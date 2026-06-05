@@ -1,0 +1,156 @@
+{% extends 'base/layout.html' %}
+
+{% block content %}
+<div class="shell-container page-stack">
+    <section class="page-header">
+        <div>
+            <div class="eyebrow">Dashboard</div>
+            <h1>{{ page_title }}</h1>
+            <p>{{ page_subtitle }}</p>
+        </div>
+        <div class="header-actions">
+            <button class="button button--primary" type="button" data-prototype-action="自动规则参数">自动规则参数</button>
+        </div>
+    </section>
+
+    <section class="summary-grid">
+        {% for card in summary_cards %}
+            {% include 'components/stats_card.html' %}
+        {% endfor %}
+    </section>
+
+    <section class="card filter-card">
+        <div class="tab-row" data-toggle-group>
+            <button class="tab-chip is-active" type="button">全部机会</button>
+            <button class="tab-chip" type="button">资金费套利</button>
+            <button class="tab-chip" type="button">价差套利</button>
+            <button class="tab-chip" type="button">自动可执行</button>
+        </div>
+
+        <div class="filters-grid">
+            <label class="field">
+                <span class="field__label">交易所</span>
+                <select class="field__control">
+                    <option>全部交易所</option>
+                    <option>Binance</option>
+                    <option>OKX</option>
+                    <option>Bybit</option>
+                    <option>Gate</option>
+                </select>
+            </label>
+            <label class="field">
+                <span class="field__label">机会类型</span>
+                <select class="field__control">
+                    <option>全部</option>
+                    <option>资金费套利</option>
+                    <option>价差套利</option>
+                </select>
+            </label>
+            <label class="field">
+                <span class="field__label">最小收益门槛</span>
+                <select class="field__control">
+                    <option>全部</option>
+                    <option>高优先级</option>
+                    <option>可执行</option>
+                    <option>全部候选</option>
+                </select>
+            </label>
+            <label class="field field--search">
+                <span class="field__label">搜索币种</span>
+                <input class="field__control" type="search" placeholder="例如 BTC / ETH" data-table-search="#dashboard-table">
+            </label>
+        </div>
+    </section>
+
+    <section class="card card--section">
+        <div class="card__header card__header--row">
+            <div>
+                <h2>套利中</h2>
+                <p>这里统一展示资金费套利和价差套利机会，更多数据可进入各自完整列表查看。</p>
+            </div>
+            <div class="section-tools">
+                <div class="inline-note">共 {{ dashboard_rows|length }} 个机会</div>
+                <a class="table-action" href="/funding-arbitrage">资金费更多</a>
+                <a class="table-action" href="/spread-arbitrage">价差更多</a>
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <table id="dashboard-table" class="data-table">
+                <thead>
+                    <tr>
+                        <th>排名</th>
+                        <th>类型</th>
+                        <th>币种</th>
+                        <th>套利组合</th>
+                        <th>收益指标</th>
+                        <th>核心指标</th>
+                        <th>补充指标</th>
+                        <th>流动性</th>
+                        <th>持仓数量</th>
+                        <th>持仓均价</th>
+                        <th>持仓市值</th>
+                        <th>关键字段</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in dashboard_rows[:5] %}
+                    <tr>
+                        <td>{{ row.rank }}</td>
+                        <td>
+                            <span class="pill pill--{{ row.type_tone }}">{{ row.type }}</span>
+                        </td>
+                        <td>
+                            <div class="spread-symbol">
+                                <strong>{{ row.symbol }}</strong>
+                                <span class="spread-symbol__hint">{{ row.symbol }}/USDT</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="pair-cell">
+                                <span class="pair-cell__line {{ 'is-positive' if row.line_a_tone == 'positive' else 'is-negative' }}">{{ row.line_a }}</span>
+                                <span class="pair-cell__line {{ 'is-positive' if row.line_b_tone == 'positive' else 'is-negative' }}">{{ row.line_b }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="spread-symbol">
+                                <strong class="spread-value">{{ row.yield_value }}</strong>
+                                <span class="spread-symbol__hint">{{ row.yield_label }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="spread-symbol">
+                                <strong class="spread-fee">{{ row.metric_value }}</strong>
+                                <span class="spread-symbol__hint">{{ row.metric_label }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="spread-symbol">
+                                <strong class="{% if row.edge_tone == 'positive' %}is-positive{% elif row.edge_tone == 'negative' %}is-negative{% endif %}">{{ row.edge_value }}</strong>
+                                <span class="spread-symbol__hint">{{ row.edge_label }}</span>
+                            </div>
+                        </td>
+                        <td class="spread-metric">{{ row.depth }}</td>
+                        <td class="spread-metric">{{ row.position_qty }}</td>
+                        <td class="spread-metric">{{ row.avg_price }}</td>
+                        <td class="spread-metric spread-metric--strong">{{ row.position_value }}</td>
+                        <td>
+                            <div class="spread-symbol">
+                                <strong class="spread-metric">{{ row.highlight_value }}</strong>
+                                <span class="spread-symbol__hint">{{ row.highlight_label }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="table-actions">
+                                <a class="table-action table-action--primary" href="{{ row.detail_link }}">查看列表</a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}

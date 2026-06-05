@@ -1,0 +1,43 @@
+.page-dashboard .card--section {
+    background: linear-gradient(180deg, #ffffff, #fbfdff);
+}
+
+.page-dashboard .filter-card {
+    background: linear-gradient(180deg, #ffffff, #fbfdff);
+}
+
+.page-dashboard .filter-card {
+    position: sticky;
+    top: 96px;
+    z-index: 5;
+}
+
+.page-dashboard .table-wrap {
+    padding-top: 18px;
+}
+
+.page-dashboard .data-table {
+    min-width: 980px;
+}
+
+.page-dashboard .data-table tbody td {
+    padding-top: 20px;
+    padding-bottom: 20px;
+}
+
+.page-dashboard .table-actions {
+    justify-content: flex-start;
+}
+
+@media (max-width: 1180px) {
+    .page-dashboard .filter-card {
+        position: static;
+    }
+}
+
+@media (max-width: 860px) {
+    .page-dashboard .table-wrap {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+}

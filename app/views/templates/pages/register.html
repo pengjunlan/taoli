@@ -1,0 +1,44 @@
+{% extends 'base/layout.html' %}
+
+{% block content %}
+<section class="login-page">
+    <div class="login-page__backdrop"></div>
+    <div class="login-shell">
+        <div class="login-card card">
+            <div class="card__header">
+                <div class="eyebrow">ArbiMatrix</div>
+                <h1>{{ page_title }}</h1>
+                <p>{{ page_subtitle }}</p>
+            </div>
+
+            <div class="login-card__intro">
+                <h2>账号注册</h2>
+            </div>
+
+            <form id="register-form" class="form-stack">
+                <label class="field">
+                    <span class="field__label">账号</span>
+                    <input class="field__control" type="text" placeholder="请输入账号">
+                </label>
+
+                <label class="field">
+                    <span class="field__label">密码</span>
+                    <input class="field__control" type="password" placeholder="请输入密码">
+                </label>
+
+                <label class="field">
+                    <span class="field__label">确认密码</span>
+                    <input class="field__control" type="password" placeholder="请再次输入密码">
+                </label>
+
+                <button class="button button--primary button--block" type="submit">注册账号</button>
+            </form>
+
+            <div class="login-card__footer">
+                <span>已有账号？</span>
+                <a class="button button--ghost" href="/login">返回登录</a>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}

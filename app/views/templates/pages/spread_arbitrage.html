@@ -1,0 +1,130 @@
+{% extends 'base/layout.html' %}
+
+{% block content %}
+<div class="shell-container page-stack">
+    <section class="page-header">
+        <div>
+            <div class="eyebrow">Spread Arbitrage</div>
+            <h1>{{ page_title }}</h1>
+            <p>{{ page_subtitle }}</p>
+        </div>
+        <div class="header-actions">
+            <button class="button button--ghost" type="button" data-prototype-action="监控范围">监控范围</button>
+            <button class="button button--primary" type="button" data-prototype-action="自动策略参数">自动策略参数</button>
+        </div>
+    </section>
+
+    <section class="card filter-card">
+        <div class="tab-row" data-toggle-group>
+            <button class="tab-chip is-active" type="button">全部机会</button>
+            <button class="tab-chip" type="button">自动可执行</button>
+            <button class="tab-chip" type="button">高深度优先</button>
+        </div>
+
+        <div class="filters-grid">
+            <label class="field">
+                <span class="field__label">交易所组合</span>
+                <select class="field__control">
+                    <option>全部组合</option>
+                    <option>Binance / OKX</option>
+                    <option>Bybit / Gate</option>
+                    <option>OKX / Gate</option>
+                </select>
+            </label>
+            <label class="field">
+                <span class="field__label">最小净价差</span>
+                <select class="field__control">
+                    <option>全部</option>
+                    <option>0.10% 以上</option>
+                    <option>0.20% 以上</option>
+                    <option>0.30% 以上</option>
+                </select>
+            </label>
+            <label class="field">
+                <span class="field__label">可成交深度</span>
+                <select class="field__control">
+                    <option>全部</option>
+                    <option>$100K 以上</option>
+                    <option>$300K 以上</option>
+                    <option>$500K 以上</option>
+                </select>
+            </label>
+            <label class="field field--search">
+                <span class="field__label">搜索币种</span>
+                <input class="field__control" type="search" placeholder="例如 SOL / XRP" data-table-search="#spread-table">
+            </label>
+        </div>
+    </section>
+
+    <section class="card card--section">
+        <div class="card__header card__header--row">
+            <div>
+                <h2>跨所价差机会列表</h2>
+                <p>这里展示的是监控引擎筛出的跨所候选机会，真正是否执行由自动策略参数统一控制。</p>
+            </div>
+            <div class="section-tools">
+                <div class="inline-note">共 {{ rows|length }} 个机会</div>
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <table id="spread-table" class="data-table" data-pagination-items="tbody tr" data-page-size="5">
+                <thead>
+                    <tr>
+                        <th>排名</th>
+                        <th>币种</th>
+                        <th>价差组合</th>
+                        <th>最新价差</th>
+                        <th>净价差</th>
+                        <th>手续费成本</th>
+                        <th>可成交深度</th>
+                        <th>建议仓位</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if rows %}
+                    {% for row in rows %}
+                    <tr>
+                        <td class="spread-rank">{{ row.rank }}</td>
+                        <td>
+                            <div class="spread-symbol">
+                                <strong>{{ row.symbol }}</strong>
+                                <span class="spread-symbol__hint">{{ row.symbol }}/USDT</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="pair-cell pair-cell--spread">
+                                <span class="pair-cell__line is-positive">买入 {{ row.symbol }}/USDT · {{ row.buy_exchange }}</span>
+                                <span class="pair-cell__line is-negative">卖出 {{ row.symbol }}/USDT · {{ row.sell_exchange }}</span>
+                            </div>
+                        </td>
+                        <td class="spread-value">{{ row.latest_spread }}</td>
+                        <td class="{{ 'is-positive' if '+' in row.net_spread else 'is-negative' }} spread-value">{{ row.net_spread }}</td>
+                        <td class="spread-fee">{{ row.fees }}</td>
+                        <td class="spread-metric">{{ row.depth }}</td>
+                        <td class="spread-metric spread-metric--strong">{{ row.position_size }}</td>
+                        <td>
+                            <div class="table-actions">
+                                <button class="table-action table-action--primary" type="button" data-prototype-action="规则详情">规则详情</button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% else %}
+                    <tr class="table-empty-row">
+                        <td colspan="9">
+                            <div class="table-empty-state">
+                                <div class="table-empty-state__icon" aria-hidden="true"></div>
+                                <div class="table-empty-state__title">暂无可用价差机会</div>
+                                <p class="table-empty-state__text">请调整筛选条件，或等待新的机会出现。</p>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}

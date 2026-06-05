@@ -1,0 +1,33 @@
+.page-positions_orders .card--section {
+    background: linear-gradient(180deg, #ffffff, #fbfdff);
+}
+
+.page-positions_orders .table-wrap {
+    padding-top: 18px;
+}
+
+.page-positions_orders .data-table {
+    min-width: 980px;
+}
+
+.page-positions_orders .data-table tbody td {
+    padding-top: 20px;
+    padding-bottom: 20px;
+}
+
+.page-positions_orders .positions-table thead th:nth-child(1),
+.page-positions_orders .positions-table tbody td:nth-child(1) {
+    width: 150px;
+}
+
+.page-positions_orders .positions-table thead th:nth-child(3),
+.page-positions_orders .positions-table tbody td:nth-child(3) {
+    min-width: 220px;
+}
+
+@media (max-width: 860px) {
+    .page-positions_orders .table-wrap {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+}

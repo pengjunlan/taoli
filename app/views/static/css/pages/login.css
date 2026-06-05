@@ -1,0 +1,121 @@
+.page-plain {
+    display: flex;
+    min-height: 100vh;
+    min-height: 100dvh;
+    background:
+        radial-gradient(circle at 20% 20%, rgba(25, 103, 210, 0.12), transparent 25%),
+        radial-gradient(circle at 80% 0%, rgba(14, 159, 110, 0.14), transparent 22%),
+        linear-gradient(180deg, #f8fbff 0%, #eef3f9 100%);
+}
+
+.page-plain .plain-shell {
+    flex: 1;
+    display: grid;
+    place-items: center;
+    width: 100%;
+    min-height: 100vh;
+    min-height: 100dvh;
+}
+
+.login-page {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 100%;
+    padding: 24px 16px;
+}
+
+.login-page__backdrop {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+        linear-gradient(135deg, rgba(25, 103, 210, 0.08), transparent 50%),
+        linear-gradient(225deg, rgba(14, 159, 110, 0.08), transparent 40%);
+}
+
+.login-shell {
+    position: relative;
+    z-index: 1;
+    width: min(560px, 100%);
+}
+
+.login-card {
+    width: 100%;
+    margin: 0 auto;
+    padding: 36px;
+    display: grid;
+    border-radius: 28px;
+    border: 1px solid rgba(217, 225, 236, 0.82);
+    box-shadow: var(--shadow-md);
+}
+
+.login-card {
+    background: rgba(255, 255, 255, 0.96);
+    overflow: hidden;
+}
+
+.login-card .card__header {
+    padding: 0 0 14px;
+    text-align: center;
+}
+
+.login-card .card__header h1 {
+    margin-top: 14px;
+    font-size: clamp(2.1rem, 5vw, 3.1rem);
+    line-height: 1.06;
+    letter-spacing: -0.04em;
+}
+
+.login-card .card__header p {
+    margin: 14px auto 0;
+    max-width: 30rem;
+    color: var(--text-soft);
+    font-size: 1rem;
+    line-height: 1.6;
+}
+
+.login-card__intro {
+    padding: 0 0 12px;
+    text-align: center;
+}
+
+.login-card__intro h2 {
+    font-size: 1.18rem;
+}
+
+.login-card__intro p {
+    margin-top: 8px;
+    color: var(--text-soft);
+    line-height: 1.6;
+}
+
+.login-card .form-stack {
+    padding: 20px 0 0;
+}
+
+.login-card .checkbox-row {
+    justify-self: start;
+}
+
+.login-card__footer {
+    display: grid;
+    justify-items: center;
+    gap: 14px;
+    padding: 20px 0 0;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+@media (max-width: 980px) {
+    .login-card {
+        padding: 28px 24px;
+        border-radius: 24px;
+    }
+
+    .login-card .card__header h1 {
+        font-size: clamp(1.9rem, 9vw, 2.6rem);
+    }
+}

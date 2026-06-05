@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ page_title }} | {{ app_name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/core/reset.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/core/variables.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/core/layout.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/components/navbar.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/components/card.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/components/table.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/components/form.css') }}">
+    {% if page_css %}
+    <link rel="stylesheet" href="{{ url_for('static', path='css/pages/' ~ page_css) }}">
+    {% endif %}
+</head>
+<body class="page-{{ page_key }}{% if not show_shell %} page-plain{% endif %}">
+    {% if show_shell %}
+        {% include 'base/navbar.html' %}
+    {% endif %}
+
+    <main class="{% if show_shell %}page-shell{% else %}plain-shell{% endif %}">
+        {% block content %}{% endblock %}
+    </main>
+
+    <div id="toast-root" class="toast-root"></div>
+
+    {% if page_js %}
+    <script type="module" src="{{ url_for('static', path='js/pages/' ~ page_js) }}"></script>
+    {% endif %}
+</body>
+</html>

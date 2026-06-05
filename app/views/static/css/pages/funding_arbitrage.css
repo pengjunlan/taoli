@@ -1,0 +1,35 @@
+.filter-card {
+    position: sticky;
+    top: 96px;
+    z-index: 5;
+}
+
+.page-funding_arbitrage .data-table {
+    min-width: 980px;
+}
+
+.page-funding_arbitrage .data-table tbody td {
+    padding-top: 20px;
+    padding-bottom: 20px;
+}
+
+.page-funding_arbitrage .table-wrap {
+    padding-top: 18px;
+}
+
+.page-funding_arbitrage .table-actions {
+    justify-content: flex-start;
+}
+
+@media (max-width: 1180px) {
+    .filter-card {
+        position: static;
+    }
+}
+
+@media (max-width: 860px) {
+    .page-funding_arbitrage .table-wrap {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+}

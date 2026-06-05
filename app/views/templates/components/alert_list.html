@@ -1,0 +1,13 @@
+<div class="alert-list" data-pagination-items=".alert-list__item" data-page-size="3">
+    {% for alert in alerts %}
+    <div class="alert-list__item">
+        <div class="alert-list__meta">
+            <span class="pill pill--{{ 'negative' if alert.level == '高' else 'warning' if alert.level == '中' else 'neutral' }}">
+                {{ alert.level }}
+            </span>
+            <span class="alert-list__time">{{ alert.time }}</span>
+        </div>
+        <div class="alert-list__message">{{ alert.message }}</div>
+    </div>
+    {% endfor %}
+</div>

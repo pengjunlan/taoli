@@ -1,0 +1,23 @@
+.page-strategy_list .card--section {
+    background: linear-gradient(180deg, #ffffff, #fbfdff);
+}
+
+.page-strategy_list .data-table {
+    min-width: 940px;
+}
+
+.page-strategy_list .data-table tbody td {
+    padding-top: 20px;
+    padding-bottom: 20px;
+}
+
+.page-strategy_list .table-wrap {
+    padding-top: 18px;
+}
+
+@media (max-width: 860px) {
+    .page-strategy_list .table-wrap {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+}

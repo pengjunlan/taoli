@@ -1,0 +1,98 @@
+.data-table {
+    min-width: 760px;
+}
+
+.data-table thead th {
+    padding: 16px 14px;
+    background: var(--surface-muted);
+    color: var(--text-soft);
+    font-size: 0.88rem;
+    font-weight: 700;
+    text-align: left;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+}
+
+.data-table tbody td {
+    padding: 18px 14px;
+    border-bottom: 1px solid rgba(229, 235, 243, 0.88);
+    vertical-align: middle;
+}
+
+.data-table tbody tr:hover {
+    background: rgba(25, 103, 210, 0.02);
+}
+
+.pair-cell {
+    display: grid;
+    gap: 4px;
+}
+
+.pair-cell--spread {
+    gap: 6px;
+}
+
+.pair-cell__line {
+    font-size: 0.94rem;
+}
+
+.spread-symbol {
+    display: grid;
+    gap: 4px;
+}
+
+.spread-symbol strong {
+    font-size: 1.05rem;
+    letter-spacing: 0.01em;
+}
+
+.spread-symbol__hint {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+
+.spread-value {
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+}
+
+.spread-fee,
+.spread-metric {
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+}
+
+.spread-metric--strong {
+    font-weight: 700;
+}
+
+.table-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.table-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: #fff;
+    color: var(--text-soft);
+    transition: all var(--transition-fast);
+}
+
+.table-action:hover {
+    border-color: rgba(25, 103, 210, 0.28);
+    color: var(--brand);
+}
+
+.table-action--primary {
+    background: var(--brand-soft);
+    border-color: rgba(25, 103, 210, 0.16);
+    color: var(--brand);
+}

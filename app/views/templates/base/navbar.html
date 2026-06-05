@@ -1,0 +1,27 @@
+<header class="navbar">
+    <div class="shell-container navbar__inner">
+        <a class="navbar__brand" href="/dashboard">
+            <span class="navbar__brand-mark">A</span>
+            <span class="navbar__brand-text">{{ app_name }}</span>
+        </a>
+
+        <nav class="navbar__menu">
+            {% for item in nav_items %}
+            <a href="{{ item.href }}" class="navbar__link{% if page_key == item.key %} is-active{% endif %}">
+                {{ item.label }}
+            </a>
+            {% endfor %}
+        </nav>
+
+        <div class="navbar__tools">
+            <label class="navbar__search">
+                <span class="navbar__search-icon">⌕</span>
+                <input type="search" placeholder="搜索币种 / 页面" data-prototype-action="搜索功能开发中">
+            </label>
+            <a class="button button--ghost" href="/login">退出登录</a>
+            <button class="button button--primary" type="button" data-prototype-action="用户菜单开发中">
+                用户中心
+            </button>
+        </div>
+    </div>
+</header>

@@ -1,0 +1,119 @@
+{% extends 'base/layout.html' %}
+
+{% block content %}
+<div class="shell-container page-stack">
+    <section class="page-header">
+        <div>
+            <div class="eyebrow">Funding Rate</div>
+            <h1>{{ page_title }}</h1>
+            <p>{{ page_subtitle }}</p>
+        </div>
+        <div class="header-actions">
+            <button class="button button--ghost" type="button" data-prototype-action="监控范围">监控范围</button>
+            <button class="button button--primary" type="button" data-prototype-action="自动策略参数">自动策略参数</button>
+        </div>
+    </section>
+
+    <section class="card filter-card">
+        <div class="tab-row" data-toggle-group>
+            <button class="tab-chip is-active" type="button">全部机会</button>
+            <button class="tab-chip" type="button">自动可执行</button>
+            <button class="tab-chip" type="button">高优先级</button>
+        </div>
+
+        <div class="filters-grid">
+            <label class="field">
+                <span class="field__label">交易所</span>
+                <select class="field__control">
+                    <option>全部交易所</option>
+                    <option>Binance</option>
+                    <option>OKX</option>
+                    <option>Bybit</option>
+                    <option>Gate</option>
+                </select>
+            </label>
+            <label class="field">
+                <span class="field__label">最小年化</span>
+                <select class="field__control">
+                    <option>全部</option>
+                    <option>5% 以上</option>
+                    <option>8% 以上</option>
+                    <option>10% 以上</option>
+                </select>
+            </label>
+            <label class="field">
+                <span class="field__label">距离结算</span>
+                <select class="field__control">
+                    <option>全部</option>
+                    <option>2小时内</option>
+                    <option>1小时内</option>
+                    <option>30分钟内</option>
+                </select>
+            </label>
+            <label class="field field--search">
+                <span class="field__label">搜索币种</span>
+                <input class="field__control" type="search" placeholder="例如 BTC / ETH" data-table-search="#funding-table">
+            </label>
+        </div>
+    </section>
+
+    <section class="card card--section">
+        <div class="card__header card__header--row">
+            <div>
+                <h2>资金费差机会列表</h2>
+                <p>这里展示的是扫描引擎筛出的候选机会，命中你的自动规则后即可直接进入执行队列。</p>
+            </div>
+            <div class="section-tools">
+                <div class="inline-note">共 {{ rows|length }} 个机会</div>
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <table id="funding-table" class="data-table" data-pagination-items="tbody tr" data-page-size="5">
+                <thead>
+                    <tr>
+                        <th>排名</th>
+                        <th>币种</th>
+                        <th>费率组合</th>
+                        <th>当前年化</th>
+                        <th>净资金费率</th>
+                        <th>价差率</th>
+                        <th>流动性</th>
+                        <th>距离结算</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <td>{{ row.rank }}</td>
+                        <td>
+                            <div class="spread-symbol">
+                                <strong>{{ row.symbol }}</strong>
+                                <span class="spread-symbol__hint">{{ row.symbol }}/USDT</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="pair-cell">
+                                <span class="pair-cell__line is-positive">做多 {{ row.symbol }}/USDT · {{ row.long_exchange }}</span>
+                                <span class="pair-cell__line is-negative">做空 {{ row.symbol }}/USDT · {{ row.short_exchange }}</span>
+                            </div>
+                        </td>
+                        <td class="spread-value is-positive">{{ row.annual }}</td>
+                        <td class="spread-fee">{{ row.net_rate }}</td>
+                        <td class="spread-value {{ 'is-positive' if '+' in row.spread else 'is-negative' }}">{{ row.spread }}</td>
+                        <td class="spread-metric">{{ row.depth }}</td>
+                        <td class="spread-metric">{{ row.settlement }}</td>
+                        <td>
+                            <div class="table-actions">
+                                <button class="table-action table-action--primary" type="button" data-prototype-action="规则详情">规则详情</button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}

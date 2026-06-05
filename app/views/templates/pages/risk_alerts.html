@@ -1,0 +1,76 @@
+{% extends 'base/layout.html' %}
+
+{% block content %}
+<div class="shell-container page-stack">
+    <section class="page-header">
+        <div>
+            <div class="eyebrow">Risk Center</div>
+            <h1>{{ page_title }}</h1>
+            <p>{{ page_subtitle }}</p>
+        </div>
+        <div class="header-actions">
+            <button class="button button--ghost" type="button" data-prototype-action="调整阈值">调整阈值</button>
+            <button class="button button--danger" type="button" data-prototype-action="全局停机">全局停机</button>
+        </div>
+    </section>
+
+    <section class="summary-grid">
+        {% for card in summary_cards %}
+            {% include 'components/stats_card.html' %}
+        {% endfor %}
+    </section>
+
+    <section class="risk-grid">
+        {% for rule in risk_rules %}
+        <article class="card risk-card">
+            <div class="risk-card__title">{{ rule.title }}</div>
+            <div class="risk-card__value">{{ rule.value }}</div>
+            <div class="risk-card__usage">{{ rule.usage }}</div>
+        </article>
+        {% endfor %}
+    </section>
+
+    <section class="card card--section">
+        <div class="card__header">
+            <h2>最新告警</h2>
+            <p>这里只保留会直接影响自动执行、资金均衡和收益波动的高相关风险事件。</p>
+        </div>
+        {% include 'components/alert_list.html' %}
+    </section>
+
+    <section class="card card--section">
+        <div class="card__header">
+            <h2>风险事件记录</h2>
+            <p>统一记录策略异常、账户限制、自动均衡失败和人工接管结果，便于复盘收益波动来源。</p>
+        </div>
+        <div class="table-wrap">
+            <table class="data-table" data-pagination-items="tbody tr" data-page-size="5">
+                <thead>
+                    <tr>
+                        <th>时间</th>
+                        <th>范围</th>
+                        <th>对象</th>
+                        <th>等级</th>
+                        <th>处理结果</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in event_rows %}
+                    <tr>
+                        <td>{{ row.time }}</td>
+                        <td>{{ row.scope }}</td>
+                        <td>{{ row.object }}</td>
+                        <td>
+                            <span class="pill pill--{{ 'negative' if row.level == '高' else 'warning' if row.level == '中' else 'neutral' }}">
+                                {{ row.level }}
+                            </span>
+                        </td>
+                        <td>{{ row.result }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}

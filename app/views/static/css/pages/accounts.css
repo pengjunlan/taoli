@@ -1,0 +1,63 @@
+.page-accounts .card--section {
+    background: linear-gradient(180deg, #ffffff, #fbfdff);
+}
+
+.page-accounts .table-wrap {
+    padding-top: 18px;
+}
+
+.page-accounts .data-table {
+    min-width: 980px;
+}
+
+.page-accounts .data-table tbody td {
+    padding-top: 20px;
+    padding-bottom: 20px;
+}
+
+.page-accounts .balance-table thead th:nth-child(1),
+.page-accounts .balance-table tbody td:nth-child(1),
+.page-accounts .account-table thead th:nth-child(1),
+.page-accounts .account-table tbody td:nth-child(1) {
+    width: 190px;
+}
+
+.page-accounts .balance-table thead th:nth-child(7),
+.page-accounts .balance-table tbody td:nth-child(7) {
+    min-width: 220px;
+}
+
+.page-accounts .transfer-table thead th:nth-child(2),
+.page-accounts .transfer-table tbody td:nth-child(2) {
+    min-width: 220px;
+}
+
+.page-accounts .address-table thead th:nth-child(1),
+.page-accounts .address-table tbody td:nth-child(1) {
+    width: 190px;
+}
+
+.page-accounts .address-table thead th:nth-child(4),
+.page-accounts .address-table tbody td:nth-child(4) {
+    min-width: 180px;
+}
+
+.page-accounts .address-table thead th:nth-child(8),
+.page-accounts .address-table tbody td:nth-child(8) {
+    min-width: 220px;
+}
+
+.page-accounts .account-table {
+    min-width: 1120px;
+}
+
+.page-accounts .table-actions {
+    justify-content: flex-start;
+}
+
+@media (max-width: 860px) {
+    .page-accounts .table-wrap {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+}

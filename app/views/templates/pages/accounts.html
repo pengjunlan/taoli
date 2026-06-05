@@ -1,0 +1,229 @@
+{% extends 'base/layout.html' %}
+
+{% block content %}
+<div class="shell-container page-stack">
+    <section class="page-header">
+        <div>
+            <div class="eyebrow">Accounts</div>
+            <h1>{{ page_title }}</h1>
+            <p>{{ page_subtitle }}</p>
+        </div>
+        <div class="header-actions">
+            <button class="button button--ghost" type="button" data-prototype-action="导入配置">导入配置</button>
+            <button class="button button--primary" type="button" data-prototype-action="一键平均分配">一键平均分配</button>
+        </div>
+    </section>
+
+    <section class="summary-grid">
+        {% for card in summary_cards %}
+            {% include 'components/stats_card.html' %}
+        {% endfor %}
+    </section>
+
+    <section class="card card--section">
+        <div class="card__header card__header--row">
+            <div>
+                <h2>账户资金分布</h2>
+                <p>统一查看当前可用资金、目标分配、偏差和调拨计划，这里才是自动套利是否可执行的资金基础。</p>
+            </div>
+            <div class="table-actions">
+                <button class="table-action" type="button" data-prototype-action="按权重分配">按权重分配</button>
+                <button class="table-action table-action--primary" type="button" data-prototype-action="自动均衡配置">自动均衡配置</button>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="data-table balance-table" data-pagination-items="tbody tr" data-page-size="5">
+                <thead>
+                    <tr>
+                        <th>账户</th>
+                        <th>角色</th>
+                        <th>当前可用</th>
+                        <th>目标资金</th>
+                        <th>偏差</th>
+                        <th>状态</th>
+                        <th>调拨建议</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in balance_rows %}
+                    <tr>
+                        <td>
+                            <div class="spread-symbol">
+                                <strong>{{ row.name }}</strong>
+                                <span class="spread-symbol__hint">{{ row.exchange }}</span>
+                            </div>
+                        </td>
+                        <td>{{ row.role }}</td>
+                        <td class="spread-metric spread-metric--strong">{{ row.available }}</td>
+                        <td class="spread-metric">{{ row.target }}</td>
+                        <td class="spread-value {{ 'is-positive' if '+' in row.deviation else 'is-negative' }}">{{ row.deviation }}</td>
+                        <td>
+                            <span class="pill pill--{{ row.status_tone }}">
+                                {{ row.status }}
+                            </span>
+                        </td>
+                        <td>
+                            <div class="pair-cell pair-cell--spread">
+                                {% for line in row.plan_lines %}
+                                <span class="pair-cell__line">{{ line }}</span>
+                                {% endfor %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card card--section">
+        <div class="card__header card__header--row">
+            <div>
+                <h2>调拨执行记录</h2>
+                <p>查看一键平均分配和自动失衡修复生成的任务，确认到账、失败重试和开仓限制是否生效。</p>
+            </div>
+            <div class="section-tools">
+                <div class="inline-note">共 {{ transfer_rows|length }} 条调拨任务</div>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="data-table transfer-table" data-pagination-items="tbody tr" data-page-size="5">
+                <thead>
+                    <tr>
+                        <th>时间</th>
+                        <th>调拨路径</th>
+                        <th>金额</th>
+                        <th>触发原因</th>
+                        <th>状态</th>
+                        <th>结果</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in transfer_rows %}
+                    <tr>
+                        <td class="spread-metric">{{ row.time }}</td>
+                        <td>
+                            <div class="pair-cell pair-cell--spread">
+                                <span class="pair-cell__line">{{ row.route_from }}</span>
+                                <span class="pair-cell__line is-positive">→ {{ row.route_to }}</span>
+                            </div>
+                        </td>
+                        <td class="spread-metric spread-metric--strong">{{ row.amount }}</td>
+                        <td>{{ row.reason }}</td>
+                        <td>
+                            <span class="pill pill--{{ row.status_tone }}">{{ row.status }}</span>
+                        </td>
+                        <td>{{ row.result }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card card--section">
+        <div class="card__header card__header--row">
+            <div>
+                <h2>资金接收地址配置</h2>
+                <p>跨交易所调拨必须配置接收地址，内部划转则可以用子账户 UID 或内部账户标识代替。</p>
+            </div>
+            <div class="table-actions">
+                <button class="table-action" type="button" data-prototype-action="批量校验地址">批量校验地址</button>
+                <button class="table-action table-action--primary" type="button" data-prototype-action="新增接收地址">新增接收地址</button>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="data-table address-table" data-pagination-items="tbody tr" data-page-size="5">
+                <thead>
+                    <tr>
+                        <th>账户</th>
+                        <th>资产</th>
+                        <th>网络/方式</th>
+                        <th>接收地址</th>
+                        <th>Memo/Tag</th>
+                        <th>用途</th>
+                        <th>状态</th>
+                        <th>备注</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in address_rows %}
+                    <tr>
+                        <td>
+                            <div class="spread-symbol">
+                                <strong>{{ row.account }}</strong>
+                                <span class="spread-symbol__hint">{{ row.exchange }}</span>
+                            </div>
+                        </td>
+                        <td class="spread-metric">{{ row.asset }}</td>
+                        <td>{{ row.network }}</td>
+                        <td class="spread-metric">{{ row.address }}</td>
+                        <td>{{ row.memo }}</td>
+                        <td>{{ row.usage }}</td>
+                        <td>
+                            <span class="pill pill--{{ row.status_tone }}">{{ row.status }}</span>
+                        </td>
+                        <td>{{ row.note }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card card--section">
+        <div class="card__header card__header--row">
+            <div>
+                <h2>已配置账户</h2>
+                <p>这里看连接状态、保证金模式和是否参与自动均衡，继续作为账户管理入口。</p>
+            </div>
+            <div class="table-actions">
+                <button class="table-action" type="button" data-prototype-action="测试全部连接">测试全部连接</button>
+                <button class="table-action table-action--primary" type="button" data-prototype-action="新增账户">新增账户</button>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="data-table account-table" data-pagination-items="tbody tr" data-page-size="5">
+                <thead>
+                    <tr>
+                        <th>账户</th>
+                        <th>状态</th>
+                        <th>可用保证金</th>
+                        <th>保证金模式</th>
+                        <th>默认杠杆</th>
+                        <th>资金均衡</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for account in account_rows %}
+                    <tr>
+                        <td>
+                            <div class="spread-symbol">
+                                <strong>{{ account.name }}</strong>
+                                <span class="spread-symbol__hint">{{ account.exchange }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="pill pill--{{ account.status_tone }}">{{ account.status }}</span>
+                        </td>
+                        <td class="spread-metric spread-metric--strong">{{ account.available }}</td>
+                        <td>{{ account.mode }}</td>
+                        <td class="spread-metric">{{ account.leverage }}</td>
+                        <td>
+                            <span class="pill pill--{{ account.rebalance_tone }}">{{ account.rebalance }}</span>
+                        </td>
+                        <td>
+                            <div class="table-actions">
+                                <button class="table-action" type="button" data-prototype-action="编辑账户">编辑</button>
+                                <button class="table-action table-action--primary" type="button" data-prototype-action="调拨配置">调拨配置</button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}

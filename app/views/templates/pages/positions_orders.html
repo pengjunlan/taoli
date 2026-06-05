@@ -1,0 +1,160 @@
+{% extends 'base/layout.html' %}
+
+{% block content %}
+<div class="shell-container page-stack">
+    <section class="page-header">
+        <div>
+            <div class="eyebrow">Positions & Orders</div>
+            <h1>{{ page_title }}</h1>
+            <p>{{ page_subtitle }}</p>
+        </div>
+        <div class="header-actions">
+            <button class="button button--primary" type="button" data-prototype-action="异常处理队列">异常处理队列</button>
+        </div>
+    </section>
+
+    <section class="summary-grid">
+        {% for card in summary_cards %}
+            {% include 'components/stats_card.html' %}
+        {% endfor %}
+    </section>
+
+    <section class="card card--section">
+        <div class="card__header card__header--row">
+            <div>
+                <h2>当前持仓</h2>
+                <p>优先看对冲是否完整、仓位是否偏离和浮动盈亏，布局与机会列表保持一致。</p>
+            </div>
+            <div class="section-tools">
+                <div class="inline-note">共 {{ positions_rows|length }} 条持仓</div>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="data-table positions-table" data-pagination-items="tbody tr" data-page-size="5">
+                <thead>
+                    <tr>
+                        <th>交易对</th>
+                        <th>执行规则</th>
+                        <th>对冲组合</th>
+                        <th>仓位规模</th>
+                        <th>对冲状态</th>
+                        <th>浮盈亏</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in positions_rows %}
+                    <tr>
+                        <td>
+                            <div class="spread-symbol">
+                                <strong>{{ row.symbol }}</strong>
+                                <span class="spread-symbol__hint">{{ row.symbol.replace('USDT', '/USDT') }}</span>
+                            </div>
+                        </td>
+                        <td>{{ row.strategy }}</td>
+                        <td>
+                            <div class="pair-cell pair-cell--spread">
+                                <span class="pair-cell__line is-positive">多头 · {{ row.long_exchange }}</span>
+                                <span class="pair-cell__line is-negative">空头 · {{ row.short_exchange }}</span>
+                            </div>
+                        </td>
+                        <td class="spread-metric spread-metric--strong">{{ row.size }}</td>
+                        <td>
+                            <span class="pill pill--{{ 'positive' if row.hedge == '完整' else 'warning' }}">
+                                {{ row.hedge }}
+                            </span>
+                        </td>
+                        <td class="spread-value {{ 'is-positive' if '+' in row.pnl else 'is-negative' }}">{{ row.pnl }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card card--section">
+        <div class="card__header card__header--row">
+            <div>
+                <h2>未成交订单</h2>
+                <p>把待成交、部分成交、待撤单集中展示，便于和机会页的候选机会一一对应。</p>
+            </div>
+            <div class="section-tools">
+                <div class="inline-note">共 {{ order_rows|length }} 条异常订单</div>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="data-table orders-table" data-pagination-items="tbody tr" data-page-size="5">
+                <thead>
+                    <tr>
+                        <th>时间</th>
+                        <th>交易对</th>
+                        <th>交易所</th>
+                        <th>方向</th>
+                        <th>状态</th>
+                        <th>规模</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in order_rows %}
+                    <tr>
+                        <td class="spread-metric">{{ row.time }}</td>
+                        <td>
+                            <div class="spread-symbol">
+                                <strong>{{ row.symbol }}</strong>
+                                <span class="spread-symbol__hint">{{ row.symbol.replace('USDT', '/USDT') }}</span>
+                            </div>
+                        </td>
+                        <td>{{ row.exchange }}</td>
+                        <td class="spread-value {{ 'is-positive' if row.side == '买入' else 'is-negative' }}">{{ row.side }}</td>
+                        <td>{{ row.status }}</td>
+                        <td class="spread-metric">{{ row.size }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card card--section">
+        <div class="card__header card__header--row">
+            <div>
+            <h2>最近成交</h2>
+            <p>后面真实成交回报接进来后，这里就是复盘入口之一，表格样式与上方保持统一。</p>
+            </div>
+            <div class="section-tools">
+                <div class="inline-note">共 {{ fill_rows|length }} 条最近成交</div>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="data-table fills-table" data-pagination-items="tbody tr" data-page-size="5">
+                <thead>
+                    <tr>
+                        <th>时间</th>
+                        <th>交易对</th>
+                        <th>交易所</th>
+                        <th>方向</th>
+                        <th>成交价</th>
+                        <th>规模</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in fill_rows %}
+                    <tr>
+                        <td class="spread-metric">{{ row.time }}</td>
+                        <td>
+                            <div class="spread-symbol">
+                                <strong>{{ row.symbol }}</strong>
+                                <span class="spread-symbol__hint">{{ row.symbol.replace('USDT', '/USDT') }}</span>
+                            </div>
+                        </td>
+                        <td>{{ row.exchange }}</td>
+                        <td class="spread-value {{ 'is-positive' if row.side == '买入' else 'is-negative' }}">{{ row.side }}</td>
+                        <td class="spread-metric">{{ row.price }}</td>
+                        <td class="spread-metric">{{ row.size }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}

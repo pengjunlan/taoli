@@ -1,0 +1,83 @@
+{% extends 'base/layout.html' %}
+
+{% block content %}
+<div class="shell-container page-stack">
+    <section class="page-header">
+        <div>
+            <div class="eyebrow">Strategies</div>
+            <h1>{{ page_title }}</h1>
+            <p>{{ page_subtitle }}</p>
+        </div>
+        <div class="header-actions">
+            <button class="button button--ghost" type="button" data-prototype-action="保存规则模板">保存规则模板</button>
+            <button class="button button--primary" type="button" data-prototype-action="新建规则组">新建规则组</button>
+        </div>
+    </section>
+
+    <section class="summary-grid">
+        {% for card in summary_cards %}
+            {% include 'components/stats_card.html' %}
+        {% endfor %}
+    </section>
+
+    <section class="card card--section">
+        <div class="card__header card__header--row">
+            <div>
+                <h2>规则组列表</h2>
+                <p>这里管理的是自动执行规则，不是单个交易对的手工策略任务。</p>
+            </div>
+            <div class="section-tools">
+                <div class="tab-row" data-toggle-group>
+                    <button class="tab-chip is-active" type="button">全部</button>
+                    <button class="tab-chip" type="button">运行中</button>
+                    <button class="tab-chip" type="button">暂停中</button>
+                    <button class="tab-chip" type="button">异常</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <table class="data-table" data-pagination-items="tbody tr" data-page-size="5">
+                <thead>
+                    <tr>
+                        <th>规则组名称</th>
+                        <th>类型</th>
+                        <th>覆盖范围</th>
+                        <th>状态</th>
+                        <th>累计收益</th>
+                        <th>当前敞口</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rule_rows %}
+                    <tr>
+                        <td>
+                            <div class="spread-symbol">
+                                <strong>{{ row.name }}</strong>
+                                <span class="spread-symbol__hint">{{ row.type }}</span>
+                            </div>
+                        </td>
+                        <td>{{ row.type }}</td>
+                        <td>{{ row.scope }}</td>
+                        <td>
+                            <span class="pill pill--{{ 'positive' if row.status == '运行中' else 'warning' if row.status == '暂停' else 'negative' }}">
+                                {{ row.status }}
+                            </span>
+                        </td>
+                        <td class="spread-value {{ 'is-positive' if '+' in row.pnl else 'is-negative' }}">{{ row.pnl }}</td>
+                        <td class="spread-metric">{{ row.exposure }}</td>
+                        <td>
+                            <div class="table-actions">
+                                <button class="table-action" type="button" data-prototype-action="规则启停">启停</button>
+                                <button class="table-action table-action--primary" type="button" data-prototype-action="规则详情">详情</button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}
