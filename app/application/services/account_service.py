@@ -304,7 +304,7 @@ class AccountService:
             raise AccountValidationError("网络类型不在支持范围内。")
 
     def _build_account_name(self, exchange_code: str, market_type: str, user_id: int) -> str:
-        return f"{self._exchange_label(exchange_code)} {self._market_label(market_type)}账户 U{user_id}"
+        return f"{self._exchange_label(exchange_code)} {self._market_label(market_type)}账户"
 
     def _exchange_label(self, exchange_code: str) -> str:
         return EXCHANGE_LABELS.get(exchange_code, exchange_code.upper())
