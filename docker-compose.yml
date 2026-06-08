@@ -54,7 +54,7 @@ services:
       ARBI_REDIS_PASSWORD: ""
       ARBI_REDIS_DB: 0
       ARBI_REDIS_ENABLED: "true"
-      ARBI_REDIS_KEY_PREFIX: arbitrage_system:auth:session:
+      ARBI_REDIS_KEY_PREFIX: "arbitrage_system:auth:session:"
       ARBI_REDIS_SOCKET_TIMEOUT: 2
       ARBI_SESSION_COOKIE_NAME: arbi_session
       ARBI_SESSION_TTL_SECONDS: 43200
