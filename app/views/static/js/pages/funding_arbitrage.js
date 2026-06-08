@@ -1,6 +1,6 @@
-import { bindListPagination, bindPrototypeActions, bindTableSearch, bindToggleGroups } from "../core/prototype.js";
+import { bindListPagination, bindPrototypeActions } from "../core/prototype.js";
+import { bindLogoutAction } from "../core/utils.js";
 
 bindPrototypeActions();
-bindTableSearch();
-bindToggleGroups();
 bindListPagination();
+bindLogoutAction();

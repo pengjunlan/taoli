@@ -1,0 +1,59 @@
+{% extends 'base/layout.html' %}
+
+{% block content %}
+<div class="shell-container page-stack">
+    <section class="page-header">
+        <div>
+            <div class="eyebrow">Transfer Records</div>
+            <h1>{{ page_title }}</h1>
+            <p>{{ page_subtitle }}</p>
+        </div>
+    </section>
+
+    <section class="card card--section">
+        <div class="card__header card__header--row">
+            <div>
+                <h2>调拨执行记录</h2>
+                <p>查看一键平均分配和自动失衡修复生成的任务，确认到账、失败重试和开仓限制是否生效。</p>
+            </div>
+            <div class="section-tools">
+                <a class="table-action" href="/accounts">返回账户页</a>
+                <div class="inline-note">共 {{ transfer_rows|length }} 条调拨任务</div>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="data-table transfer-table" data-pagination-items="tbody tr" data-page-size="10">
+                <thead>
+                    <tr>
+                        <th>时间</th>
+                        <th>调拨路径</th>
+                        <th>金额</th>
+                        <th>触发原因</th>
+                        <th>状态</th>
+                        <th>结果</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in transfer_rows %}
+                    <tr>
+                        <td class="spread-metric">{{ row.time }}</td>
+                        <td>
+                            <div class="pair-cell pair-cell--spread">
+                                <span class="pair-cell__line">{{ row.route_from }}</span>
+                                <span class="pair-cell__line is-positive">-> {{ row.route_to }}</span>
+                            </div>
+                        </td>
+                        <td class="spread-metric spread-metric--strong">{{ row.amount }}</td>
+                        <td>{{ row.reason }}</td>
+                        <td>
+                            <span class="pill pill--{{ row.status_tone }}">{{ row.status }}</span>
+                        </td>
+                        <td>{{ row.result }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}

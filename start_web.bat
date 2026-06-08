@@ -21,6 +21,11 @@ echo   访问地址: http://127.0.0.1:8000/login
 echo ==========================================
 echo.
 
+echo [INFO] 清理已占用 8000 端口的旧服务...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0manage_web.ps1" cleanup
+echo [INFO] 如任务管理器里同时看到 .venv\Scripts\python.exe 和基础 Python.exe，
+echo [INFO] 这通常是同一条虚拟环境服务链，不代表启动了两套独立网站。
+
 start "" powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ProgressPreference='SilentlyContinue';" ^
   "for ($i = 0; $i -lt 30; $i++) {" ^
@@ -31,6 +36,6 @@ start "" powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "  Start-Sleep -Seconds 1" ^
   "}"
 
-".venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+".venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 endlocal

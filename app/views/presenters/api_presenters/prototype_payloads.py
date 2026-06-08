@@ -1,7 +1,16 @@
+"""Prototype API payload presenters for dashboard and opportunity feeds."""
+
 import math
 import time
 from copy import deepcopy
 from typing import Dict, List
+
+from app.shared.utils.formatters import (
+    format_countdown,
+    format_percent,
+    format_signed_percent,
+    format_usd_compact,
+)
 
 
 START_TS = time.time()
@@ -144,34 +153,9 @@ BASE_ALERTS = [
 def _elapsed_seconds() -> float:
     return time.time() - START_TS
 
-
-def _format_signed_percent(value: float, digits: int = 2) -> str:
-    sign = "+" if value >= 0 else ""
-    return f"{sign}{value:.{digits}f}%"
-
-
-def _format_percent(value: float, digits: int = 4) -> str:
-    return f"{value:.{digits}f}%"
-
-
-def _format_usd_compact(value: float) -> str:
-    if value >= 1_000_000:
-        return f"${value / 1_000_000:.1f}M"
-    if value >= 1_000:
-        return f"${value / 1_000:.0f}K"
-    return f"${value:.0f}"
-
-
-def _format_countdown(seconds: int) -> str:
-    seconds = max(seconds, 0)
-    hours, remainder = divmod(seconds, 3600)
-    minutes, second = divmod(remainder, 60)
-    return f"{hours:02d}:{minutes:02d}:{second:02d}"
-
-
 def _metric_delta(value: float, digits: int = 2, signed: bool = True) -> str:
     if signed:
-        return _format_signed_percent(value, digits)
+        return format_signed_percent(value, digits)
     return f"{value:.{digits}f}%"
 
 
@@ -193,14 +177,14 @@ def build_topbar_metrics() -> List[Dict[str, str]]:
         {
             "key": "funding",
             "label": "平均净资金费",
-            "value": _format_percent(avg_rate, 4),
+            "value": format_percent(avg_rate, 4),
             "delta": _metric_delta(0.0021 + math.cos(elapsed / 8) * 0.0008, 4),
             "tone": "positive",
         },
         {
             "key": "spread",
             "label": "跨所价差峰值",
-            "value": _format_percent(peak_spread, 2),
+            "value": format_percent(peak_spread, 2),
             "delta": _metric_delta(math.sin(elapsed / 6) * 0.06, 2),
             "tone": "brand" if peak_spread >= 0.4 else "warning",
         },
@@ -235,13 +219,13 @@ def build_funding_rows() -> List[Dict[str, object]]:
                 "annual_value": round(annual, 2),
                 "annual": f"{annual:.2f}%",
                 "net_rate_value": round(net_rate, 4),
-                "net_rate": _format_percent(net_rate, 4),
+                "net_rate": format_percent(net_rate, 4),
                 "spread_value": round(spread, 2),
-                "spread": _format_signed_percent(spread, 2),
+                "spread": format_signed_percent(spread, 2),
                 "depth_value": depth,
-                "depth": _format_usd_compact(depth),
+                "depth": format_usd_compact(depth),
                 "settlement_seconds": remaining,
-                "settlement": _format_countdown(remaining),
+                "settlement": format_countdown(remaining),
             }
         )
 
@@ -269,15 +253,15 @@ def build_spread_rows() -> List[Dict[str, object]]:
                 "buy_exchange": item["buy_exchange"],
                 "sell_exchange": item["sell_exchange"],
                 "latest_spread_value": round(latest_spread, 2),
-                "latest_spread": _format_signed_percent(latest_spread, 2),
+                "latest_spread": format_signed_percent(latest_spread, 2),
                 "net_spread_value": round(net_spread, 2),
-                "net_spread": _format_signed_percent(net_spread, 2),
+                "net_spread": format_signed_percent(net_spread, 2),
                 "fees_value": round(fees, 2),
-                "fees": _format_percent(fees, 2),
+                "fees": format_percent(fees, 2),
                 "depth_value": depth,
-                "depth": _format_usd_compact(depth),
+                "depth": format_usd_compact(depth),
                 "position_size_value": position_size,
-                "position_size": _format_usd_compact(position_size),
+                "position_size": format_usd_compact(position_size),
             }
         )
 

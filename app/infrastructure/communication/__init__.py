@@ -1,0 +1,1 @@
+"""External communication adapters."""

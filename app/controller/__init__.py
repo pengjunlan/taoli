@@ -1,1 +1,1 @@
-"""页面控制器模块。"""
+"""Controller layer for page and API route aggregation."""

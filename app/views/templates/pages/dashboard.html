@@ -8,58 +8,12 @@
             <h1>{{ page_title }}</h1>
             <p>{{ page_subtitle }}</p>
         </div>
-        <div class="header-actions">
-            <button class="button button--primary" type="button" data-prototype-action="自动规则参数">自动规则参数</button>
-        </div>
     </section>
 
     <section class="summary-grid">
         {% for card in summary_cards %}
             {% include 'components/stats_card.html' %}
         {% endfor %}
-    </section>
-
-    <section class="card filter-card">
-        <div class="tab-row" data-toggle-group>
-            <button class="tab-chip is-active" type="button">全部机会</button>
-            <button class="tab-chip" type="button">资金费套利</button>
-            <button class="tab-chip" type="button">价差套利</button>
-            <button class="tab-chip" type="button">自动可执行</button>
-        </div>
-
-        <div class="filters-grid">
-            <label class="field">
-                <span class="field__label">交易所</span>
-                <select class="field__control">
-                    <option>全部交易所</option>
-                    <option>Binance</option>
-                    <option>OKX</option>
-                    <option>Bybit</option>
-                    <option>Gate</option>
-                </select>
-            </label>
-            <label class="field">
-                <span class="field__label">机会类型</span>
-                <select class="field__control">
-                    <option>全部</option>
-                    <option>资金费套利</option>
-                    <option>价差套利</option>
-                </select>
-            </label>
-            <label class="field">
-                <span class="field__label">最小收益门槛</span>
-                <select class="field__control">
-                    <option>全部</option>
-                    <option>高优先级</option>
-                    <option>可执行</option>
-                    <option>全部候选</option>
-                </select>
-            </label>
-            <label class="field field--search">
-                <span class="field__label">搜索币种</span>
-                <input class="field__control" type="search" placeholder="例如 BTC / ETH" data-table-search="#dashboard-table">
-            </label>
-        </div>
     </section>
 
     <section class="card card--section">
@@ -86,12 +40,10 @@
                         <th>收益指标</th>
                         <th>核心指标</th>
                         <th>补充指标</th>
-                        <th>流动性</th>
                         <th>持仓数量</th>
                         <th>持仓均价</th>
                         <th>持仓市值</th>
                         <th>关键字段</th>
-                        <th>操作</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -131,19 +83,40 @@
                                 <span class="spread-symbol__hint">{{ row.edge_label }}</span>
                             </div>
                         </td>
-                        <td class="spread-metric">{{ row.depth }}</td>
-                        <td class="spread-metric">{{ row.position_qty }}</td>
-                        <td class="spread-metric">{{ row.avg_price }}</td>
-                        <td class="spread-metric spread-metric--strong">{{ row.position_value }}</td>
+                        <td>
+                            <div class="pair-cell pair-cell--hedge">
+                                <span class="pair-cell__line pair-cell__line--hedge is-positive">
+                                    <span>{{ row.qty_long }}</span>
+                                </span>
+                                <span class="pair-cell__line pair-cell__line--hedge is-negative">
+                                    <span>{{ row.qty_short }}</span>
+                                </span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="pair-cell pair-cell--hedge">
+                                <span class="pair-cell__line pair-cell__line--hedge is-positive">
+                                    <span>{{ row.avg_long }}</span>
+                                </span>
+                                <span class="pair-cell__line pair-cell__line--hedge is-negative">
+                                    <span>{{ row.avg_short }}</span>
+                                </span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="pair-cell pair-cell--hedge">
+                                <span class="pair-cell__line pair-cell__line--hedge is-positive spread-metric--strong">
+                                    <span>{{ row.value_long }}</span>
+                                </span>
+                                <span class="pair-cell__line pair-cell__line--hedge is-negative spread-metric--strong">
+                                    <span>{{ row.value_short }}</span>
+                                </span>
+                            </div>
+                        </td>
                         <td>
                             <div class="spread-symbol">
                                 <strong class="spread-metric">{{ row.highlight_value }}</strong>
                                 <span class="spread-symbol__hint">{{ row.highlight_label }}</span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="table-actions">
-                                <a class="table-action table-action--primary" href="{{ row.detail_link }}">查看列表</a>
                             </div>
                         </td>
                     </tr>

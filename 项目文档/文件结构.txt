@@ -1,232 +1,240 @@
 多交易所套利系统文件结构说明
 
-一、页面实现推荐技术
+一、当前技术实现
 
 1. 后端框架：FastAPI
 2. 页面模板：Jinja2
 3. 前端交互：HTML + CSS + 原生 JavaScript ES Modules
-4. 实时数据：WebSocket
-5. 图表展示：ECharts
-6. 大表格展示：Tabulator 或原生表格增强
-7. 数据库：SQLite
+4. 当前数据形态：页面原型数据 / 占位数据
+5. 当前启动方式：`start_web.bat` 或 `uvicorn`
 
 说明：
-1. 第一阶段先完成页面骨架，不急着做复杂前后端分离
-2. 页面、接口、策略、交易所接入统一放在 app 目录中
-3. 页面层负责展示和交互，不直接承载交易逻辑
+1. 当前项目已经开始从页面原型结构，过渡到分层更清晰的正式结构
+2. 展示层继续保留 `views` 命名，不删除、不改名
+3. 后续真实接入时，重点围绕账户监控、市场监控、机会分析、开平仓决策逐步落地
+4. 后续接入真实后端时，所有核心数据都需要带用户归属字段
 
 
-二、项目目录结构
+二、当前收敛后的项目目录结构
 
 app/
 ├── main.py
 │   启动入口
+├── __init__.py
 │
 ├── config/
 │   ├── settings.py
-│   │   配置读取
-│   └── config.yaml
-│       系统配置文件
+│   │   配置入口占位
+│   ├── logging.py
+│   │   日志配置占位
+│   ├── constants.py
+│   │   全局常量占位
+│   └── __init__.py
 │
 ├── controller/
 │   ├── page_controller.py
-│   │   页面路由
-│   └── api_controller.py
-│       接口路由
-│
-├── models/
-│   ├── user.py
-│   │   用户模型
-│   ├── exchange_account.py
-│   │   交易所账户模型
-│   ├── strategy.py
-│   │   策略模型
-│   ├── order.py
-│   │   订单模型
-│   └── position.py
-│       持仓模型
-│
-├── service/
-│   ├── market_service.py
-│   │   行情聚合服务
-│   ├── websocket_service.py
-│   │   WebSocket 连接管理
-│   ├── account_service.py
-│   │   账户信息服务
-│   └── strategy_service.py
-│       策略调度服务
-│
-├── strategy/
-│   ├── funding_arbitrage.py
-│   │   资金费套利策略
-│   └── spread_arbitrage.py
-│       合约价差套利策略
-│
-├── exchanges/
-│   ├── base_adapter.py
-│   │   交易所适配器基类
-│   ├── binance_adapter.py
-│   │   Binance 适配器
-│   ├── okx_adapter.py
-│   │   OKX 适配器
-│   └── bybit_adapter.py
-│       Bybit 适配器
+│   │   页面总路由入口
+│   │   负责统一汇总各页面控制器
+│   ├── api_controller.py
+│   │   API / WebSocket 总路由入口
+│   ├── pages/
+│   │   ├── login_controller.py
+│   │   ├── register_controller.py
+│   │   ├── dashboard_controller.py
+│   │   ├── funding_arbitrage_controller.py
+│   │   ├── spread_arbitrage_controller.py
+│   │   ├── strategy_list_controller.py
+│   │   ├── positions_orders_controller.py
+│   │   ├── accounts_controller.py
+│   │   └── risk_alerts_controller.py
+│   │       每个页面独立一个控制器
+│   ├── api/
+│   │   预留给后续拆分 API 子模块
+│   └── __init__.py
 │
 ├── views/
 │   ├── templates/
 │   │   ├── base/
 │   │   │   ├── layout.html
 │   │   │   │   页面总布局
-│   │   │   ├── topbar.html
-│   │   │   │   顶部指标栏
 │   │   │   └── navbar.html
 │   │   │       主导航栏
-│   │   │
 │   │   ├── components/
 │   │   │   ├── stats_card.html
 │   │   │   │   数据卡片组件
-│   │   │   ├── filter_bar.html
-│   │   │   │   筛选栏组件
-│   │   │   ├── data_table.html
-│   │   │   │   表格组件
 │   │   │   └── alert_list.html
 │   │   │       告警列表组件
-│   │   │
 │   │   └── pages/
 │   │       ├── login.html
-│   │       │   登录页
+│   │       ├── register.html
 │   │       ├── dashboard.html
-│   │       │   首页总览页
 │   │       ├── funding_arbitrage.html
-│   │       │   资金费套利页
 │   │       ├── spread_arbitrage.html
-│   │       │   合约价差套利页
 │   │       ├── strategy_list.html
-│   │       │   策略管理页
 │   │       ├── positions_orders.html
-│   │       │   持仓与订单页
 │   │       ├── accounts.html
-│   │       │   账户与交易所配置页
 │   │       └── risk_alerts.html
-│   │           风控与告警页
 │   │
-│   └── static/
-│       ├── css/
-│       │   ├── core/
-│       │   │   ├── reset.css
-│       │   │   │   基础重置样式
-│       │   │   ├── variables.css
-│       │   │   │   全局颜色和变量
-│       │   │   └── layout.css
-│       │   │       全局布局样式
-│       │   │
-│       │   ├── components/
-│       │   │   ├── topbar.css
-│       │   │   ├── navbar.css
-│       │   │   ├── table.css
-│       │   │   ├── card.css
-│       │   │   └── form.css
-│       │   │
-│       │   └── pages/
-│       │       ├── login.css
-│       │       ├── dashboard.css
-│       │       ├── funding_arbitrage.css
-│       │       ├── spread_arbitrage.css
-│       │       ├── strategy_list.css
-│       │       ├── positions_orders.css
-│       │       ├── accounts.css
-│       │       └── risk_alerts.css
-│       │
-│       ├── js/
-│       │   ├── core/
-│       │   │   ├── api.js
-│       │   │   │   接口请求封装
-│       │   │   ├── ws.js
-│       │   │   │   WebSocket 封装
-│       │   │   └── utils.js
-│       │   │       通用工具
-│       │   │
-│       │   ├── components/
-│       │   │   ├── table.js
-│       │   │   ├── filters.js
-│       │   │   └── modal.js
-│       │   │
-│       │   └── pages/
-│       │       ├── login.js
-│       │       ├── dashboard.js
-│       │       ├── funding_arbitrage.js
-│       │       ├── spread_arbitrage.js
-│       │       ├── strategy_list.js
-│       │       ├── positions_orders.js
-│       │       ├── accounts.js
-│       │       └── risk_alerts.js
-│       │
-│       ├── images/
-│       │   图片资源
-│       └── icons/
-│           图标资源
+│   ├── static/
+│   │   ├── css/
+│   │   │   ├── core/
+│   │   │   ├── components/
+│   │   │   └── pages/
+│   │   └── js/
+│   │       ├── core/
+│   │       └── pages/
+│   │
+│   ├── viewmodels/
+│   │   ├── page_models.py
+│   │   │   页面配置模型
+│   │   ├── navigation.py
+│   │   │   页面导航模型
+│   │   ├── pages/
+│   │   │   └── page_contexts.py
+│   │   │       页面原型上下文数据
+│   │   └── __init__.py
+│   │
+│   ├── presenters/
+│   │   ├── page_presenters/
+│   │   │   └── template_renderer.py
+│   │   │       页面渲染封装
+│   │   ├── api_presenters/
+│   │   │   └── prototype_payloads.py
+│   │   │       原型 API / WebSocket 数据载荷
+│   │   └── __init__.py
+│   │
+│   └── __init__.py
+│   展示层统一保留在 `views`
 │
-├── data/
-│   本地缓存、备份、临时文件
+├── application/
+│   ├── services/
+│   │   ├── account_monitor_service.py
+│   │   │   账户监控服务骨架
+│   │   ├── market_data_monitor_service.py
+│   │   │   市场数据监控服务骨架
+│   │   ├── trade_decision_service.py
+│   │   │   根据信号分析是否开仓、平仓的服务骨架
+│   │   └── __init__.py
+│   ├── use_cases/
+│   │   后续用于放显式业务流程
+│   ├── dto/
+│   │   ├── requests/
+│   │   ├── responses/
+│   │   └── events/
+│   └── __init__.py
+│   application 层用于承载业务编排和服务
 │
-└── logs/
-    系统运行日志
+├── domain/
+│   ├── entities/
+│   │   └── monitor_models.py
+│   │       领域实体骨架
+│   ├── value_objects/
+│   ├── repositories/
+│   ├── policies/
+│   ├── enums/
+│   └── __init__.py
+│   domain 层用于承载核心业务对象和规则
+│
+├── infrastructure/
+│   ├── communication/
+│   │   ├── base_client.py
+│   │   │   外部通讯基础客户端
+│   │   ├── exchanges/
+│   │   │   └── exchange_gateway.py
+│   │   │       交易所通讯网关骨架
+│   │   ├── market_data/
+│   │   └── notifier/
+│   ├── persistence/
+│   ├── cache/
+│   ├── tasks/
+│   └── __init__.py
+│   infrastructure 层用于对接外部系统和运行时基础设施
+│
+├── shared/
+│   ├── utils/
+│   │   └── formatters.py
+│   │       通用格式化工具
+│   ├── exceptions/
+│   ├── types/
+│   └── __init__.py
+│   shared 层用于放真正跨层通用的工具
+│
+├── core/
+│   ├── paths.py
+│   │   当前仍保留的底层路径定义
+│   └── __init__.py
+│   core 当前仅保留底层基础辅助，不再扩展业务内容
+│
+├── communication/
+│   └── __init__.py
+├── model/
+│   └── __init__.py
+├── service/
+│   └── __init__.py
+├── utils/
+│   └── __init__.py
+│   以上四个目录当前作为兼容过渡保留
+│   后续新代码不再继续放入
 
 
-三、页面文件存放规范
+三、当前页面文件存放规范
 
 1. 每个页面单独一套文件
-   templates/pages/xxx.html
-   static/css/pages/xxx.css
-   static/js/pages/xxx.js
+   `views/templates/pages/xxx.html`
+   `views/static/css/pages/xxx.css`
+   `views/static/js/pages/xxx.js`
 
-2. 公共布局统一放在 base
-   包括总布局、顶部指标栏、主导航栏
+2. 每个页面都应该有自己的页面控制器
+   `controller/pages/xxx_controller.py`
 
-3. 可复用模块统一放在 components
-   包括卡片、表格、筛选栏、弹窗、告警列表
+3. 页面总路由统一保留在 `controller/page_controller.py`
+   它负责汇总页面控制器，不承载所有页面细节实现
 
-4. 页面脚本只负责：
-   页面渲染
-   页面交互
-   调用接口
-   订阅实时数据
+4. API 总路由统一保留在 `controller/api_controller.py`
+   后续新增接口、WebSocket、推送通道，优先从这里统一汇总
 
-5. 交易和策略逻辑不要写进页面 js
-   页面层只做展示和操作入口
+5. 页面展示数据优先进入 `views/viewmodels`
+   不再继续放入旧的 `core`
+
+6. 页面渲染和 API 输出封装优先进入 `views/presenters`
+
+7. 交易、监控、分析、执行逻辑不写在页面 js 中
+   页面层只负责展示与交互入口
 
 
-四、第一阶段核心页面
+四、当前各层职责备注
 
-1. login.html
-   登录页
+1. `controller`
+   只负责路由、参数接收、调用服务、返回结果
 
-2. dashboard.html
-   首页总览页
+2. `views`
+   只负责展示层，包括模板、静态资源、页面展示模型、页面/API 输出组装
 
-3. funding_arbitrage.html
-   资金费套利页
+3. `application`
+   负责业务编排，如账户监控、市场监控、机会扫描、开平仓决策
 
-4. spread_arbitrage.html
-   合约价差套利页
+4. `domain`
+   负责核心业务对象、规则、策略约束
 
-5. strategy_list.html
-   策略管理页
+5. `infrastructure`
+   负责交易所通讯、市场数据连接、缓存、持久化、后台任务
 
-6. positions_orders.html
-   持仓与订单页
+6. `shared`
+   负责真正通用的工具、异常、类型
 
-7. accounts.html
-   账户与交易所配置页
-
-8. risk_alerts.html
-   风控与告警页
+7. `core`
+   当前只保留极少数底层辅助，不再作为“什么都能放”的目录
 
 
 五、当前结构设计原则
 
-1. 所有代码只写在 app 目录内
+1. 保留 `views` 作为展示层，不删除、不改名
 2. 页面结构、样式、交互分离
-3. 公共组件优先抽离
-4. 页面先做骨架，后接真实数据
-5. 先支持多交易所展示，再逐步接入真实套利逻辑
+3. 页面路由集中汇总，但每个页面单独控制器实现
+4. API 路由集中汇总，后续再按模块拆分到 `controller/api`
+5. 展示模型、领域模型、业务服务、基础设施分层隔离
+6. 通讯层不直接承担业务判断
+7. 工具层只放真正可复用的跨层工具
+8. 先保证页面链路清晰，再逐步接真实业务逻辑
+9. 围绕“机会发现、规则执行、资金调度、风控追踪”四条主线组织系统
+10. 后续所有账户、规则、持仓、订单、风控数据都必须按用户隔离设计

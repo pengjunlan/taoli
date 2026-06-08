@@ -32,8 +32,18 @@
     gap: 6px;
 }
 
+.pair-cell--hedge {
+    gap: 8px;
+}
+
 .pair-cell__line {
     font-size: 0.94rem;
+}
+
+.pair-cell__line--hedge {
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
 }
 
 .spread-symbol {

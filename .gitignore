@@ -9,3 +9,7 @@ __pycache__/
 .vscode/
 Thumbs.db
 Desktop.ini
+*.log
+.env
+.env.local
+项目文档/备忘.txt

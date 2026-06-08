@@ -263,21 +263,52 @@ body {
 
 .toast-root {
     position: fixed;
-    right: 24px;
-    bottom: 24px;
+    inset: 0;
+    display: none;
+    z-index: 1200;
+}
+
+.toast-root.is-active {
+    display: block;
+}
+
+.toast-mask {
+    position: absolute;
+    inset: 0;
     display: grid;
-    gap: 10px;
-    z-index: 50;
+    place-items: center;
+    padding: 24px;
+    background: rgba(15, 23, 42, 0.22);
+    backdrop-filter: blur(3px);
 }
 
 .toast {
-    min-width: 280px;
-    max-width: 360px;
-    padding: 14px 16px;
-    border-radius: 14px;
-    background: rgba(16, 35, 60, 0.94);
+    min-width: min(360px, calc(100vw - 48px));
+    max-width: min(420px, calc(100vw - 48px));
+    padding: 18px 22px;
+    border-radius: 18px;
+    background: rgba(16, 35, 60, 0.96);
     color: #fff;
     box-shadow: var(--shadow-md);
+    text-align: center;
+    font-size: 1rem;
+    line-height: 1.7;
+}
+
+.toast--centered {
+    animation: toast-pop 0.18s ease-out;
+}
+
+@keyframes toast-pop {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
 @media (max-width: 1180px) {
@@ -323,4 +354,5 @@ body {
     .table-search input {
         width: 100%;
     }
+
 }

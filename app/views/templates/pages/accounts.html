@@ -8,10 +8,6 @@
             <h1>{{ page_title }}</h1>
             <p>{{ page_subtitle }}</p>
         </div>
-        <div class="header-actions">
-            <button class="button button--ghost" type="button" data-prototype-action="导入配置">导入配置</button>
-            <button class="button button--primary" type="button" data-prototype-action="一键平均分配">一键平均分配</button>
-        </div>
     </section>
 
     <section class="summary-grid">
@@ -24,11 +20,12 @@
         <div class="card__header card__header--row">
             <div>
                 <h2>账户资金分布</h2>
-                <p>统一查看当前可用资金、目标分配、偏差和调拨计划，这里才是自动套利是否可执行的资金基础。</p>
+                <p>统一查看当前可用资金、目标分配、偏差和调拨计划，这里是自动套利是否可执行的资金基础。</p>
             </div>
             <div class="table-actions">
-                <button class="table-action" type="button" data-prototype-action="按权重分配">按权重分配</button>
-                <button class="table-action table-action--primary" type="button" data-prototype-action="自动均衡配置">自动均衡配置</button>
+                <button class="table-action" type="button" data-prototype-action="自动调拨">自动调拨</button>
+                <button class="table-action" type="button" data-prototype-action="手动调拨">手动调拨</button>
+                <a class="table-action table-action--primary" href="/transfer-records">调拨记录</a>
             </div>
         </div>
         <div class="table-wrap">
@@ -58,9 +55,7 @@
                         <td class="spread-metric">{{ row.target }}</td>
                         <td class="spread-value {{ 'is-positive' if '+' in row.deviation else 'is-negative' }}">{{ row.deviation }}</td>
                         <td>
-                            <span class="pill pill--{{ row.status_tone }}">
-                                {{ row.status }}
-                            </span>
+                            <span class="pill pill--{{ row.status_tone }}">{{ row.status }}</span>
                         </td>
                         <td>
                             <div class="pair-cell pair-cell--spread">
@@ -77,153 +72,236 @@
     </section>
 
     <section class="card card--section">
-        <div class="card__header card__header--row">
-            <div>
-                <h2>调拨执行记录</h2>
-                <p>查看一键平均分配和自动失衡修复生成的任务，确认到账、失败重试和开仓限制是否生效。</p>
-            </div>
-            <div class="section-tools">
-                <div class="inline-note">共 {{ transfer_rows|length }} 条调拨任务</div>
+        <div class="card__header account-tabs-shell">
+            <div class="account-tabs" role="tablist" aria-label="账户信息切换">
+                <button
+                    class="tab-chip is-active"
+                    type="button"
+                    role="tab"
+                    aria-selected="true"
+                    data-account-tab-trigger="accounts"
+                >
+                    已配置账户
+                </button>
+                <button
+                    class="tab-chip"
+                    type="button"
+                    role="tab"
+                    aria-selected="false"
+                    data-account-tab-trigger="addresses"
+                >
+                    资金接收地址配置
+                </button>
             </div>
         </div>
-        <div class="table-wrap">
-            <table class="data-table transfer-table" data-pagination-items="tbody tr" data-page-size="5">
-                <thead>
-                    <tr>
-                        <th>时间</th>
-                        <th>调拨路径</th>
-                        <th>金额</th>
-                        <th>触发原因</th>
-                        <th>状态</th>
-                        <th>结果</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in transfer_rows %}
-                    <tr>
-                        <td class="spread-metric">{{ row.time }}</td>
-                        <td>
-                            <div class="pair-cell pair-cell--spread">
-                                <span class="pair-cell__line">{{ row.route_from }}</span>
-                                <span class="pair-cell__line is-positive">→ {{ row.route_to }}</span>
-                            </div>
-                        </td>
-                        <td class="spread-metric spread-metric--strong">{{ row.amount }}</td>
-                        <td>{{ row.reason }}</td>
-                        <td>
-                            <span class="pill pill--{{ row.status_tone }}">{{ row.status }}</span>
-                        </td>
-                        <td>{{ row.result }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </section>
 
-    <section class="card card--section">
-        <div class="card__header card__header--row">
-            <div>
-                <h2>资金接收地址配置</h2>
-                <p>跨交易所调拨必须配置接收地址，内部划转则可以用子账户 UID 或内部账户标识代替。</p>
+        <div class="account-tab-panel is-active" data-account-tab-panel="accounts">
+            <div class="card__header card__header--row">
+                <div>
+                    <h2>已配置账户</h2>
+                    <p>这里展示新增账户时保存下来的账户主信息，按当前数据库真实结构显示。</p>
+                </div>
+                <div class="section-tools">
+                    <button class="table-action" type="button" data-account-modal-open>新增账户</button>
+                    <div class="inline-note" data-account-count>共 {{ account_rows|length }} 个账户</div>
+                </div>
             </div>
-            <div class="table-actions">
-                <button class="table-action" type="button" data-prototype-action="批量校验地址">批量校验地址</button>
-                <button class="table-action table-action--primary" type="button" data-prototype-action="新增接收地址">新增接收地址</button>
+            <div class="table-wrap">
+                <table class="data-table account-table" data-pagination-items="tbody tr" data-page-size="5">
+                    <thead>
+                        <tr>
+                            <th>账户</th>
+                            <th>市场类型</th>
+                            <th>API Key</th>
+                            <th>API Secret</th>
+                            <th>Passphrase</th>
+                            <th>地址配置</th>
+                            <th>更新时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody data-account-table-body>
+                        {% for account in account_rows %}
+                        <tr data-account-row="{{ account.id if account.id is defined else '' }}">
+                            <td>
+                                <div class="spread-symbol">
+                                    <strong>{{ account.name }}</strong>
+                                    <span class="spread-symbol__hint">{{ account.exchange }}</span>
+                                </div>
+                            </td>
+                            <td>{{ account.market_type }}</td>
+                            <td class="spread-metric">{{ account.api_key }}</td>
+                            <td class="spread-metric">{{ account.api_secret }}</td>
+                            <td>{{ account.api_passphrase }}</td>
+                            <td>
+                                <span class="pill pill--{{ account.address_status_tone }}">{{ account.address_status }}</span>
+                            </td>
+                            <td class="spread-metric">{{ account.updated_at }}</td>
+                            <td>
+                                <div class="account-actions">
+                                    <button class="table-action" type="button" data-account-edit="{{ account.id if account.id is defined else '' }}">编辑</button>
+                                    <button class="table-action" type="button" data-account-delete="{{ account.id if account.id is defined else '' }}">删除</button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
-        <div class="table-wrap">
-            <table class="data-table address-table" data-pagination-items="tbody tr" data-page-size="5">
-                <thead>
-                    <tr>
-                        <th>账户</th>
-                        <th>资产</th>
-                        <th>网络/方式</th>
-                        <th>接收地址</th>
-                        <th>Memo/Tag</th>
-                        <th>用途</th>
-                        <th>状态</th>
-                        <th>备注</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in address_rows %}
-                    <tr>
-                        <td>
-                            <div class="spread-symbol">
-                                <strong>{{ row.account }}</strong>
-                                <span class="spread-symbol__hint">{{ row.exchange }}</span>
-                            </div>
-                        </td>
-                        <td class="spread-metric">{{ row.asset }}</td>
-                        <td>{{ row.network }}</td>
-                        <td class="spread-metric">{{ row.address }}</td>
-                        <td>{{ row.memo }}</td>
-                        <td>{{ row.usage }}</td>
-                        <td>
-                            <span class="pill pill--{{ row.status_tone }}">{{ row.status }}</span>
-                        </td>
-                        <td>{{ row.note }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </section>
 
-    <section class="card card--section">
-        <div class="card__header card__header--row">
-            <div>
-                <h2>已配置账户</h2>
-                <p>这里看连接状态、保证金模式和是否参与自动均衡，继续作为账户管理入口。</p>
+        <div class="account-tab-panel" data-account-tab-panel="addresses" hidden>
+            <div class="card__header card__header--row">
+                <div>
+                    <h2>资金接收地址配置</h2>
+                    <p>这里展示新增账户时保存下来的地址配置字段，按真实落库数据展示。</p>
+                </div>
+                <div class="section-tools">
+                    <div class="inline-note" data-address-count>共 {{ address_rows|length }} 条地址配置</div>
+                </div>
             </div>
-            <div class="table-actions">
-                <button class="table-action" type="button" data-prototype-action="测试全部连接">测试全部连接</button>
-                <button class="table-action table-action--primary" type="button" data-prototype-action="新增账户">新增账户</button>
+            <div class="table-wrap">
+                <table class="data-table address-table" data-pagination-items="tbody tr" data-page-size="5">
+                    <thead>
+                        <tr>
+                            <th>账户</th>
+                            <th>网络类型</th>
+                            <th>接收地址 / UID</th>
+                            <th>Memo/Tag</th>
+                            <th>创建时间</th>
+                            <th>更新时间</th>
+                        </tr>
+                    </thead>
+                    <tbody data-address-table-body>
+                        {% for row in address_rows %}
+                        <tr>
+                            <td>
+                                <div class="spread-symbol">
+                                    <strong>{{ row.account }}</strong>
+                                    <span class="spread-symbol__hint">{{ row.exchange }}</span>
+                                </div>
+                            </td>
+                            <td>{{ row.network }}</td>
+                            <td class="spread-metric">{{ row.address }}</td>
+                            <td>{{ row.memo }}</td>
+                            <td class="spread-metric">{{ row.created_at }}</td>
+                            <td class="spread-metric">{{ row.updated_at }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
-        </div>
-        <div class="table-wrap">
-            <table class="data-table account-table" data-pagination-items="tbody tr" data-page-size="5">
-                <thead>
-                    <tr>
-                        <th>账户</th>
-                        <th>状态</th>
-                        <th>可用保证金</th>
-                        <th>保证金模式</th>
-                        <th>默认杠杆</th>
-                        <th>资金均衡</th>
-                        <th>操作</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for account in account_rows %}
-                    <tr>
-                        <td>
-                            <div class="spread-symbol">
-                                <strong>{{ account.name }}</strong>
-                                <span class="spread-symbol__hint">{{ account.exchange }}</span>
-                            </div>
-                        </td>
-                        <td>
-                            <span class="pill pill--{{ account.status_tone }}">{{ account.status }}</span>
-                        </td>
-                        <td class="spread-metric spread-metric--strong">{{ account.available }}</td>
-                        <td>{{ account.mode }}</td>
-                        <td class="spread-metric">{{ account.leverage }}</td>
-                        <td>
-                            <span class="pill pill--{{ account.rebalance_tone }}">{{ account.rebalance }}</span>
-                        </td>
-                        <td>
-                            <div class="table-actions">
-                                <button class="table-action" type="button" data-prototype-action="编辑账户">编辑</button>
-                                <button class="table-action table-action--primary" type="button" data-prototype-action="调拨配置">调拨配置</button>
-                            </div>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
         </div>
     </section>
+</div>
+
+<div class="account-modal" data-account-modal hidden>
+    <div class="account-modal__mask" data-account-modal-close></div>
+    <div class="account-modal__dialog card" role="dialog" aria-modal="true" aria-labelledby="account-modal-title">
+        <div class="account-modal__header">
+            <div>
+                <div class="eyebrow">New Account</div>
+                <h2 id="account-modal-title">新增账户</h2>
+                <p>先在这里录入交易所连接信息和资金接收配置，下一步我们再把新增账户接口、连接校验和地址验证接上。</p>
+            </div>
+            <button class="account-modal__close" type="button" aria-label="关闭新增账户弹层" data-account-modal-close>×</button>
+        </div>
+
+        <form class="form-stack account-form" data-account-form data-mode="create">
+            <input type="hidden" name="account_id" value="">
+            <div class="account-form__grid">
+                <label class="field">
+                    <span class="field__label">市场类型（必填）</span>
+                    <select class="field__control" name="market_type">
+                        <option value="">请选择市场类型</option>
+                        <option value="spot">现货</option>
+                        <option value="swap">永续合约</option>
+                    </select>
+                </label>
+
+                <label class="field">
+                    <span class="field__label">交易所（必填）</span>
+                    <select class="field__control" name="exchange_code">
+                        <option value="">请选择交易所</option>
+                        <option value="binance">Binance</option>
+                        <option value="bitget">Bitget</option>
+                        <option value="okx">OKX</option>
+                        <option value="gate">Gate</option>
+                        <option value="htx">HTX</option>
+                    </select>
+                </label>
+
+                <label class="field field--full">
+                    <span class="field__label">API Key（必填）</span>
+                    <input class="field__control" type="text" name="api_key" placeholder="请输入交易所 API Key" maxlength="255">
+                </label>
+
+                <label class="field field--full">
+                    <span class="field__label">API Secret（必填）</span>
+                    <input class="field__control" type="password" name="api_secret" placeholder="请输入交易所 API Secret" maxlength="255">
+                </label>
+
+                <label class="field field--full">
+                    <span class="field__label">API Passphrase（选填）</span>
+                    <input class="field__control" type="password" name="api_passphrase" placeholder="部分交易所需要，例如 OKX" maxlength="255">
+                </label>
+            </div>
+
+            <section class="account-form__section">
+                <div class="account-form__section-head">
+                    <h3>资金接收地址配置</h3>
+                    <p>这里先保留最核心的接收配置；如果暂时不填，也可以后续在账户页里补录。</p>
+                </div>
+
+                <div class="account-form__grid account-form__grid--address">
+                    <label class="field field--full">
+                        <span class="field__label">网络类型（选填）</span>
+                        <select class="field__control" name="address_network">
+                            <option value="">暂不配置</option>
+                            <option value="trc20">TRC20</option>
+                            <option value="erc20">ERC20</option>
+                            <option value="bep20">BEP20</option>
+                            <option value="arbitrum">Arbitrum One</option>
+                            <option value="optimism">Optimism</option>
+                            <option value="polygon">Polygon</option>
+                            <option value="solana">Solana</option>
+                            <option value="omni">OMNI</option>
+                            <option value="internal">交易所内部划转</option>
+                        </select>
+                    </label>
+
+                    <label class="field field--full">
+                        <span class="field__label">接收地址 / UID（选填）</span>
+                        <input class="field__control" type="text" name="address_value" placeholder="请输入接收地址或内部 UID" maxlength="255">
+                    </label>
+
+                    <label class="field field--full">
+                        <span class="field__label">Memo / Tag（选填）</span>
+                        <input class="field__control" type="text" name="address_memo" placeholder="部分交易所或链路需要" maxlength="120">
+                    </label>
+                </div>
+            </section>
+
+            <div class="form-actions">
+                <button class="button button--ghost" type="button" data-account-test>测试连接</button>
+                <button class="button button--ghost" type="button" data-account-modal-close>取消</button>
+                <button class="button button--primary" type="submit">保存账户</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="account-confirm" data-account-confirm hidden>
+    <div class="account-confirm__mask" data-account-confirm-cancel></div>
+    <div class="account-confirm__dialog card" role="dialog" aria-modal="true" aria-labelledby="account-confirm-title">
+        <div class="account-confirm__content">
+            <h2 id="account-confirm-title">确认删除账户</h2>
+            <p data-account-confirm-message>确定删除这个账户吗？删除后不可恢复。</p>
+        </div>
+        <div class="account-confirm__actions">
+            <button class="button button--ghost" type="button" data-account-confirm-cancel>取消</button>
+            <button class="button button--primary" type="button" data-account-confirm-accept>确定</button>
+        </div>
+    </div>
 </div>
 {% endblock %}

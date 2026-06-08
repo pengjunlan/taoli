@@ -17,18 +17,18 @@
 
             <form id="login-form" class="form-stack">
                 <label class="field">
-                    <span class="field__label">账号</span>
-                    <input class="field__control" type="text" placeholder="请输入账号">
+                    <span class="field__label">账号（必填）</span>
+                    <input id="login-username" name="username" class="field__control" type="text" placeholder="请输入账号">
                 </label>
 
                 <label class="field">
-                    <span class="field__label">密码</span>
-                    <input class="field__control" type="password" placeholder="请输入密码">
+                    <span class="field__label">密码（必填）</span>
+                    <input id="login-password" name="password" class="field__control" type="password" placeholder="请输入密码">
                 </label>
 
                 <label class="checkbox-row">
-                    <input type="checkbox" checked>
-                    <span>记住登录状态</span>
+                    <input id="login-remember-me" name="remember_me" type="checkbox" checked>
+                    <span>记住登录状态（选填）</span>
                 </label>
 
                 <button class="button button--primary button--block" type="submit">进入系统</button>

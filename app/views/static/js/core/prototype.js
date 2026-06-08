@@ -6,6 +6,18 @@ function syncItemVisibility(item) {
   item.style.display = searchHidden || paginationHidden ? "none" : "";
 }
 
+function getPaginationContainers(root = document) {
+  if (!root) return [];
+
+  const containers = [];
+  if (root.matches?.("[data-pagination-items]")) {
+    containers.push(root);
+  }
+
+  containers.push(...root.querySelectorAll?.("[data-pagination-items]"));
+  return containers;
+}
+
 export function bindPrototypeActions() {
   document.querySelectorAll("[data-prototype-action]").forEach((element) => {
     element.addEventListener("click", () => {
@@ -34,6 +46,7 @@ export function bindTableSearch() {
     const rows = Array.from(table.querySelectorAll("tbody tr")).filter(
       (row) => !row.classList.contains("table-empty-row"),
     );
+
     input.addEventListener("input", () => {
       const keyword = input.value.trim().toLowerCase();
       rows.forEach((row) => {
@@ -47,8 +60,10 @@ export function bindTableSearch() {
   });
 }
 
-export function bindListPagination() {
-  document.querySelectorAll("[data-pagination-items]").forEach((container) => {
+export function bindListPagination(root = document) {
+  getPaginationContainers(root).forEach((container) => {
+    if (container.__paginationCleanup) return;
+
     const itemSelector = container.dataset.paginationItems;
     if (!itemSelector) return;
 
@@ -144,11 +159,29 @@ export function bindListPagination() {
       render();
     });
 
-    container.addEventListener("prototype:filter-change", () => {
+    const handleFilterChange = () => {
       currentPage = 1;
       render();
-    });
+    };
+
+    container.addEventListener("prototype:filter-change", handleFilterChange);
+
+    container.__paginationCleanup = () => {
+      container.removeEventListener("prototype:filter-change", handleFilterChange);
+      footer.remove();
+      delete container.__paginationCleanup;
+    };
 
     render();
   });
+}
+
+export function refreshListPagination(root = document) {
+  getPaginationContainers(root).forEach((container) => {
+    if (container.__paginationCleanup) {
+      container.__paginationCleanup();
+    }
+  });
+
+  bindListPagination(root);
 }

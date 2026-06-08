@@ -1,16 +1,20 @@
-.page-accounts .card--section {
+.page-accounts .card--section,
+.page-transfer_records .card--section {
     background: linear-gradient(180deg, #ffffff, #fbfdff);
 }
 
-.page-accounts .table-wrap {
+.page-accounts .table-wrap,
+.page-transfer_records .table-wrap {
     padding-top: 18px;
 }
 
-.page-accounts .data-table {
+.page-accounts .data-table,
+.page-transfer_records .data-table {
     min-width: 980px;
 }
 
-.page-accounts .data-table tbody td {
+.page-accounts .data-table tbody td,
+.page-transfer_records .data-table tbody td {
     padding-top: 20px;
     padding-bottom: 20px;
 }
@@ -28,7 +32,9 @@
 }
 
 .page-accounts .transfer-table thead th:nth-child(2),
-.page-accounts .transfer-table tbody td:nth-child(2) {
+.page-accounts .transfer-table tbody td:nth-child(2),
+.page-transfer_records .transfer-table thead th:nth-child(2),
+.page-transfer_records .transfer-table tbody td:nth-child(2) {
     min-width: 220px;
 }
 
@@ -42,22 +48,322 @@
     min-width: 180px;
 }
 
-.page-accounts .address-table thead th:nth-child(8),
-.page-accounts .address-table tbody td:nth-child(8) {
+.page-accounts .address-table thead th:nth-child(3),
+.page-accounts .address-table tbody td:nth-child(3) {
     min-width: 220px;
 }
 
+.page-accounts .address-table thead th:nth-child(5),
+.page-accounts .address-table tbody td:nth-child(5),
+.page-accounts .address-table thead th:nth-child(6),
+.page-accounts .address-table tbody td:nth-child(6) {
+    min-width: 150px;
+}
+
 .page-accounts .account-table {
-    min-width: 1120px;
+    min-width: 1240px;
+}
+
+.page-accounts .account-table thead th:nth-child(3),
+.page-accounts .account-table tbody td:nth-child(3),
+.page-accounts .account-table thead th:nth-child(4),
+.page-accounts .account-table tbody td:nth-child(4) {
+    min-width: 150px;
+}
+
+.page-accounts .account-table thead th:nth-child(8),
+.page-accounts .account-table tbody td:nth-child(8) {
+    width: 180px;
+}
+
+.page-accounts .account-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-start;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.page-accounts .account-tabs-shell {
+    padding-bottom: 0;
+    border-bottom: 1px solid rgba(217, 225, 236, 0.92);
+    background: #ffffff;
+}
+
+.page-accounts .account-tabs {
+    display: flex;
+    gap: 28px;
+    align-items: center;
+    flex-wrap: wrap;
+    overflow: visible;
+    padding-top: 0;
+}
+
+.page-accounts .account-tabs .tab-chip {
+    min-height: 36px;
+    padding: 0 2px;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: #3f4a5f;
+    box-shadow: none;
+    transform: none;
+    white-space: nowrap;
+    font-weight: 600;
+    position: relative;
+}
+
+.page-accounts .account-tabs .tab-chip + .tab-chip {
+    margin-left: 0;
+}
+
+.page-accounts .account-tabs .tab-chip:hover {
+    transform: none;
+    border-color: transparent;
+    color: var(--brand);
+}
+
+.page-accounts .account-tabs .tab-chip.is-active {
+    color: var(--brand);
+    background: transparent;
+    box-shadow: none;
+}
+
+.page-accounts .account-tabs .tab-chip.is-active::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 3px;
+    border-radius: 999px;
+    background: #3b82f6;
+}
+
+.page-accounts .account-tab-panel {
+    display: none;
+}
+
+.page-accounts .account-tab-panel.is-active {
+    display: block;
+    padding-top: 10px;
 }
 
 .page-accounts .table-actions {
     justify-content: flex-start;
 }
 
+.page-accounts .account-confirm[hidden] {
+    display: none;
+}
+
+.page-accounts .account-confirm {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    z-index: 1200;
+}
+
+.page-accounts .account-confirm__mask {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.34);
+    backdrop-filter: blur(4px);
+}
+
+.page-accounts .account-confirm__dialog {
+    position: relative;
+    width: min(420px, calc(100vw - 32px));
+    border-radius: 24px;
+    box-shadow: 0 28px 80px rgba(15, 23, 42, 0.24);
+    animation: account-modal-enter 0.18s ease-out;
+}
+
+.page-accounts .account-confirm__content {
+    display: grid;
+    gap: 10px;
+    padding: 26px 28px 18px;
+}
+
+.page-accounts .account-confirm__content h2 {
+    font-size: 1.1rem;
+    line-height: 1.25;
+}
+
+.page-accounts .account-confirm__content p {
+    color: var(--text-soft);
+}
+
+.page-accounts .account-confirm__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 0 28px 26px;
+}
+
+.page-accounts .account-modal[hidden] {
+    display: none;
+}
+
+.page-accounts .account-modal {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    z-index: 1100;
+}
+
+.page-accounts .account-modal__mask {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.32);
+    backdrop-filter: blur(4px);
+}
+
+.page-accounts .account-modal__dialog {
+    position: relative;
+    width: min(760px, calc(100vw - 32px));
+    max-height: calc(100vh - 48px);
+    overflow: auto;
+    border-radius: 24px;
+    box-shadow: 0 28px 80px rgba(15, 23, 42, 0.22);
+    animation: account-modal-enter 0.2s ease-out;
+}
+
+.page-accounts .account-modal__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 24px 24px 0;
+}
+
+.page-accounts .account-modal__header h2 {
+    font-size: 1.4rem;
+    line-height: 1.2;
+    margin-top: 4px;
+}
+
+.page-accounts .account-modal__header p {
+    margin-top: 10px;
+    color: var(--text-soft);
+}
+
+.page-accounts .account-modal__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.88);
+    color: var(--text-soft);
+    font-size: 1.5rem;
+    line-height: 1;
+    transition: all var(--transition-fast);
+}
+
+.page-accounts .account-modal__close:hover {
+    border-color: rgba(25, 103, 210, 0.24);
+    color: var(--brand);
+}
+
+.page-accounts .account-form {
+    padding-top: 20px;
+}
+
+.page-accounts .account-form__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.page-accounts .account-form__section {
+    display: grid;
+    gap: 18px;
+    padding: 0 24px;
+    margin-top: 4px;
+}
+
+.page-accounts .account-form__section-head {
+    display: grid;
+    gap: 8px;
+}
+
+.page-accounts .account-form__section-head h3 {
+    font-size: 1rem;
+    line-height: 1.3;
+}
+
+.page-accounts .account-form__section-head p,
+.page-accounts .account-form__hint {
+    color: var(--text-soft);
+}
+
+.page-accounts .account-form__hint {
+    font-size: 0.92rem;
+}
+
+.page-accounts .account-form__grid--address {
+    gap: 16px;
+}
+
+.page-accounts .field__control--textarea {
+    min-height: 96px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    resize: vertical;
+}
+
+.page-accounts .field__control:disabled {
+    background: #f5f7fb;
+    color: #9aa6bd;
+    cursor: not-allowed;
+}
+
+.page-accounts .field--full {
+    grid-column: 1 / -1;
+}
+
+@keyframes account-modal-enter {
+    from {
+        opacity: 0;
+        transform: translateY(10px) scale(0.985);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
 @media (max-width: 860px) {
     .page-accounts .table-wrap {
         padding-left: 16px;
         padding-right: 16px;
+    }
+
+    .page-accounts .account-tabs-shell {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .page-accounts .account-modal__dialog {
+        width: min(760px, calc(100vw - 20px));
+        max-height: calc(100vh - 20px);
+        border-radius: 20px;
+    }
+
+    .page-accounts .account-form__section {
+        padding-left: 24px;
+        padding-right: 24px;
+    }
+
+    .page-accounts .account-form__grid {
+        grid-template-columns: 1fr;
     }
 }

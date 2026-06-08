@@ -1,0 +1,1 @@
+"""Market data communication adapters."""

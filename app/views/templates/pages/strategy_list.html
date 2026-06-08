@@ -8,10 +8,6 @@
             <h1>{{ page_title }}</h1>
             <p>{{ page_subtitle }}</p>
         </div>
-        <div class="header-actions">
-            <button class="button button--ghost" type="button" data-prototype-action="保存规则模板">保存规则模板</button>
-            <button class="button button--primary" type="button" data-prototype-action="新建规则组">新建规则组</button>
-        </div>
     </section>
 
     <section class="summary-grid">
@@ -27,12 +23,7 @@
                 <p>这里管理的是自动执行规则，不是单个交易对的手工策略任务。</p>
             </div>
             <div class="section-tools">
-                <div class="tab-row" data-toggle-group>
-                    <button class="tab-chip is-active" type="button">全部</button>
-                    <button class="tab-chip" type="button">运行中</button>
-                    <button class="tab-chip" type="button">暂停中</button>
-                    <button class="tab-chip" type="button">异常</button>
-                </div>
+                <div class="inline-note">共 {{ rule_rows|length }} 条规则</div>
             </div>
         </div>
 
@@ -46,7 +37,7 @@
                         <th>状态</th>
                         <th>累计收益</th>
                         <th>当前敞口</th>
-                        <th>操作</th>
+                        <th>执行说明</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -67,12 +58,7 @@
                         </td>
                         <td class="spread-value {{ 'is-positive' if '+' in row.pnl else 'is-negative' }}">{{ row.pnl }}</td>
                         <td class="spread-metric">{{ row.exposure }}</td>
-                        <td>
-                            <div class="table-actions">
-                                <button class="table-action" type="button" data-prototype-action="规则启停">启停</button>
-                                <button class="table-action table-action--primary" type="button" data-prototype-action="规则详情">详情</button>
-                            </div>
-                        </td>
+                        <td>{{ row.execution }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
