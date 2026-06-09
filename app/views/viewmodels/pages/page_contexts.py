@@ -20,7 +20,7 @@ def dashboard_rows() -> List[Dict[str, str]]:
     funding_items = [
         {
             "rank": row["rank"],
-            "type": "资金费套利",
+            "type": "资费套利",
             "type_tone": "brand",
             "symbol": row["symbol"],
             "pair_title": "费率组合",
@@ -308,7 +308,7 @@ def strategy_context() -> dict:
         "rule_rows": [
             {
                 "name": "主力资金费规则",
-                "type": "资金费套利",
+                "type": "资费套利",
                 "scope": "Binance / OKX / Bybit",
                 "status": "运行中",
                 "pnl": "+$8,240",
@@ -326,7 +326,7 @@ def strategy_context() -> dict:
             },
             {
                 "name": "夜间资金费规则",
-                "type": "资金费套利",
+                "type": "资费套利",
                 "scope": "00:00 - 08:00 自动执行",
                 "status": "异常",
                 "pnl": "-$120",
@@ -344,7 +344,7 @@ def strategy_context() -> dict:
             },
             {
                 "name": "保守资金费规则",
-                "type": "资金费套利",
+                "type": "资费套利",
                 "scope": "低杠杆 / 高流动性",
                 "status": "暂停",
                 "pnl": "+$1,260",
@@ -606,6 +606,14 @@ def accounts_context(user_id: Optional[int] = None) -> dict:
         "address_rows": address_rows,
         "account_rows": account_rows,
     }
+
+
+def transfer_records_context_for_user(user_id: Optional[int] = None) -> dict:
+    if user_id is not None:
+        return {
+            "transfer_rows": account_service.build_transfer_rows_for_user(user_id),
+        }
+    return transfer_records_context()
 
 
 def risk_context() -> dict:

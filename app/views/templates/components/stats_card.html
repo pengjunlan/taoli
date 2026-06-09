@@ -1,5 +1,5 @@
-<article class="stats-card stats-card--{{ card.tone | default('neutral') }}">
-    <div class="stats-card__label">{{ card.label }}</div>
-    <div class="stats-card__value">{{ card.value }}</div>
-    <div class="stats-card__change">{{ card.change }}</div>
+<article class="stats-card stats-card--{{ card.tone | default('neutral') }}" {% if card.key %}data-summary-card="{{ card.key }}"{% endif %}>
+    <div class="stats-card__label" data-summary-label>{{ card.label }}</div>
+    <div class="stats-card__value" data-summary-value>{{ card.value }}</div>
+    <div class="stats-card__change" data-summary-change>{{ card.change }}</div>
 </article>

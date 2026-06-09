@@ -28,7 +28,150 @@
 
 .page-accounts .balance-table thead th:nth-child(7),
 .page-accounts .balance-table tbody td:nth-child(7) {
-    min-width: 220px;
+    min-width: 120px;
+}
+
+.page-accounts .balance-table {
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
+}
+
+.page-accounts .balance-table thead th:nth-child(1),
+.page-accounts .balance-table tbody td:nth-child(1) {
+    width: 16%;
+}
+
+.page-accounts .balance-table thead th:nth-child(2),
+.page-accounts .balance-table tbody td:nth-child(2) {
+    width: 7%;
+}
+
+.page-accounts .balance-table thead th:nth-child(3),
+.page-accounts .balance-table tbody td:nth-child(3),
+.page-accounts .balance-table thead th:nth-child(4),
+.page-accounts .balance-table tbody td:nth-child(4),
+.page-accounts .balance-table thead th:nth-child(5),
+.page-accounts .balance-table tbody td:nth-child(5) {
+    width: 8%;
+}
+
+.page-accounts .balance-table thead th:nth-child(6),
+.page-accounts .balance-table tbody td:nth-child(6),
+.page-accounts .balance-table thead th:nth-child(7),
+.page-accounts .balance-table tbody td:nth-child(7) {
+    width: 8%;
+}
+
+.page-accounts .balance-table thead th:nth-child(8),
+.page-accounts .balance-table tbody td:nth-child(8) {
+    width: 8%;
+}
+
+.page-accounts .balance-table thead th:nth-child(9),
+.page-accounts .balance-table tbody td:nth-child(9) {
+    width: 8%;
+}
+
+.page-accounts .balance-table thead th:nth-child(10),
+.page-accounts .balance-table tbody td:nth-child(10) {
+    width: 7%;
+}
+
+.page-accounts .balance-table thead th:nth-child(11),
+.page-accounts .balance-table tbody td:nth-child(11) {
+    width: 14%;
+}
+
+.page-accounts .balance-table tbody td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.page-accounts .balance-table .account-actions {
+    justify-content: flex-start;
+    gap: 8px;
+    flex-wrap: nowrap;
+    min-width: 0;
+}
+
+.page-accounts .balance-table .account-actions .table-action {
+    min-height: 32px;
+    padding: 0 9px;
+    font-size: 0.88rem;
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+
+.page-accounts .balance-config-dialog {
+    width: min(420px, calc(100vw - 32px));
+}
+
+.page-accounts .transfer-dialog {
+    width: min(460px, calc(100vw - 32px));
+}
+
+.page-accounts .transfer-dialog .field__control[readonly] {
+    background: #f5f7fb;
+    color: #64748b;
+    cursor: not-allowed;
+}
+
+.page-accounts .transfer-preview {
+    display: grid;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid rgba(217, 225, 236, 0.92);
+    border-radius: 18px;
+    background: linear-gradient(180deg, #f8fbff, #fdfefe);
+}
+
+.page-accounts .transfer-preview__head {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #1f2a44;
+}
+
+.page-accounts .transfer-preview__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.page-accounts .transfer-preview__card {
+    display: grid;
+    gap: 8px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: #ffffff;
+    border: 1px solid rgba(226, 232, 240, 0.95);
+}
+
+.page-accounts .transfer-preview__title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #334155;
+}
+
+.page-accounts .transfer-preview__row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.9rem;
+    color: #64748b;
+}
+
+.page-accounts .transfer-preview__row strong {
+    color: #0f172a;
+    font-weight: 700;
+}
+
+.page-accounts .transfer-preview__hint {
+    font-size: 0.88rem;
+    color: #2563eb;
+    font-weight: 600;
 }
 
 .page-accounts .transfer-table thead th:nth-child(2),
@@ -61,27 +204,82 @@
 }
 
 .page-accounts .account-table {
-    min-width: 1240px;
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
+}
+
+.page-accounts .account-table thead th:nth-child(1),
+.page-accounts .account-table tbody td:nth-child(1) {
+    width: 16%;
+}
+
+.page-accounts .account-table thead th:nth-child(2),
+.page-accounts .account-table tbody td:nth-child(2) {
+    width: 8%;
 }
 
 .page-accounts .account-table thead th:nth-child(3),
 .page-accounts .account-table tbody td:nth-child(3),
 .page-accounts .account-table thead th:nth-child(4),
 .page-accounts .account-table tbody td:nth-child(4) {
-    min-width: 150px;
+    width: 12%;
+}
+
+.page-accounts .account-table thead th:nth-child(5),
+.page-accounts .account-table tbody td:nth-child(5) {
+    width: 9%;
+}
+
+.page-accounts .account-table thead th:nth-child(6),
+.page-accounts .account-table tbody td:nth-child(6),
+.page-accounts .account-table thead th:nth-child(7),
+.page-accounts .account-table tbody td:nth-child(7) {
+    width: 8%;
 }
 
 .page-accounts .account-table thead th:nth-child(8),
 .page-accounts .account-table tbody td:nth-child(8) {
-    width: 180px;
+    width: 11%;
+}
+
+.page-accounts .account-table thead th:nth-child(9),
+.page-accounts .account-table tbody td:nth-child(9) {
+    width: 18%;
 }
 
 .page-accounts .account-actions {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     justify-content: flex-start;
     align-items: center;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+}
+
+.page-accounts .account-actions .table-action {
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 0.9rem;
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.page-accounts .account-table tbody td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.page-accounts .account-table .spread-symbol,
+.page-accounts .account-table .account-actions {
+    min-width: 0;
+}
+
+.page-accounts .account-table .spread-symbol strong,
+.page-accounts .account-table .spread-symbol__hint {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .page-accounts .account-tabs-shell {
@@ -150,7 +348,60 @@
 }
 
 .page-accounts .table-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     justify-content: flex-start;
+}
+
+.page-accounts .auto-transfer-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 32px;
+    padding: 0 4px;
+    border: none;
+    background: transparent;
+    color: #64748b;
+}
+
+.page-accounts .auto-transfer-toggle__track {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    width: 46px;
+    height: 24px;
+    padding: 2px;
+    border-radius: 999px;
+    background: #dbe4f0;
+    transition: background 0.18s ease;
+}
+
+.page-accounts .auto-transfer-toggle__thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    background: #ffffff;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
+    transition: transform 0.18s ease;
+}
+
+.page-accounts .auto-transfer-toggle__label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.page-accounts .auto-transfer-toggle.is-enabled {
+    color: #2563eb;
+}
+
+.page-accounts .auto-transfer-toggle.is-enabled .auto-transfer-toggle__track {
+    background: #3b82f6;
+}
+
+.page-accounts .auto-transfer-toggle.is-enabled .auto-transfer-toggle__thumb {
+    transform: translateX(22px);
 }
 
 .page-accounts .account-confirm[hidden] {
@@ -285,7 +536,7 @@
 .page-accounts .account-form__section {
     display: grid;
     gap: 18px;
-    padding: 0 24px;
+    padding: 0;
     margin-top: 4px;
 }
 
@@ -358,12 +609,11 @@
         border-radius: 20px;
     }
 
-    .page-accounts .account-form__section {
-        padding-left: 24px;
-        padding-right: 24px;
+    .page-accounts .account-form__grid {
+        grid-template-columns: 1fr;
     }
 
-    .page-accounts .account-form__grid {
+    .page-accounts .transfer-preview__grid {
         grid-template-columns: 1fr;
     }
 }

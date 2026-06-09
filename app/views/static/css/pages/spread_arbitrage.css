@@ -7,27 +7,58 @@
 }
 
 .page-spread_arbitrage .data-table {
-    min-width: 980px;
+    width: 100%;
+    min-width: 0;
+    table-layout: auto;
 }
 
 .page-spread_arbitrage .data-table thead th:nth-child(1),
 .page-spread_arbitrage .data-table tbody td:nth-child(1) {
-    width: 70px;
+    width: 5%;
 }
 
 .page-spread_arbitrage .data-table thead th:nth-child(2),
 .page-spread_arbitrage .data-table tbody td:nth-child(2) {
-    width: 110px;
+    width: 8%;
 }
 
 .page-spread_arbitrage .data-table thead th:nth-child(3),
 .page-spread_arbitrage .data-table tbody td:nth-child(3) {
-    min-width: 260px;
+    width: 9%;
+}
+
+.page-spread_arbitrage .data-table thead th:nth-child(4),
+.page-spread_arbitrage .data-table tbody td:nth-child(4) {
+    width: 20%;
+}
+
+.page-spread_arbitrage .data-table thead th:nth-child(5),
+.page-spread_arbitrage .data-table tbody td:nth-child(5),
+.page-spread_arbitrage .data-table thead th:nth-child(6),
+.page-spread_arbitrage .data-table tbody td:nth-child(6),
+.page-spread_arbitrage .data-table thead th:nth-child(7),
+.page-spread_arbitrage .data-table tbody td:nth-child(7) {
+    width: 7%;
+}
+
+.page-spread_arbitrage .data-table thead th:nth-child(8),
+.page-spread_arbitrage .data-table tbody td:nth-child(8),
+.page-spread_arbitrage .data-table thead th:nth-child(9),
+.page-spread_arbitrage .data-table tbody td:nth-child(9),
+.page-spread_arbitrage .data-table thead th:nth-child(10),
+.page-spread_arbitrage .data-table tbody td:nth-child(10) {
+    width: 9%;
+}
+
+.page-spread_arbitrage .data-table thead th:nth-child(11),
+.page-spread_arbitrage .data-table tbody td:nth-child(11) {
+    width: 8%;
 }
 
 .page-spread_arbitrage .data-table tbody td {
     padding-top: 20px;
     padding-bottom: 20px;
+    vertical-align: middle;
 }
 
 .page-spread_arbitrage .data-table tbody tr:hover {
@@ -35,11 +66,21 @@
 }
 
 .page-spread_arbitrage .pair-cell--spread {
+    display: grid;
     gap: 6px;
+    min-width: 0;
 }
 
 .page-spread_arbitrage .pair-cell--spread .pair-cell__line {
     font-size: 0.95rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.page-spread_arbitrage .data-table thead th,
+.page-spread_arbitrage .data-table tbody td {
+    box-sizing: border-box;
 }
 
 .page-spread_arbitrage .spread-rank {
@@ -120,6 +161,6 @@
     }
 
     .page-spread_arbitrage .data-table {
-        min-width: 920px;
+        min-width: 980px;
     }
 }

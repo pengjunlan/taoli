@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
+from app.application.services.account_monitor_service import account_monitor_service
 from app.controller.api_controller import router as api_router
 from app.controller.page_controller import router as page_router
 from app.infrastructure.cache import redis_session_cache
@@ -32,3 +33,4 @@ app.include_router(page_router)
 async def startup_event() -> None:
     mysql_manager.initialize()
     redis_session_cache.initialize()
+    account_monitor_service.start()

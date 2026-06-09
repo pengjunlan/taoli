@@ -13,6 +13,11 @@ from app.shared.exceptions.auth_exceptions import (
     SessionExpiredError,
     UserAlreadyExistsError,
 )
+from app.shared.exceptions.exchange_exceptions import (
+    ExchangeConnectionError,
+    ExchangeError,
+    ExchangeValidationError,
+)
 
 __all__ = [
     "AccountError",
@@ -22,6 +27,9 @@ __all__ = [
     "AuthError",
     "AuthenticationFailedError",
     "AuthValidationError",
+    "ExchangeConnectionError",
+    "ExchangeError",
+    "ExchangeValidationError",
     "SessionExpiredError",
     "UserAlreadyExistsError",
 ]

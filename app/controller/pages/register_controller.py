@@ -13,7 +13,7 @@ PAGE = PageConfig(
     template_name="pages/register.html",
     title="注册账号",
     subtitle="填写账号信息完成注册。",
-    css_name="login.css",
+    css_name="register.css",
     js_name="register.js",
     show_shell=False,
 )
