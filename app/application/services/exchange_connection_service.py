@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict
 
 import ccxt
@@ -18,6 +19,8 @@ EXCHANGE_IDS = {
     "htx": "htx",
 }
 
+logger = logging.getLogger(__name__)
+
 
 class ExchangeConnectionService:
     """Calls a private exchange API to validate whether submitted credentials work."""
@@ -30,13 +33,39 @@ class ExchangeConnectionService:
         try:
             exchange.fetch_balance()
         except (ccxt.AuthenticationError, ccxt.PermissionDenied) as exc:
-            raise ExchangeConnectionError("连接失败，请检查 API Key、Secret、Passphrase 或接口权限。") from exc
+            logger.warning(
+                "Exchange connection auth failed: exchange=%s market_type=%s detail=%s",
+                normalized["exchange_code"],
+                normalized["market_type"],
+                exc,
+            )
+            raise ExchangeConnectionError(self._build_connection_error_message(exc)) from exc
         except ccxt.NetworkError as exc:
-            raise ExchangeConnectionError("连接失败，交易所接口暂时不可用或网络异常。") from exc
+            logger.warning(
+                "Exchange connection network failed: exchange=%s market_type=%s detail=%s",
+                normalized["exchange_code"],
+                normalized["market_type"],
+                exc,
+            )
+            raise ExchangeConnectionError(self._build_network_error_message(exc)) from exc
         except ccxt.ExchangeError as exc:
-            raise ExchangeConnectionError(self._map_exchange_error(str(exc))) from exc
+            logger.warning(
+                "Exchange connection exchange error: exchange=%s market_type=%s detail=%s",
+                normalized["exchange_code"],
+                normalized["market_type"],
+                exc,
+            )
+            raise ExchangeConnectionError(self._build_connection_error_message(exc)) from exc
         except Exception as exc:
-            raise ExchangeConnectionError("连接失败，请稍后重试。") from exc
+            logger.exception(
+                "Exchange connection unexpected error: exchange=%s market_type=%s",
+                normalized["exchange_code"],
+                normalized["market_type"],
+            )
+            raise ExchangeConnectionError(
+                "连接测试失败：交易所返回了未预期的异常。\n"
+                f"原始原因：{self._truncate_message(str(exc))}"
+            ) from exc
         finally:
             try:
                 exchange.close()
@@ -52,13 +81,42 @@ class ExchangeConnectionService:
             balance = exchange.fetch_balance()
             return float(self._extract_available_balance(balance, normalized["market_type"]))
         except (ccxt.AuthenticationError, ccxt.PermissionDenied) as exc:
-            raise ExchangeConnectionError("读取余额失败，请检查 API Key、Secret、Passphrase 或接口权限。") from exc
+            logger.warning(
+                "Fetch balance auth failed: exchange=%s market_type=%s detail=%s",
+                normalized["exchange_code"],
+                normalized["market_type"],
+                exc,
+            )
+            raise ExchangeConnectionError(self._build_balance_error_message(exc)) from exc
         except ccxt.NetworkError as exc:
-            raise ExchangeConnectionError("读取余额失败，交易所接口暂时不可用或网络异常。") from exc
+            logger.warning(
+                "Fetch balance network failed: exchange=%s market_type=%s detail=%s",
+                normalized["exchange_code"],
+                normalized["market_type"],
+                exc,
+            )
+            raise ExchangeConnectionError(
+                "读取余额失败：交易所接口暂时不可用，或服务器到交易所的网络异常。\n"
+                f"原始原因：{self._truncate_message(str(exc))}"
+            ) from exc
         except ccxt.ExchangeError as exc:
-            raise ExchangeConnectionError(self._map_exchange_error(str(exc)).replace("连接失败", "读取余额失败")) from exc
+            logger.warning(
+                "Fetch balance exchange error: exchange=%s market_type=%s detail=%s",
+                normalized["exchange_code"],
+                normalized["market_type"],
+                exc,
+            )
+            raise ExchangeConnectionError(self._build_balance_error_message(exc)) from exc
         except Exception as exc:
-            raise ExchangeConnectionError("读取余额失败，请稍后重试。") from exc
+            logger.exception(
+                "Fetch balance unexpected error: exchange=%s market_type=%s",
+                normalized["exchange_code"],
+                normalized["market_type"],
+            )
+            raise ExchangeConnectionError(
+                "读取余额失败：交易所返回了未预期的异常。\n"
+                f"原始原因：{self._truncate_message(str(exc))}"
+            ) from exc
         finally:
             try:
                 exchange.close()
@@ -87,7 +145,8 @@ class ExchangeConnectionService:
             raise ExchangeValidationError("OKX 需要填写 API Passphrase。")
 
     def _build_exchange(self, payload: Dict[str, str]) -> Any:
-        exchange_class = getattr(ccxt, EXCHANGE_IDS[payload["exchange_code"]])
+        exchange_class_name = self._resolve_exchange_class_name(payload["exchange_code"], payload["market_type"])
+        exchange_class = getattr(ccxt, exchange_class_name)
         options: Dict[str, Any] = {
             "apiKey": payload["api_key"],
             "secret": payload["api_secret"],
@@ -100,7 +159,17 @@ class ExchangeConnectionService:
         if payload["api_passphrase"]:
             options["password"] = payload["api_passphrase"]
 
-        return exchange_class(options)
+        exchange = exchange_class(options)
+        try:
+            exchange.session.trust_env = False
+        except Exception:
+            pass
+        return exchange
+
+    def _resolve_exchange_class_name(self, exchange_code: str, market_type: str) -> str:
+        if exchange_code == "binance" and market_type == "swap":
+            return "binanceusdm"
+        return EXCHANGE_IDS[exchange_code]
 
     def _extract_available_balance(self, balance: Any, market_type: str) -> float:
         if not isinstance(balance, dict):
@@ -146,13 +215,66 @@ class ExchangeConnectionService:
 
         return 0.0
 
-    def _map_exchange_error(self, message: str) -> str:
+    def _build_connection_error_message(self, error: Exception) -> str:
+        return self._map_exchange_error(str(error), prefix="连接测试失败")
+
+    def _build_balance_error_message(self, error: Exception) -> str:
+        return self._map_exchange_error(str(error), prefix="读取余额失败")
+
+    def _build_network_error_message(self, error: Exception) -> str:
+        return (
+            "连接测试失败：交易所接口暂时不可用，或服务器到交易所的网络异常。\n"
+            f"原始原因：{self._truncate_message(str(error))}"
+        )
+
+    def _map_exchange_error(self, message: str, *, prefix: str) -> str:
         lowered = message.lower()
-        if "api-key" in lowered or "api key" in lowered or "signature" in lowered or "passphrase" in lowered:
-            return "连接失败，请检查 API Key、Secret 或 Passphrase。"
+        raw_message = self._truncate_message(message)
+
+        if "signature for this request is not valid" in lowered or "code\":-1022" in lowered or "signature" in lowered:
+            return (
+                f"{prefix}：Binance 返回签名无效（code -1022）。\n"
+                "请重点检查 API Secret 是否填写正确，并确认 API Key 和 Secret 是同一套。\n"
+                f"原始原因：{raw_message}"
+            )
+        if "invalid api-key" in lowered or "invalid api key" in lowered or "api-key format invalid" in lowered:
+            return (
+                f"{prefix}：API Key 无效、已被禁用，或填错了账号。\n"
+                f"原始原因：{raw_message}"
+            )
+        if "passphrase" in lowered:
+            return (
+                f"{prefix}：Passphrase 不正确或缺失。\n"
+                f"原始原因：{raw_message}"
+            )
         if "permission" in lowered or "forbidden" in lowered:
-            return "连接失败，当前 API 权限不足。"
-        return "连接失败，请检查密钥配置是否正确。"
+            return (
+                f"{prefix}：API 权限不足。\n"
+                "请检查是否开启了读取资产/合约权限，并确认该 Key 是否允许当前操作。\n"
+                f"原始原因：{raw_message}"
+            )
+        if ("ip" in lowered and "whitelist" in lowered) or "restricted ip" in lowered:
+            return (
+                f"{prefix}：当前服务器 IP 不在交易所 API 白名单内。\n"
+                "请把服务器 IP 加到该 API 的白名单后再试。\n"
+                f"原始原因：{raw_message}"
+            )
+        if "timestamp" in lowered or "recvwindow" in lowered or "\"code\":-1021" in lowered:
+            return (
+                f"{prefix}：交易所时间校验失败。\n"
+                "请检查服务器时间是否准确，或适当放宽交易所 API 的时间窗口设置。\n"
+                f"原始原因：{raw_message}"
+            )
+        return (
+            f"{prefix}：请检查密钥配置是否正确。\n"
+            f"原始原因：{raw_message}"
+        )
+
+    def _truncate_message(self, message: str, max_length: int = 220) -> str:
+        text = " ".join(str(message or "").split())
+        if len(text) <= max_length:
+            return text
+        return f"{text[: max_length - 3]}..."
 
 
 exchange_connection_service = ExchangeConnectionService()

@@ -415,8 +415,6 @@ class OpportunityRuntimeService:
                 pass
 
     def _build_public_exchange(self, *, exchange_code: str, market_type: str):
-        config_map = system_exchange_config_service.get_config_map()
-        exchange_config = config_map.get(exchange_code, {})
         exchange_class = getattr(ccxt, exchange_code)
         params = {
             "enableRateLimit": True,
@@ -425,12 +423,6 @@ class OpportunityRuntimeService:
                 "defaultType": market_type,
             },
         }
-        if exchange_config and not bool(exchange_config.get("use_public_api")):
-            params["apiKey"] = str(exchange_config.get("api_key") or "")
-            params["secret"] = str(exchange_config.get("api_secret") or "")
-            passphrase = str(exchange_config.get("api_passphrase") or "")
-            if passphrase:
-                params["password"] = passphrase
         exchange = exchange_class(params)
         try:
             exchange.session.trust_env = False
