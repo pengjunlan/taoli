@@ -1,6 +1,13 @@
 """Domain entities."""
 
-from app.domain.entities.account_models import AccountAddress, AutoTransferConfig, ExchangeAccount, TransferRecord
+from app.domain.entities.account_models import (
+    AccountAddress,
+    AutoTransferConfig,
+    ExchangeAccount,
+    StrategyRule,
+    SystemExchangeConfig,
+    TransferRecord,
+)
 from app.domain.entities.auth_models import AuthSession, AuthUser
 
 __all__ = [
@@ -9,5 +16,7 @@ __all__ = [
     "AuthSession",
     "AuthUser",
     "ExchangeAccount",
+    "StrategyRule",
+    "SystemExchangeConfig",
     "TransferRecord",
 ]

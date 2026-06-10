@@ -10,6 +10,8 @@ __pycache__/
 Thumbs.db
 Desktop.ini
 *.log
+app/log/
+.deploy/
 .env
 .env.local
 .tools/

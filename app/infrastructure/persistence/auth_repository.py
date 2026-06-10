@@ -32,7 +32,7 @@ class MySQLAuthRepository:
 
             cursor.execute(
                 """
-                SELECT id, username, password_hash, is_active, created_at, updated_at, last_login_at
+                SELECT id, username, password_hash, is_active, is_admin, created_at, updated_at, last_login_at
                 FROM users
                 WHERE id = %s
                 """,
@@ -47,7 +47,7 @@ class MySQLAuthRepository:
             cursor = connection.cursor(dictionary=True)
             cursor.execute(
                 """
-                SELECT id, username, password_hash, is_active, created_at, updated_at, last_login_at
+                SELECT id, username, password_hash, is_active, is_admin, created_at, updated_at, last_login_at
                 FROM users
                 WHERE username = %s
                 LIMIT 1
@@ -62,7 +62,7 @@ class MySQLAuthRepository:
             cursor = connection.cursor(dictionary=True)
             cursor.execute(
                 """
-                SELECT id, username, password_hash, is_active, created_at, updated_at, last_login_at
+                SELECT id, username, password_hash, is_active, is_admin, created_at, updated_at, last_login_at
                 FROM users
                 WHERE id = %s
                 LIMIT 1
@@ -123,6 +123,7 @@ class MySQLAuthRepository:
                     u.username,
                     u.password_hash,
                     u.is_active,
+                    u.is_admin,
                     u.created_at AS user_created_at,
                     u.updated_at AS user_updated_at,
                     u.last_login_at
@@ -199,6 +200,7 @@ class MySQLAuthRepository:
             username=str(row["username"]),
             password_hash=str(row["password_hash"]),
             is_active=bool(row["is_active"]),
+            is_admin=bool(row.get("is_admin")),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             last_login_at=row.get("last_login_at"),
@@ -210,6 +212,7 @@ class MySQLAuthRepository:
             username=str(row["username"]),
             password_hash=str(row["password_hash"]),
             is_active=bool(row["is_active"]),
+            is_admin=bool(row.get("is_admin")),
             created_at=row["user_created_at"],
             updated_at=row["user_updated_at"],
             last_login_at=row.get("last_login_at"),

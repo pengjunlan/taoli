@@ -1,7 +1,7 @@
 {% extends 'base/layout.html' %}
 
 {% block content %}
-<div class="shell-container page-stack">
+<div class="shell-container page-stack strategy-page">
     <section class="page-header">
         <div>
             <div class="eyebrow">Strategies</div>
@@ -16,54 +16,137 @@
         {% endfor %}
     </section>
 
-    <section class="card card--section">
-        <div class="card__header card__header--row">
+    <section class="card card--section strategy-section">
+        <div class="card__header card__header--row strategy-section__header">
             <div>
-                <h2>规则组列表</h2>
-                <p>这里管理的是自动执行规则，不是单个交易对的手工策略任务。</p>
+                <h2>规则列表</h2>
+                <p>这里配置的是会真实参与自动执行的策略规则。资金费套利按年化阈值触发，价差套利按价差率触发，并统一控制最大开仓交易对数、单笔下单金额、最大持仓和下单间隔。</p>
             </div>
             <div class="section-tools">
-                <div class="inline-note">共 {{ rule_rows|length }} 条规则</div>
+                <div class="inline-note" data-rule-count>加载中...</div>
+                <button class="table-action" type="button" data-rule-create>新增规则</button>
             </div>
         </div>
 
         <div class="table-wrap">
-            <table class="data-table" data-pagination-items="tbody tr" data-page-size="5">
+            <table class="data-table strategy-table" data-pagination-items="tbody tr" data-page-size="6">
                 <thead>
                     <tr>
-                        <th>规则组名称</th>
+                        <th>规则名称</th>
                         <th>类型</th>
-                        <th>覆盖范围</th>
+                        <th>触发条件</th>
+                        <th>最大价差阈值</th>
+                        <th>最大开仓交易对数</th>
+                        <th>单笔下单金额</th>
+                        <th>最大持仓</th>
+                        <th>下单间隔</th>
                         <th>状态</th>
-                        <th>累计收益</th>
-                        <th>当前敞口</th>
-                        <th>执行说明</th>
+                        <th>更新时间</th>
+                        <th>操作</th>
                     </tr>
                 </thead>
-                <tbody>
-                    {% for row in rule_rows %}
-                    <tr>
-                        <td>
-                            <div class="spread-symbol">
-                                <strong>{{ row.name }}</strong>
-                                <span class="spread-symbol__hint">{{ row.type }}</span>
-                            </div>
-                        </td>
-                        <td>{{ row.type }}</td>
-                        <td>{{ row.scope }}</td>
-                        <td>
-                            <span class="pill pill--{{ 'positive' if row.status == '运行中' else 'warning' if row.status == '暂停' else 'negative' }}">
-                                {{ row.status }}
-                            </span>
-                        </td>
-                        <td class="spread-value {{ 'is-positive' if '+' in row.pnl else 'is-negative' }}">{{ row.pnl }}</td>
-                        <td class="spread-metric">{{ row.exposure }}</td>
-                        <td>{{ row.execution }}</td>
+                <tbody data-strategy-table-body>
+                    <tr class="table-empty-row">
+                        <td colspan="11" class="spread-metric">加载中...</td>
                     </tr>
-                    {% endfor %}
                 </tbody>
             </table>
         </div>
     </section>
+</div>
+
+<div class="account-modal strategy-modal" data-strategy-modal hidden>
+    <div class="account-modal__mask" data-strategy-modal-close></div>
+    <div class="account-modal__dialog card strategy-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="strategy-modal-title">
+        <div class="account-modal__header">
+            <div>
+                <div class="eyebrow">Rule Config</div>
+                <h2 id="strategy-modal-title">新增规则</h2>
+                <p>按当前业务配置真实策略规则，达到设定阈值后才允许继续自动开仓。</p>
+            </div>
+            <button class="account-modal__close" type="button" aria-label="关闭规则弹窗" data-strategy-modal-close>×</button>
+        </div>
+
+        <form class="form-stack strategy-form" data-strategy-form data-mode="create">
+            <input type="hidden" name="rule_id" value="">
+
+            <div class="strategy-form__grid">
+                <label class="field field--full">
+                    <span class="field__label">规则名称</span>
+                    <input class="field__control" type="text" name="name" maxlength="128" placeholder="请输入规则名称">
+                </label>
+
+                <label class="field">
+                    <span class="field__label">规则类型</span>
+                    <select class="field__control" name="strategy_type" data-strategy-type>
+                        <option value="funding">资金费套利</option>
+                        <option value="spread">价差套利</option>
+                    </select>
+                </label>
+
+                <label class="field" data-field-annualized>
+                    <span class="field__label">资金费年化阈值 (%)</span>
+                    <input class="field__control" type="number" name="annualized_rate_threshold" min="0" step="0.01" value="0" placeholder="例如 12">
+                </label>
+
+                <label class="field is-hidden" data-field-spread>
+                    <span class="field__label">价差率阈值 (%)</span>
+                    <input class="field__control" type="number" name="spread_rate_threshold" min="0" step="0.01" value="0" placeholder="例如 0.3" disabled>
+                </label>
+
+                <label class="field">
+                    <span class="field__label">最大价差阈值 (%)</span>
+                    <input class="field__control" type="number" name="max_spread_rate_threshold" min="0" step="0.01" value="0" placeholder="例如 1.5">
+                </label>
+
+                <label class="field">
+                    <span class="field__label">最大开仓交易对数</span>
+                    <input class="field__control" type="number" name="max_pairs" min="1" step="1" value="1" placeholder="例如 5">
+                </label>
+
+                <label class="field">
+                    <span class="field__label">单笔下单金额 (U)</span>
+                    <input class="field__control" type="number" name="order_amount_usdt" min="0" step="0.01" value="0" placeholder="例如 1000">
+                </label>
+
+                <label class="field">
+                    <span class="field__label">最大持仓 (U)</span>
+                    <input class="field__control" type="number" name="max_position_usdt" min="0" step="0.01" value="0" placeholder="例如 5000">
+                </label>
+
+                <label class="field">
+                    <span class="field__label">下单间隔时间 (秒)</span>
+                    <input class="field__control" type="number" name="order_interval_seconds" min="0" step="1" value="0" placeholder="例如 30">
+                </label>
+
+                <label class="field field--checkbox">
+                    <span class="field__label">规则状态</span>
+                    <label class="checkbox-row">
+                        <input type="checkbox" name="is_enabled" checked>
+                        <span>启用该规则</span>
+                    </label>
+                </label>
+            </div>
+
+            <div class="form-actions">
+                <button class="button button--ghost" type="button" data-strategy-modal-close>取消</button>
+                <button class="button button--primary" type="submit">保存规则</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="account-confirm" data-strategy-confirm hidden>
+    <div class="account-confirm__mask" data-strategy-confirm-cancel></div>
+    <div class="account-confirm__dialog card" role="dialog" aria-modal="true" aria-labelledby="strategy-confirm-title">
+        <div class="account-confirm__content">
+            <h2 id="strategy-confirm-title">确认删除规则</h2>
+            <p data-strategy-confirm-message>确定删除这条规则吗？删除后不可恢复。</p>
+        </div>
+        <div class="account-confirm__actions">
+            <button class="button button--ghost" type="button" data-strategy-confirm-cancel>取消</button>
+            <button class="button button--primary" type="button" data-strategy-confirm-accept>确定</button>
+        </div>
+    </div>
 </div>
 {% endblock %}

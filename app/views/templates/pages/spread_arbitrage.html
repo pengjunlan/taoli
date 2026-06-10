@@ -17,7 +17,7 @@
                 <p>这里展示的是监控引擎筛出的跨所候选机会，真正是否执行由自动策略参数统一控制。</p>
             </div>
             <div class="section-tools">
-                <div class="inline-note">共 {{ rows|length }} 个机会</div>
+                <div class="inline-note" data-spread-count>加载中...</div>
             </div>
         </div>
 
@@ -31,88 +31,23 @@
                         <th>套利组合</th>
                         <th>收益指标</th>
                         <th>核心指标</th>
-                        <th>补充指标</th>
+                        <th>交易手续费</th>
                         <th>持仓数量</th>
                         <th>持仓均价</th>
                         <th>持仓市值</th>
                         <th>关键字段</th>
                     </tr>
                 </thead>
-                <tbody>
-                    {% if rows %}
-                    {% for row in rows %}
-                    <tr>
-                        <td class="spread-rank">{{ row.rank }}</td>
-                        <td>
-                            <span class="pill pill--positive">价差套利</span>
-                        </td>
-                        <td>
-                            <div class="spread-symbol">
-                                <strong>{{ row.symbol }}</strong>
-                                <span class="spread-symbol__hint">{{ row.symbol }}/USDT</span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="pair-cell pair-cell--spread">
-                                <span class="pair-cell__line is-positive">买入 {{ row.symbol }}/USDT · {{ row.buy_exchange }}</span>
-                                <span class="pair-cell__line is-negative">卖出 {{ row.symbol }}/USDT · {{ row.sell_exchange }}</span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="spread-symbol">
-                                <strong class="spread-value">{{ row.latest_spread }}</strong>
-                                <span class="spread-symbol__hint">最新价差</span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="spread-symbol">
-                                <strong class="{{ 'is-positive' if '+' in row.net_spread else 'is-negative' }} spread-value">{{ row.net_spread }}</strong>
-                                <span class="spread-symbol__hint">净价差</span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="spread-symbol">
-                                <strong class="spread-fee">{{ row.fees }}</strong>
-                                <span class="spread-symbol__hint">手续费</span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="pair-cell pair-cell--hedge">
-                                <span class="pair-cell__line pair-cell__line--hedge is-positive">{{ row.qty_long }}</span>
-                                <span class="pair-cell__line pair-cell__line--hedge is-negative">{{ row.qty_short }}</span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="pair-cell pair-cell--hedge">
-                                <span class="pair-cell__line pair-cell__line--hedge is-positive">{{ row.avg_long }}</span>
-                                <span class="pair-cell__line pair-cell__line--hedge is-negative">{{ row.avg_short }}</span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="pair-cell pair-cell--hedge">
-                                <span class="pair-cell__line pair-cell__line--hedge is-positive spread-metric--strong">{{ row.value_long }}</span>
-                                <span class="pair-cell__line pair-cell__line--hedge is-negative spread-metric--strong">{{ row.value_short }}</span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="spread-symbol">
-                                <strong class="spread-metric spread-metric--strong">{{ row.position_size }}</strong>
-                                <span class="spread-symbol__hint">建议仓位</span>
-                            </div>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                    {% else %}
+                <tbody data-spread-table-body>
                     <tr class="table-empty-row">
-                        <td colspan="10">
+                        <td colspan="11">
                             <div class="table-empty-state">
                                 <div class="table-empty-state__icon" aria-hidden="true"></div>
-                                <div class="table-empty-state__title">暂无可用价差机会</div>
-                                <p class="table-empty-state__text">请调整筛选条件，或等待新的机会出现。</p>
+                                <div class="table-empty-state__title">加载中...</div>
+                                <p class="table-empty-state__text">正在获取最新价差机会数据。</p>
                             </div>
                         </td>
                     </tr>
-                    {% endif %}
                 </tbody>
             </table>
         </div>

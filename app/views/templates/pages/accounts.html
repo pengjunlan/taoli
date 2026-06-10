@@ -307,12 +307,40 @@
 
                 <label class="field field--full">
                     <span class="field__label">API Secret（必填）</span>
-                    <input class="field__control" type="password" name="api_secret" placeholder="请输入交易所 API Secret" maxlength="255">
+                    <div class="password-field">
+                        <input class="field__control password-field__control" type="password" name="api_secret" placeholder="请输入交易所 API Secret" maxlength="255">
+                        <button
+                            class="password-field__toggle"
+                            type="button"
+                            aria-label="查看 API Secret"
+                            aria-pressed="false"
+                            data-password-toggle
+                        >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M2 12s3.6-5 10-5 10 5 10 5-3.6 5-10 5-10-5-10-5Z"></path>
+                                <circle cx="12" cy="12" r="2.6"></circle>
+                            </svg>
+                        </button>
+                    </div>
                 </label>
 
                 <label class="field field--full">
                     <span class="field__label">API Passphrase（选填）</span>
-                    <input class="field__control" type="password" name="api_passphrase" placeholder="部分交易所需要，例如 OKX" maxlength="255">
+                    <div class="password-field">
+                        <input class="field__control password-field__control" type="password" name="api_passphrase" placeholder="部分交易所需要，例如 OKX" maxlength="255">
+                        <button
+                            class="password-field__toggle"
+                            type="button"
+                            aria-label="查看 API Passphrase"
+                            aria-pressed="false"
+                            data-password-toggle
+                        >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M2 12s3.6-5 10-5 10 5 10 5-3.6 5-10 5-10-5-10-5Z"></path>
+                                <circle cx="12" cy="12" r="2.6"></circle>
+                            </svg>
+                        </button>
+                    </div>
                 </label>
             </div>
 

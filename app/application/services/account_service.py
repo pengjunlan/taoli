@@ -416,6 +416,7 @@ class AccountService:
             username="system",
             password_hash="",
             is_active=True,
+            is_admin=True,
             created_at=now,
             updated_at=now,
         )
@@ -449,7 +450,9 @@ class AccountService:
                     "user_id": str(row["user_id"]),
                     "name": account_name,
                     "exchange": exchange_label,
+                    "exchange_code": str(row["exchange_code"]),
                     "market_type": market_label,
+                    "market_type_code": str(row["market_type"]),
                     "api_key": self._mask_secret(api_key, left=4, right=4),
                     "api_secret": self._mask_secret(api_secret, left=3, right=3),
                     "api_passphrase": "已配置" if api_passphrase else "未配置",

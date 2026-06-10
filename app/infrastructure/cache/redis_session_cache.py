@@ -58,6 +58,7 @@ class RedisSessionCache:
                 "username": session.user.username,
                 "password_hash": session.user.password_hash,
                 "is_active": int(session.user.is_active),
+                "is_admin": int(session.user.is_admin),
                 "user_created_at": session.user.created_at.isoformat(),
                 "user_updated_at": session.user.updated_at.isoformat(),
                 "last_login_at": session.user.last_login_at.isoformat()
@@ -95,6 +96,7 @@ class RedisSessionCache:
             username=str(data["username"]),
             password_hash=str(data["password_hash"]),
             is_active=bool(int(data["is_active"])),
+            is_admin=bool(int(data.get("is_admin", 0))),
             created_at=datetime.fromisoformat(str(data["user_created_at"])),
             updated_at=datetime.fromisoformat(str(data["user_updated_at"])),
             last_login_at=datetime.fromisoformat(str(data["last_login_at"]))

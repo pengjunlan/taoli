@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 
 from app.application.services import account_service
 
+
 def dashboard_context() -> dict:
     return {
         "summary_cards": [
@@ -20,13 +21,13 @@ def dashboard_rows() -> List[Dict[str, str]]:
     funding_items = [
         {
             "rank": row["rank"],
-            "type": "资费套利",
+            "type": "资金费套利",
             "type_tone": "brand",
             "symbol": row["symbol"],
             "pair_title": "费率组合",
-            "line_a": f"做多 {row['symbol']}/USDT · {row['long_exchange']}",
+            "line_a": f"做多 {row['symbol']}/USDT / {row['long_exchange']}",
             "line_a_tone": "positive",
-            "line_b": f"做空 {row['symbol']}/USDT · {row['short_exchange']}",
+            "line_b": f"做空 {row['symbol']}/USDT / {row['short_exchange']}",
             "line_b_tone": "negative",
             "yield_label": "当前年化",
             "yield_value": row["annual"],
@@ -54,9 +55,9 @@ def dashboard_rows() -> List[Dict[str, str]]:
             "type_tone": "positive",
             "symbol": row["symbol"],
             "pair_title": "价差组合",
-            "line_a": f"买入 {row['symbol']}/USDT · {row['buy_exchange']}",
+            "line_a": f"买入 {row['symbol']}/USDT / {row['buy_exchange']}",
             "line_a_tone": "positive",
-            "line_b": f"卖出 {row['symbol']}/USDT · {row['sell_exchange']}",
+            "line_b": f"卖出 {row['symbol']}/USDT / {row['sell_exchange']}",
             "line_b_tone": "negative",
             "yield_label": "最新价差",
             "yield_value": row["latest_spread"],
@@ -94,6 +95,8 @@ def funding_rows() -> List[Dict[str, str]]:
             "net_rate": "0.0168%",
             "spread": "+0.08%",
             "depth": "$2.6M",
+            "long_fee_rate": "0.02%",
+            "short_fee_rate": "0.05%",
             "qty_long": "2.30 BTC",
             "qty_short": "2.30 BTC",
             "avg_long": "104,286",
@@ -111,6 +114,8 @@ def funding_rows() -> List[Dict[str, str]]:
             "net_rate": "0.0151%",
             "spread": "-0.04%",
             "depth": "$1.9M",
+            "long_fee_rate": "0.03%",
+            "short_fee_rate": "0.06%",
             "qty_long": "29.10 ETH",
             "qty_short": "29.10 ETH",
             "avg_long": "4,122",
@@ -128,6 +133,8 @@ def funding_rows() -> List[Dict[str, str]]:
             "net_rate": "0.0121%",
             "spread": "+0.01%",
             "depth": "$1.3M",
+            "long_fee_rate": "0.04%",
+            "short_fee_rate": "0.03%",
             "qty_long": "615 SOL",
             "qty_short": "615 SOL",
             "avg_long": "146.34",
@@ -145,6 +152,8 @@ def funding_rows() -> List[Dict[str, str]]:
             "net_rate": "0.0114%",
             "spread": "-0.02%",
             "depth": "$920K",
+            "long_fee_rate": "0.02%",
+            "short_fee_rate": "0.06%",
             "qty_long": "318,000 XRP",
             "qty_short": "318,000 XRP",
             "avg_long": "0.2201",
@@ -162,6 +171,8 @@ def funding_rows() -> List[Dict[str, str]]:
             "net_rate": "0.0102%",
             "spread": "+0.02%",
             "depth": "$780K",
+            "long_fee_rate": "0.05%",
+            "short_fee_rate": "0.04%",
             "qty_long": "255,000 DOGE",
             "qty_short": "255,000 DOGE",
             "avg_long": "0.2157",
@@ -179,6 +190,8 @@ def funding_rows() -> List[Dict[str, str]]:
             "net_rate": "0.0098%",
             "spread": "+0.05%",
             "depth": "$650K",
+            "long_fee_rate": "0.02%",
+            "short_fee_rate": "0.03%",
             "qty_long": "3,200 LINK",
             "qty_short": "3,200 LINK",
             "avg_long": "14.06",
@@ -199,7 +212,8 @@ def spread_rows() -> List[Dict[str, str]]:
             "sell_exchange": "Gate",
             "latest_spread": "+0.42%",
             "net_spread": "+0.31%",
-            "fees": "0.11%",
+            "buy_fee_rate": "0.03%",
+            "sell_fee_rate": "0.08%",
             "depth": "$920K",
             "qty_long": "29.10 ETH",
             "qty_short": "29.10 ETH",
@@ -207,7 +221,7 @@ def spread_rows() -> List[Dict[str, str]]:
             "avg_short": "4,136",
             "value_long": "$120.0K",
             "value_short": "$120.4K",
-            "position_size": "$120K",
+            "opportunity_time": "09:42:18",
         },
         {
             "rank": 2,
@@ -216,7 +230,8 @@ def spread_rows() -> List[Dict[str, str]]:
             "sell_exchange": "Binance",
             "latest_spread": "+0.33%",
             "net_spread": "+0.24%",
-            "fees": "0.09%",
+            "buy_fee_rate": "0.04%",
+            "sell_fee_rate": "0.05%",
             "depth": "$1.8M",
             "qty_long": "2.30 BTC",
             "qty_short": "2.30 BTC",
@@ -224,7 +239,7 @@ def spread_rows() -> List[Dict[str, str]]:
             "avg_short": "104,631",
             "value_long": "$239.9K",
             "value_short": "$240.7K",
-            "position_size": "$240K",
+            "opportunity_time": "09:38:44",
         },
         {
             "rank": 3,
@@ -233,7 +248,8 @@ def spread_rows() -> List[Dict[str, str]]:
             "sell_exchange": "Binance",
             "latest_spread": "+0.29%",
             "net_spread": "+0.18%",
-            "fees": "0.11%",
+            "buy_fee_rate": "0.06%",
+            "sell_fee_rate": "0.05%",
             "depth": "$510K",
             "qty_long": "318,000 XRP",
             "qty_short": "318,000 XRP",
@@ -241,7 +257,7 @@ def spread_rows() -> List[Dict[str, str]]:
             "avg_short": "0.2207",
             "value_long": "$70.0K",
             "value_short": "$70.2K",
-            "position_size": "$70K",
+            "opportunity_time": "09:35:09",
         },
         {
             "rank": 4,
@@ -250,7 +266,8 @@ def spread_rows() -> List[Dict[str, str]]:
             "sell_exchange": "OKX",
             "latest_spread": "+0.24%",
             "net_spread": "+0.15%",
-            "fees": "0.09%",
+            "buy_fee_rate": "0.03%",
+            "sell_fee_rate": "0.04%",
             "depth": "$680K",
             "qty_long": "615 SOL",
             "qty_short": "615 SOL",
@@ -258,7 +275,7 @@ def spread_rows() -> List[Dict[str, str]]:
             "avg_short": "146.70",
             "value_long": "$90.0K",
             "value_short": "$90.2K",
-            "position_size": "$90K",
+            "opportunity_time": "09:31:57",
         },
         {
             "rank": 5,
@@ -267,7 +284,8 @@ def spread_rows() -> List[Dict[str, str]]:
             "sell_exchange": "Gate",
             "latest_spread": "+0.20%",
             "net_spread": "+0.12%",
-            "fees": "0.08%",
+            "buy_fee_rate": "0.04%",
+            "sell_fee_rate": "0.04%",
             "depth": "$470K",
             "qty_long": "255,000 DOGE",
             "qty_short": "255,000 DOGE",
@@ -275,7 +293,7 @@ def spread_rows() -> List[Dict[str, str]]:
             "avg_short": "0.2161",
             "value_long": "$55.0K",
             "value_short": "$55.1K",
-            "position_size": "$55K",
+            "opportunity_time": "09:28:41",
         },
         {
             "rank": 6,
@@ -284,7 +302,8 @@ def spread_rows() -> List[Dict[str, str]]:
             "sell_exchange": "Bybit",
             "latest_spread": "+0.17%",
             "net_spread": "+0.10%",
-            "fees": "0.07%",
+            "buy_fee_rate": "0.02%",
+            "sell_fee_rate": "0.05%",
             "depth": "$360K",
             "qty_long": "3,200 LINK",
             "qty_short": "3,200 LINK",
@@ -292,7 +311,7 @@ def spread_rows() -> List[Dict[str, str]]:
             "avg_short": "14.19",
             "value_long": "$45.0K",
             "value_short": "$45.4K",
-            "position_size": "$45K",
+            "opportunity_time": "09:24:36",
         },
     ]
 
@@ -308,8 +327,7 @@ def strategy_context() -> dict:
         "rule_rows": [
             {
                 "name": "主力资金费规则",
-                "type": "资费套利",
-                "scope": "Binance / OKX / Bybit",
+                "type": "资金费套利",
                 "status": "运行中",
                 "pnl": "+$8,240",
                 "exposure": "$420K",
@@ -318,7 +336,6 @@ def strategy_context() -> dict:
             {
                 "name": "高深度价差规则",
                 "type": "价差套利",
-                "scope": "BTC / ETH / SOL 优先",
                 "status": "运行中",
                 "pnl": "+$5,110",
                 "exposure": "$360K",
@@ -326,8 +343,7 @@ def strategy_context() -> dict:
             },
             {
                 "name": "夜间资金费规则",
-                "type": "资费套利",
-                "scope": "00:00 - 08:00 自动执行",
+                "type": "资金费套利",
                 "status": "异常",
                 "pnl": "-$120",
                 "exposure": "$75K",
@@ -336,7 +352,6 @@ def strategy_context() -> dict:
             {
                 "name": "补充价差规则",
                 "type": "价差套利",
-                "scope": "XRP / DOGE / LINK",
                 "status": "暂停",
                 "pnl": "+$640",
                 "exposure": "$0",
@@ -344,8 +359,7 @@ def strategy_context() -> dict:
             },
             {
                 "name": "保守资金费规则",
-                "type": "资费套利",
-                "scope": "低杠杆 / 高流动性",
+                "type": "资金费套利",
                 "status": "暂停",
                 "pnl": "+$1,260",
                 "exposure": "$0",
@@ -354,7 +368,6 @@ def strategy_context() -> dict:
             {
                 "name": "全市场价差规则",
                 "type": "价差套利",
-                "scope": "已配置交易所全量扫描",
                 "status": "运行中",
                 "pnl": "+$2,180",
                 "exposure": "$210K",
@@ -453,7 +466,7 @@ def _prototype_account_rows() -> List[Dict[str, str]]:
             "dispatch_note": "已纳入自动调度",
         },
         {
-            "name": "Gate 备份账户",
+            "name": "Gate 备用账户",
             "exchange": "Gate",
             "status": "权限待确认",
             "status_tone": "warning",
@@ -473,7 +486,7 @@ def transfer_records_context() -> dict:
             {
                 "time": "09:43:12",
                 "route_from": "Binance 主账户",
-                "route_to": "Gate 备份账户",
+                "route_to": "Gate 备用账户",
                 "amount": "$120K",
                 "reason": "一键平均分配",
                 "status": "处理中",
@@ -483,7 +496,7 @@ def transfer_records_context() -> dict:
             {
                 "time": "09:39:08",
                 "route_from": "OKX 套利账户",
-                "route_to": "Gate 备份账户",
+                "route_to": "Gate 备用账户",
                 "amount": "$85K",
                 "reason": "自动失衡修复",
                 "status": "已创建",
@@ -508,7 +521,7 @@ def accounts_context(user_id: Optional[int] = None) -> dict:
     account_rows = _prototype_account_rows()
     address_rows = [
         {
-            "account": "Gate 备份账户",
+            "account": "Gate 备用账户",
             "exchange": "Gate",
             "asset": "USDT",
             "network": "TRC20",
@@ -545,17 +558,15 @@ def accounts_context(user_id: Optional[int] = None) -> dict:
         },
     ]
     if user_id is not None:
-        saved_rows = account_service.build_account_rows_for_user(user_id)
-        account_rows = saved_rows
-        saved_address_rows = account_service.build_address_rows_for_user(user_id)
-        address_rows = saved_address_rows
+        account_rows = account_service.build_account_rows_for_user(user_id)
+        address_rows = account_service.build_address_rows_for_user(user_id)
 
     return {
         "summary_cards": [
             {"label": "参与调度账户", "value": "4", "change": "全部已纳入资金监控", "tone": "brand"},
             {"label": "总可用保证金", "value": "$1.82M", "change": "可按规则重新分配", "tone": "positive"},
             {"label": "失衡账户", "value": "2", "change": "Gate / Bybit 低于目标", "tone": "warning"},
-            {"label": "自动均衡", "value": "已开启", "change": "阈值 8% · 冷却 15 分钟", "tone": "brand"},
+            {"label": "自动均衡", "value": "已开启", "change": "阈值 8% / 冷却 15 分钟", "tone": "brand"},
         ],
         "balance_rows": [
             {
@@ -592,9 +603,9 @@ def accounts_context(user_id: Optional[int] = None) -> dict:
                 "plan_lines": ["待接收 $45K", "未补足前限制大额新开仓"],
             },
             {
-                "name": "Gate 备份账户",
+                "name": "Gate 备用账户",
                 "exchange": "Gate",
-                "role": "备援账户 / 低余额",
+                "role": "备用账户 / 低余额",
                 "available": "$250K",
                 "target": "$455K",
                 "deviation": "-$205K",
@@ -637,7 +648,7 @@ def risk_context() -> dict:
         ],
         "event_rows": [
             {"time": "09:28:14", "scope": "策略", "object": "SOL 夜间资金费", "level": "高", "result": "已暂停并等待人工接管"},
-            {"time": "09:14:36", "scope": "账户", "object": "Gate 备份账户", "level": "中", "result": "已限制自动开仓"},
+            {"time": "09:14:36", "scope": "账户", "object": "Gate 备用账户", "level": "中", "result": "已限制自动开仓"},
             {"time": "08:59:11", "scope": "连接", "object": "Bybit 行情通道", "level": "低", "result": "自动重连成功"},
             {"time": "08:34:57", "scope": "订单", "object": "ETH 价差策略", "level": "中", "result": "重试下单成功"},
         ],

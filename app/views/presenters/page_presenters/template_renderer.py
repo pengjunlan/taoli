@@ -1,5 +1,6 @@
 """Shared template rendering adapter for page responses."""
 
+import time
 from typing import Any
 
 from fastapi import Request
@@ -15,6 +16,7 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 def render_page(request: Request, page: PageConfig, **context: Any) -> HTMLResponse:
+    current_user = context.pop("current_user", None)
     return templates.TemplateResponse(
         page.template_name,
         {
@@ -25,9 +27,10 @@ def render_page(request: Request, page: PageConfig, **context: Any) -> HTMLRespo
             "page_subtitle": page.subtitle,
             "page_css": page.css_name,
             "page_js": page.js_name,
+            "asset_version": str(int(time.time())),
             "show_shell": page.show_shell,
-            "nav_items": build_nav_items(),
-            "current_user": context.pop("current_user", None),
+            "nav_items": build_nav_items(current_user),
+            "current_user": current_user,
             **context,
         },
     )

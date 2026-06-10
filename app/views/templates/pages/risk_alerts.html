@@ -1,71 +1,91 @@
 {% extends 'base/layout.html' %}
 
 {% block content %}
-<div class="shell-container page-stack">
-    <section class="page-header">
+<div class="shell-container page-stack risk-page">
+    <section class="page-header risk-page__header">
         <div>
-            <div class="eyebrow">Risk Center</div>
+            <div class="eyebrow">THREAD MONITOR</div>
             <h1>{{ page_title }}</h1>
             <p>{{ page_subtitle }}</p>
         </div>
     </section>
 
-    <section class="summary-grid">
-        {% for card in summary_cards %}
-            {% include 'components/stats_card.html' %}
-        {% endfor %}
-    </section>
-
-    <section class="risk-grid">
-        {% for rule in risk_rules %}
-        <article class="card risk-card">
-            <div class="risk-card__title">{{ rule.title }}</div>
-            <div class="risk-card__value">{{ rule.value }}</div>
-            <div class="risk-card__usage">{{ rule.usage }}</div>
-        </article>
-        {% endfor %}
-    </section>
-
-    <section class="card card--section">
-        <div class="card__header">
-            <h2>最新告警</h2>
-            <p>这里只保留会直接影响自动执行、资金均衡和收益波动的高相关风险事件。</p>
+    <section class="card card--section risk-section">
+        <div class="card__header card__header--row risk-section__header">
+            <div class="risk-section__title">
+                <h2>线程列表</h2>
+                <p>这里只监控我们自己常驻运行的后台线程服务，比如余额同步、自动调拨监控，后续新增线程也会统一接入这里。</p>
+            </div>
+            <div class="risk-toolbar">
+                <div class="risk-refresh-note" data-risk-refresh-note>加载中...</div>
+                <button class="table-action" type="button" data-risk-refresh>立即刷新</button>
+            </div>
         </div>
-        {% include 'components/alert_list.html' %}
+
+        <div class="risk-worker-list" data-risk-worker-list>
+            <article class="worker-card worker-card--loading">
+                <div class="worker-card__head">
+                    <div>
+                        <h3>加载中...</h3>
+                        <p>正在读取后台线程状态</p>
+                    </div>
+                    <span class="worker-status worker-status--idle">加载中</span>
+                </div>
+            </article>
+        </div>
     </section>
 
-    <section class="card card--section">
-        <div class="card__header">
-            <h2>风险事件记录</h2>
-            <p>统一记录策略异常、账户限制、自动均衡失败和人工接管结果，便于复盘收益波动来源。</p>
+    <section class="card card--section risk-section">
+        <div class="card__header card__header--row risk-section__header">
+            <div class="risk-section__title">
+                <h2>最近线程日志</h2>
+                <p>这里按控制台方式展示线程运行日志，最多保留 1000 条，超过后自动清空重新累计。</p>
+            </div>
+            <div class="risk-console-meta">
+                <span class="risk-console-count" data-risk-log-count>0 / 1000</span>
+            </div>
         </div>
-        <div class="table-wrap">
-            <table class="data-table" data-pagination-items="tbody tr" data-page-size="5">
-                <thead>
-                    <tr>
-                        <th>时间</th>
-                        <th>范围</th>
-                        <th>对象</th>
-                        <th>等级</th>
-                        <th>处理结果</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in event_rows %}
-                    <tr>
-                        <td>{{ row.time }}</td>
-                        <td>{{ row.scope }}</td>
-                        <td>{{ row.object }}</td>
-                        <td>
-                            <span class="pill pill--{{ 'negative' if row.level == '高' else 'warning' if row.level == '中' else 'neutral' }}">
-                                {{ row.level }}
-                            </span>
-                        </td>
-                        <td>{{ row.result }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        <div class="risk-console" data-risk-log-console>
+            <div class="risk-console__toolbar">
+                <span class="risk-console__dot risk-console__dot--danger"></span>
+                <span class="risk-console__dot risk-console__dot--warning"></span>
+                <span class="risk-console__dot risk-console__dot--success"></span>
+                <span class="risk-console__title">worker-log-console</span>
+            </div>
+            <div class="risk-console__body" data-risk-log-list>
+                <div class="risk-console__empty">加载中...</div>
+            </div>
+        </div>
+    </section>
+
+    <section class="card card--section risk-section">
+        <div class="card__header risk-section__header">
+            <div class="risk-section__title">
+                <h2>监控说明</h2>
+                <p>这个页面只看后台线程，不统计普通页面请求。</p>
+            </div>
+        </div>
+        <div class="monitor-grid risk-monitor-grid">
+            <article class="monitor-item">
+                <div class="monitor-item__label">监控范围</div>
+                <div class="monitor-item__value">后台常驻线程服务</div>
+                <div class="monitor-item__meta">例如余额同步线程、自动调拨监控线程，以及后续新增线程。</div>
+            </article>
+            <article class="monitor-item">
+                <div class="monitor-item__label">数据来源</div>
+                <div class="monitor-item__value">监控中心注册表</div>
+                <div class="monitor-item__meta">线程启动时注册，运行中持续上报心跳、成功、异常和日志。</div>
+            </article>
+            <article class="monitor-item">
+                <div class="monitor-item__label">刷新方式</div>
+                <div class="monitor-item__value">AJAX 轮询</div>
+                <div class="monitor-item__meta">当前页面定时拉取最新监控数据，不影响现有页面结构。</div>
+            </article>
+            <article class="monitor-item">
+                <div class="monitor-item__label">后续扩展</div>
+                <div class="monitor-item__value">新增线程可直接接入</div>
+                <div class="monitor-item__meta">只要在后台线程里注册并上报状态，这里就会自动展示。</div>
+            </article>
         </div>
     </section>
 </div>

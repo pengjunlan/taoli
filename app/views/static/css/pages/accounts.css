@@ -580,6 +580,51 @@
     grid-column: 1 / -1;
 }
 
+.page-accounts .password-field {
+    position: relative;
+}
+
+.page-accounts .password-field__control {
+    padding-right: 42px;
+}
+
+.page-accounts .password-field__toggle {
+    position: absolute;
+    top: 50%;
+    right: 14px;
+    transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: #24324a;
+    box-shadow: none;
+    transition: color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.page-accounts .password-field__toggle:hover {
+    color: var(--brand);
+}
+
+.page-accounts .password-field__toggle[aria-pressed="true"] {
+    color: var(--brand);
+}
+
+.page-accounts .password-field__toggle svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
 @keyframes account-modal-enter {
     from {
         opacity: 0;

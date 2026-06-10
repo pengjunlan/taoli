@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import HTTPException, Request, WebSocket, status
 from fastapi.responses import RedirectResponse
-from typing import Optional
 
 from app.application.services import auth_service
 from app.config import settings
@@ -30,7 +31,7 @@ def get_optional_current_user(request: Request) -> Optional[AuthUser]:
 def require_current_user(request: Request) -> AuthUser:
     user = get_optional_current_user(request)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录。")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
     return user
 
 
@@ -41,7 +42,14 @@ def require_api_user(request: Request) -> AuthUser:
 def require_page_user(request: Request) -> AuthUser:
     user = get_optional_current_user(request)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录。")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
+    return user
+
+
+def require_admin_user(request: Request) -> AuthUser:
+    user = require_current_user(request)
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有管理员可以访问该功能")
     return user
 
 

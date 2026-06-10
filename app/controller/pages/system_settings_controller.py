@@ -9,17 +9,17 @@ from app.views.viewmodels.page_models import PageConfig
 router = APIRouter()
 
 PAGE = PageConfig(
-    key="strategy_list",
-    template_name="pages/strategy_list.html",
-    title="自动规则管理",
-    subtitle="管理资金费套利与价差套利规则，统一控制触发阈值、开仓数量、单笔金额、最大持仓和下单节奏。",
-    css_name="strategy_list.css",
-    js_name="strategy_list.js",
+    key="system_settings",
+    template_name="pages/system_settings.html",
+    title="系统配置",
+    subtitle="配置系统级交易所连接方式，统一控制公共市场数据同步所使用的交易所接口。",
+    css_name="system_settings.css",
+    js_name="system_settings.js",
 )
 
 
-@router.get("/strategies", response_class=HTMLResponse)
-async def strategy_list_page(request: Request) -> HTMLResponse:
+@router.get("/system-settings", response_class=HTMLResponse)
+async def system_settings_page(request: Request) -> HTMLResponse:
     current_user = get_optional_current_user(request)
     if current_user is None:
         return RedirectResponse(url="/login", status_code=302)
@@ -30,32 +30,32 @@ async def strategy_list_page(request: Request) -> HTMLResponse:
         current_user=current_user,
         summary_cards=[
             {
-                "key": "rule_count",
-                "label": "规则总数",
+                "key": "exchange_count",
+                "label": "交易所数量",
                 "value": "加载中...",
-                "change": "正在读取策略规则",
+                "change": "正在读取系统交易所配置",
                 "tone": "brand",
             },
             {
                 "key": "enabled_count",
                 "label": "已启用",
                 "value": "加载中...",
-                "change": "正在统计运行规则",
+                "change": "正在统计启用配置",
                 "tone": "positive",
             },
             {
-                "key": "disabled_count",
-                "label": "已停用",
+                "key": "mode_count",
+                "label": "私有模式",
                 "value": "加载中...",
-                "change": "正在统计暂停规则",
-                "tone": "warning",
+                "change": "正在统计接口模式",
+                "tone": "brand",
             },
             {
-                "key": "rule_scope",
-                "label": "控制维度",
+                "key": "ready_count",
+                "label": "已配置密钥",
                 "value": "加载中...",
-                "change": "正在读取策略参数",
-                "tone": "brand",
+                "change": "正在统计系统 API 配置",
+                "tone": "warning",
             },
         ],
     )

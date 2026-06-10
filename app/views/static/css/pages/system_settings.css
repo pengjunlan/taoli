@@ -1,0 +1,124 @@
+.system-settings-page {
+  gap: 24px;
+}
+
+.page-system_settings .account-modal[hidden] {
+  display: none;
+}
+
+.page-system_settings .account-modal {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  z-index: 1100;
+}
+
+.page-system_settings .account-modal__mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.32);
+  backdrop-filter: blur(4px);
+}
+
+.page-system_settings .account-modal__dialog {
+  position: relative;
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  border-radius: 24px;
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.22);
+  animation: system-settings-modal-enter 0.2s ease-out;
+}
+
+.page-system_settings .account-modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 24px 24px 0;
+}
+
+.page-system_settings .account-modal__header h2 {
+  font-size: 1.4rem;
+  line-height: 1.2;
+  margin-top: 4px;
+}
+
+.page-system_settings .account-modal__header p {
+  margin-top: 10px;
+  color: var(--text-soft);
+}
+
+.page-system_settings .account-modal__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--text-soft);
+  font-size: 1.5rem;
+  line-height: 1;
+  transition: all var(--transition-fast);
+}
+
+.page-system_settings .account-modal__close:hover {
+  border-color: rgba(25, 103, 210, 0.24);
+  color: var(--brand);
+}
+
+.system-settings-section__header {
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.system-settings-table th,
+.system-settings-table td {
+  white-space: nowrap;
+}
+
+.system-settings-modal__dialog {
+  width: min(760px, calc(100vw - 32px));
+}
+
+.system-settings-form__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.system-settings-form__grid .field.is-hidden {
+  display: none;
+}
+
+.system-settings-form__grid .field--full {
+  grid-column: 1 / -1;
+}
+
+@keyframes system-settings-modal-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 900px) {
+  .page-system_settings .account-modal__dialog {
+    width: min(760px, calc(100vw - 20px));
+    max-height: calc(100vh - 20px);
+    border-radius: 20px;
+  }
+
+  .system-settings-form__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

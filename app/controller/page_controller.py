@@ -10,6 +10,7 @@ from app.controller.pages.register_controller import router as register_router
 from app.controller.pages.risk_alerts_controller import router as risk_alerts_router
 from app.controller.pages.spread_arbitrage_controller import router as spread_arbitrage_router
 from app.controller.pages.strategy_list_controller import router as strategy_list_router
+from app.controller.pages.system_settings_controller import router as system_settings_router
 from app.controller.pages.transfer_records_controller import router as transfer_records_router
 
 
@@ -27,6 +28,7 @@ router.include_router(dashboard_router)
 router.include_router(funding_arbitrage_router)
 router.include_router(spread_arbitrage_router)
 router.include_router(strategy_list_router)
+router.include_router(system_settings_router)
 router.include_router(positions_orders_router)
 router.include_router(accounts_router)
 router.include_router(transfer_records_router)

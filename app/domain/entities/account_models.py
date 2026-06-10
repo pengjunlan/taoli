@@ -58,3 +58,35 @@ class AutoTransferConfig:
     trigger_ratio: float
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True)
+class StrategyRule:
+    id: int
+    user_id: int
+    name: str
+    strategy_type: str
+    annualized_rate_threshold: float
+    spread_rate_threshold: float
+    max_spread_rate_threshold: float
+    max_pairs: int
+    order_amount_usdt: float
+    max_position_usdt: float
+    order_interval_seconds: int
+    is_enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class SystemExchangeConfig:
+    id: int
+    exchange_code: str
+    is_enabled: bool
+    use_public_api: bool
+    api_key: str
+    api_secret: str
+    api_passphrase: str
+    remark: str
+    created_at: datetime
+    updated_at: datetime

@@ -425,6 +425,13 @@ function bindAccountModal() {
     hiddenConnectionStatus.value = "untested";
     title.textContent = "新增账户";
     submitButton.textContent = "保存账户";
+    form.querySelectorAll("[data-password-toggle]").forEach((button) => {
+      const wrapper = button.closest(".password-field");
+      const input = wrapper?.querySelector(".password-field__control");
+      if (!input) return;
+      input.type = "password";
+      button.setAttribute("aria-pressed", "false");
+    });
   };
 
   const closeModal = () => {
@@ -622,6 +629,18 @@ function bindAccountModal() {
 
     field.addEventListener("input", syncConnectionStatusByConfig);
     field.addEventListener("change", syncConnectionStatusByConfig);
+  });
+
+  form.querySelectorAll("[data-password-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const wrapper = button.closest(".password-field");
+      const input = wrapper?.querySelector(".password-field__control");
+      if (!input) return;
+
+      const isVisible = input.type === "text";
+      input.type = isVisible ? "password" : "text";
+      button.setAttribute("aria-pressed", isVisible ? "false" : "true");
+    });
   });
 
   openButton.addEventListener("click", () => {

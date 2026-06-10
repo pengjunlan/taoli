@@ -19,11 +19,11 @@
     <section class="card card--section">
         <div class="card__header card__header--row">
             <div>
-                <h2>套利中</h2>
-                <p>这里统一展示资费套利和价差套利机会，更多数据可进入各自完整列表查看。</p>
+                <h2>机会预览</h2>
+                <p>这里统一展示资金费套利和价差套利机会，更多数据可进入各自完整列表查看。</p>
             </div>
             <div class="section-tools">
-                <div class="inline-note">共 {{ dashboard_rows|length }} 个机会</div>
+                <div class="inline-note" data-dashboard-count>加载中...</div>
                 <a class="table-action" href="/funding-arbitrage">资金费更多</a>
                 <a class="table-action" href="/spread-arbitrage">价差更多</a>
             </div>
@@ -46,81 +46,10 @@
                         <th>关键字段</th>
                     </tr>
                 </thead>
-                <tbody>
-                    {% for row in dashboard_rows[:5] %}
-                    <tr>
-                        <td>{{ row.rank }}</td>
-                        <td>
-                            <span class="pill pill--{{ row.type_tone }}">{{ row.type }}</span>
-                        </td>
-                        <td>
-                            <div class="spread-symbol">
-                                <strong>{{ row.symbol }}</strong>
-                                <span class="spread-symbol__hint">{{ row.symbol }}/USDT</span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="pair-cell">
-                                <span class="pair-cell__line {{ 'is-positive' if row.line_a_tone == 'positive' else 'is-negative' }}">{{ row.line_a }}</span>
-                                <span class="pair-cell__line {{ 'is-positive' if row.line_b_tone == 'positive' else 'is-negative' }}">{{ row.line_b }}</span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="spread-symbol">
-                                <strong class="spread-value">{{ row.yield_value }}</strong>
-                                <span class="spread-symbol__hint">{{ row.yield_label }}</span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="spread-symbol">
-                                <strong class="spread-fee">{{ row.metric_value }}</strong>
-                                <span class="spread-symbol__hint">{{ row.metric_label }}</span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="spread-symbol">
-                                <strong class="{% if row.edge_tone == 'positive' %}is-positive{% elif row.edge_tone == 'negative' %}is-negative{% endif %}">{{ row.edge_value }}</strong>
-                                <span class="spread-symbol__hint">{{ row.edge_label }}</span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="pair-cell pair-cell--hedge">
-                                <span class="pair-cell__line pair-cell__line--hedge is-positive">
-                                    <span>{{ row.qty_long }}</span>
-                                </span>
-                                <span class="pair-cell__line pair-cell__line--hedge is-negative">
-                                    <span>{{ row.qty_short }}</span>
-                                </span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="pair-cell pair-cell--hedge">
-                                <span class="pair-cell__line pair-cell__line--hedge is-positive">
-                                    <span>{{ row.avg_long }}</span>
-                                </span>
-                                <span class="pair-cell__line pair-cell__line--hedge is-negative">
-                                    <span>{{ row.avg_short }}</span>
-                                </span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="pair-cell pair-cell--hedge">
-                                <span class="pair-cell__line pair-cell__line--hedge is-positive spread-metric--strong">
-                                    <span>{{ row.value_long }}</span>
-                                </span>
-                                <span class="pair-cell__line pair-cell__line--hedge is-negative spread-metric--strong">
-                                    <span>{{ row.value_short }}</span>
-                                </span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="spread-symbol">
-                                <strong class="spread-metric">{{ row.highlight_value }}</strong>
-                                <span class="spread-symbol__hint">{{ row.highlight_label }}</span>
-                            </div>
-                        </td>
+                <tbody data-dashboard-table-body>
+                    <tr class="table-empty-row">
+                        <td colspan="11" class="spread-metric">加载中...</td>
                     </tr>
-                    {% endfor %}
                 </tbody>
             </table>
         </div>

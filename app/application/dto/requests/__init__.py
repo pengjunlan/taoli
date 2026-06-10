@@ -9,6 +9,13 @@ from app.application.dto.requests.account_requests import (
 )
 from app.application.dto.requests.auth_requests import LoginRequest, RegisterRequest
 from app.application.dto.requests.exchange_requests import ExchangeConnectionTestRequest
+from app.application.dto.requests.strategy_requests import (
+    StrategyRuleCreateRequest,
+    StrategyRuleUpdateRequest,
+)
+from app.application.dto.requests.system_exchange_requests import (
+    SystemExchangeConfigUpdateRequest,
+)
 
 __all__ = [
     "AccountAutoTransferConfigRequest",
@@ -19,4 +26,7 @@ __all__ = [
     "ExchangeConnectionTestRequest",
     "LoginRequest",
     "RegisterRequest",
+    "StrategyRuleCreateRequest",
+    "StrategyRuleUpdateRequest",
+    "SystemExchangeConfigUpdateRequest",
 ]

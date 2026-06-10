@@ -1,0 +1,121 @@
+{% extends 'base/layout.html' %}
+
+{% block content %}
+<div class="shell-container page-stack system-settings-page">
+    <section class="page-header">
+        <div>
+            <div class="eyebrow">System Config</div>
+            <h1>{{ page_title }}</h1>
+            <p>{{ page_subtitle }}</p>
+        </div>
+    </section>
+
+    <section class="summary-grid">
+        {% for card in summary_cards %}
+            {% include 'components/stats_card.html' %}
+        {% endfor %}
+    </section>
+
+    <section class="card card--section system-settings-section">
+        <div class="card__header card__header--row system-settings-section__header">
+            <div>
+                <h2>系统交易所配置</h2>
+                <p>这里配置的是系统级交易所接口，用来统一同步公共市场数据，不占用普通用户自己的 API 授权。</p>
+            </div>
+            <div class="section-tools">
+                <div class="inline-note" data-system-config-count>加载中..</div>
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <table class="data-table system-settings-table" data-pagination-items="tbody tr" data-page-size="10">
+                <thead>
+                    <tr>
+                        <th>交易所</th>
+                        <th>启用状态</th>
+                        <th>接口模式</th>
+                        <th>配置状态</th>
+                        <th>API Key</th>
+                        <th>API Secret</th>
+                        <th>Passphrase</th>
+                        <th>备注</th>
+                        <th>更新时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody data-system-config-table-body>
+                    <tr class="table-empty-row">
+                        <td colspan="10" class="spread-metric">加载中..</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+
+<div class="account-modal system-settings-modal" data-system-config-modal hidden>
+    <div class="account-modal__mask" data-system-config-modal-close></div>
+    <div class="account-modal__dialog card system-settings-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="system-config-modal-title">
+        <div class="account-modal__header">
+            <div>
+                <div class="eyebrow">Exchange Config</div>
+                <h2 id="system-config-modal-title">系统交易所配置</h2>
+                <p>选择该交易所走公开接口还是系统私有接口，私有接口模式下可填写系统级 API 信息。</p>
+            </div>
+            <button class="account-modal__close" type="button" aria-label="关闭系统配置弹窗" data-system-config-modal-close>×</button>
+        </div>
+
+        <form class="form-stack system-settings-form" data-system-config-form>
+            <input type="hidden" name="exchange_code" value="">
+
+            <div class="system-settings-form__grid">
+                <label class="field">
+                    <span class="field__label">交易所</span>
+                    <input class="field__control" type="text" name="exchange_label" value="" readonly>
+                </label>
+
+                <label class="field field--checkbox">
+                    <span class="field__label">启用状态</span>
+                    <label class="checkbox-row">
+                        <input type="checkbox" name="is_enabled" checked>
+                        <span>启用该交易所</span>
+                    </label>
+                </label>
+
+                <label class="field field--checkbox field--full">
+                    <span class="field__label">接口模式</span>
+                    <label class="checkbox-row">
+                        <input type="checkbox" name="use_public_api" checked data-system-public-api>
+                        <span>使用公开接口</span>
+                    </label>
+                </label>
+
+                <label class="field" data-system-private-field>
+                    <span class="field__label">系统 API Key</span>
+                    <input class="field__control" type="text" name="api_key" maxlength="255" placeholder="请输入系统级 API Key">
+                </label>
+
+                <label class="field" data-system-private-field>
+                    <span class="field__label">系统 API Secret</span>
+                    <input class="field__control" type="text" name="api_secret" maxlength="255" placeholder="请输入系统级 API Secret">
+                </label>
+
+                <label class="field" data-system-private-field>
+                    <span class="field__label">系统 Passphrase</span>
+                    <input class="field__control" type="text" name="api_passphrase" maxlength="255" placeholder="部分交易所需要填写">
+                </label>
+
+                <label class="field field--full">
+                    <span class="field__label">备注</span>
+                    <input class="field__control" type="text" name="remark" maxlength="255" placeholder="例如：服务器白名单专用 / 默认公开接口">
+                </label>
+            </div>
+
+            <div class="form-actions">
+                <button class="button button--ghost" type="button" data-system-config-modal-close>取消</button>
+                <button class="button button--primary" type="submit">保存配置</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

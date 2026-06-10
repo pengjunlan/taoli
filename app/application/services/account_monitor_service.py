@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import List
 
 from app.application.dto.requests.exchange_requests import ExchangeConnectionTestRequest
+from app.application.services.monitor_center_service import monitor_center_service
 from app.application.services.exchange_connection_service import exchange_connection_service
 from app.domain.entities.monitor_models import AccountSnapshot, ServiceHeartbeat
 from app.infrastructure.cache import AccountBalanceCacheItem, account_balance_cache
@@ -27,12 +28,22 @@ class AccountMonitorService:
         self._interval_seconds = 30
         self._last_status = "idle"
         self._last_detail = "waiting for startup"
+        self._monitor_key = "account_balance_sync"
 
     def start(self) -> None:
         with self._lock:
             if self._started:
                 return
             self._started = True
+            monitor_center_service.register_worker(
+                key=self._monitor_key,
+                name="账户余额同步线程",
+                category="账户监控",
+                thread_name="account-balance-monitor",
+                interval_seconds=self._interval_seconds,
+                status="starting",
+                detail="准备加载数据库余额缓存",
+            )
             self._prime_cache_from_database()
             self._thread = threading.Thread(
                 target=self._run_loop,
@@ -87,15 +98,25 @@ class AccountMonitorService:
         )
         self._last_status = "primed"
         self._last_detail = f"loaded {len(rows)} account balances from database"
+        monitor_center_service.mark_success(
+            self._monitor_key,
+            f"已从数据库加载 {len(rows)} 个账户余额缓存",
+        )
 
     def _run_loop(self) -> None:
         while True:
             try:
+                monitor_center_service.heartbeat(
+                    self._monitor_key,
+                    status="running",
+                    detail="线程心跳正常，准备刷新账户余额",
+                )
                 self._refresh_all_accounts()
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Account balance monitor loop failed: %s", exc)
                 self._last_status = "error"
                 self._last_detail = str(exc)
+                monitor_center_service.mark_error(self._monitor_key, f"账户余额同步线程异常：{exc}")
             time.sleep(self._interval_seconds)
 
     def _refresh_all_accounts(self) -> None:
@@ -123,9 +144,19 @@ class AccountMonitorService:
                 )
             except ExchangeError as exc:
                 logger.warning("Refresh balance failed for account_id=%s: %s", account_id, exc)
+                monitor_center_service.add_log(
+                    self._monitor_key,
+                    "warning",
+                    f"账户 {account_id} 余额刷新失败：{exc}",
+                )
                 continue
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Refresh balance failed unexpectedly for account_id=%s: %s", account_id, exc)
+                monitor_center_service.add_log(
+                    self._monitor_key,
+                    "warning",
+                    f"账户 {account_id} 余额刷新异常：{exc}",
+                )
                 continue
 
             cached_item = account_balance_cache.get(account_id)
@@ -147,10 +178,19 @@ class AccountMonitorService:
                 synced_at=synced_at,
             )
             refreshed_count += 1
+            monitor_center_service.add_log(
+                self._monitor_key,
+                "info",
+                f"账户 {account_id} 当前可用已更新为 {normalized_amount}",
+            )
 
         self._last_status = "running"
         self._last_detail = (
             f"refreshed {refreshed_count} accounts, skipped {skipped_count} untested/failed accounts"
+        )
+        monitor_center_service.mark_success(
+            self._monitor_key,
+            f"本轮完成：更新 {refreshed_count} 个账户，跳过 {skipped_count} 个未测试/失败账户",
         )
 
 

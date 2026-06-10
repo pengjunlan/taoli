@@ -72,6 +72,7 @@ class MySQLConnectionManager:
                 username VARCHAR(64) NOT NULL,
                 password_hash VARCHAR(255) NOT NULL,
                 is_active TINYINT(1) NOT NULL DEFAULT 1,
+                is_admin TINYINT(1) NOT NULL DEFAULT 0,
                 last_login_at DATETIME NULL,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -198,12 +199,133 @@ class MySQLConnectionManager:
                     ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """,
+            """
+            CREATE TABLE IF NOT EXISTS strategy_rules (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                user_id BIGINT UNSIGNED NOT NULL,
+                name VARCHAR(128) NOT NULL,
+                strategy_type VARCHAR(32) NOT NULL,
+                annualized_rate_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
+                spread_rate_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
+                max_spread_rate_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
+                max_pairs INT NOT NULL DEFAULT 1,
+                order_amount_usdt DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+                max_position_usdt DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+                order_interval_seconds INT NOT NULL DEFAULT 0,
+                is_enabled TINYINT(1) NOT NULL DEFAULT 1,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    ON UPDATE CURRENT_TIMESTAMP,
+                KEY idx_strategy_rules_user_id (user_id),
+                KEY idx_strategy_rules_type (strategy_type),
+                CONSTRAINT fk_strategy_rules_user
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                    ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS exchange_markets (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                exchange_code VARCHAR(32) NOT NULL,
+                market_type VARCHAR(32) NOT NULL,
+                symbol VARCHAR(128) NOT NULL,
+                symbol_normalized VARCHAR(128) NOT NULL,
+                base_asset VARCHAR(64) NOT NULL,
+                quote_asset VARCHAR(64) NOT NULL,
+                settle_asset VARCHAR(64) NOT NULL DEFAULT '',
+                is_contract TINYINT(1) NOT NULL DEFAULT 0,
+                is_linear TINYINT(1) NOT NULL DEFAULT 0,
+                contract_size DECIMAL(18,8) NOT NULL DEFAULT 0.00000000,
+                price_precision DECIMAL(18,8) NOT NULL DEFAULT 0.00000000,
+                amount_precision DECIMAL(18,8) NOT NULL DEFAULT 0.00000000,
+                min_amount DECIMAL(18,8) NOT NULL DEFAULT 0.00000000,
+                supports_funding TINYINT(1) NOT NULL DEFAULT 0,
+                supports_ws TINYINT(1) NOT NULL DEFAULT 1,
+                is_active TINYINT(1) NOT NULL DEFAULT 1,
+                synced_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_exchange_markets_unique (exchange_code, market_type, symbol),
+                KEY idx_exchange_markets_symbol_normalized (symbol_normalized),
+                KEY idx_exchange_markets_exchange_market (exchange_code, market_type)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS exchange_market_pairs (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                pair_type VARCHAR(32) NOT NULL,
+                pair_key VARCHAR(255) NOT NULL,
+                left_exchange_code VARCHAR(32) NOT NULL,
+                right_exchange_code VARCHAR(32) NOT NULL,
+                left_market_type VARCHAR(32) NOT NULL,
+                right_market_type VARCHAR(32) NOT NULL,
+                symbol_normalized VARCHAR(128) NOT NULL,
+                left_symbol VARCHAR(128) NOT NULL,
+                right_symbol VARCHAR(128) NOT NULL,
+                base_asset VARCHAR(64) NOT NULL,
+                quote_asset VARCHAR(64) NOT NULL,
+                settle_asset VARCHAR(64) NOT NULL DEFAULT '',
+                match_mode VARCHAR(32) NOT NULL DEFAULT 'auto',
+                pair_reason VARCHAR(255) NOT NULL DEFAULT '',
+                is_active TINYINT(1) NOT NULL DEFAULT 1,
+                generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_exchange_market_pairs_pair_key (pair_key),
+                KEY idx_exchange_market_pairs_type (pair_type),
+                KEY idx_exchange_market_pairs_symbol (symbol_normalized)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS system_exchange_configs (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                exchange_code VARCHAR(32) NOT NULL,
+                is_enabled TINYINT(1) NOT NULL DEFAULT 1,
+                use_public_api TINYINT(1) NOT NULL DEFAULT 1,
+                api_key VARCHAR(255) NOT NULL DEFAULT '',
+                api_secret VARCHAR(255) NOT NULL DEFAULT '',
+                api_passphrase VARCHAR(255) NOT NULL DEFAULT '',
+                remark VARCHAR(255) NOT NULL DEFAULT '',
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_system_exchange_configs_exchange_code (exchange_code)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
         ]
 
         with self.connection() as connection:
             cursor = connection.cursor()
             for statement in statements:
                 cursor.execute(statement)
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s
+                  AND TABLE_NAME = 'users'
+                  AND COLUMN_NAME = 'is_admin'
+                """,
+                (mysql_config.database,),
+            )
+            has_users_is_admin = int(cursor.fetchone()[0]) > 0
+            if not has_users_is_admin:
+                cursor.execute(
+                    """
+                    ALTER TABLE users
+                    ADD COLUMN is_admin TINYINT(1) NOT NULL DEFAULT 0
+                    AFTER is_active
+                    """
+                )
+            cursor.execute(
+                """
+                UPDATE users
+                SET is_admin = 1
+                WHERE id = (
+                    SELECT earliest_user_id
+                    FROM (
+                        SELECT MIN(id) AS earliest_user_id
+                        FROM users
+                    ) AS first_user
+                )
+                """
+            )
             cursor.execute(
                 """
                 SELECT COUNT(*)
@@ -288,6 +410,81 @@ class MySQLConnectionManager:
                 except MySQLError as exc:
                     if "Duplicate column name" not in str(exc):
                         raise
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s
+                  AND TABLE_NAME = 'strategy_rules'
+                  AND COLUMN_NAME = 'max_position_usdt'
+                """,
+                (mysql_config.database,),
+            )
+            has_max_position_usdt = int(cursor.fetchone()[0]) > 0
+            if not has_max_position_usdt:
+                try:
+                    cursor.execute(
+                        """
+                        ALTER TABLE strategy_rules
+                        ADD COLUMN max_position_usdt DECIMAL(18,2) NOT NULL DEFAULT 0.00
+                        AFTER order_amount_usdt
+                        """
+                    )
+                except MySQLError as exc:
+                    if "Duplicate column name" not in str(exc):
+                        raise
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s
+                  AND TABLE_NAME = 'strategy_rules'
+                  AND COLUMN_NAME = 'max_spread_rate_threshold'
+                """,
+                (mysql_config.database,),
+            )
+            has_max_spread_rate_threshold = int(cursor.fetchone()[0]) > 0
+            if not has_max_spread_rate_threshold:
+                try:
+                    cursor.execute(
+                        """
+                        ALTER TABLE strategy_rules
+                        ADD COLUMN max_spread_rate_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000
+                        AFTER spread_rate_threshold
+                        """
+                    )
+                except MySQLError as exc:
+                    if "Duplicate column name" not in str(exc):
+                        raise
+            cursor.execute(
+                """
+                UPDATE strategy_rules
+                SET max_position_usdt = order_amount_usdt
+                WHERE max_position_usdt <= 0
+                  AND order_amount_usdt > 0
+                """
+            )
+            cursor.execute(
+                """
+                INSERT INTO system_exchange_configs (
+                    exchange_code,
+                    is_enabled,
+                    use_public_api,
+                    api_key,
+                    api_secret,
+                    api_passphrase,
+                    remark
+                )
+                VALUES
+                    ('binance', 1, 1, '', '', '', '默认公开接口'),
+                    ('bitget', 1, 1, '', '', '', '默认公开接口'),
+                    ('okx', 1, 1, '', '', '', '默认公开接口'),
+                    ('gate', 1, 1, '', '', '', '默认公开接口'),
+                    ('htx', 1, 1, '', '', '', '默认公开接口')
+                ON DUPLICATE KEY UPDATE
+                    exchange_code = VALUES(exchange_code)
+                """
+            )
             connection.commit()
 
     def _sanitize_legacy_account_names(self) -> None:

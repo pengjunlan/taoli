@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from app.domain.entities import AccountAddress, AutoTransferConfig, ExchangeAccount, TransferRecord
+from app.domain.entities import AccountAddress, AutoTransferConfig, ExchangeAccount, StrategyRule, TransferRecord
 from app.infrastructure.persistence import mysql_manager
 
 
@@ -546,6 +546,231 @@ class MySQLAccountRepository:
             assert row is not None
             return self._build_auto_transfer_config(row)
 
+    def list_strategy_rules_by_user_id(self, user_id: int) -> List[Dict[str, Any]]:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    user_id,
+                    name,
+                    strategy_type,
+                    annualized_rate_threshold,
+                    spread_rate_threshold,
+                    max_spread_rate_threshold,
+                    max_pairs,
+                    order_amount_usdt,
+                    max_position_usdt,
+                    order_interval_seconds,
+                    is_enabled,
+                    created_at,
+                    updated_at
+                FROM strategy_rules
+                WHERE user_id = %s
+                ORDER BY id DESC
+                """,
+                (user_id,),
+            )
+            return list(cursor.fetchall())
+
+    def get_strategy_rule_by_id(self, rule_id: int, user_id: int) -> Dict[str, Any] | None:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    user_id,
+                    name,
+                    strategy_type,
+                    annualized_rate_threshold,
+                    spread_rate_threshold,
+                    max_spread_rate_threshold,
+                    max_pairs,
+                    order_amount_usdt,
+                    max_position_usdt,
+                    order_interval_seconds,
+                    is_enabled,
+                    created_at,
+                    updated_at
+                FROM strategy_rules
+                WHERE id = %s AND user_id = %s
+                LIMIT 1
+                """,
+                (rule_id, user_id),
+            )
+            return cursor.fetchone()
+
+    def create_strategy_rule(
+        self,
+        *,
+        user_id: int,
+        name: str,
+        strategy_type: str,
+        annualized_rate_threshold: float,
+        spread_rate_threshold: float,
+        max_spread_rate_threshold: float,
+        max_pairs: int,
+        order_amount_usdt: float,
+        max_position_usdt: float,
+        order_interval_seconds: int,
+        is_enabled: bool,
+    ) -> StrategyRule:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                INSERT INTO strategy_rules (
+                    user_id,
+                    name,
+                    strategy_type,
+                    annualized_rate_threshold,
+                    spread_rate_threshold,
+                    max_spread_rate_threshold,
+                    max_pairs,
+                    order_amount_usdt,
+                    max_position_usdt,
+                    order_interval_seconds,
+                    is_enabled
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    user_id,
+                    name,
+                    strategy_type,
+                    annualized_rate_threshold,
+                    spread_rate_threshold,
+                    max_spread_rate_threshold,
+                    max_pairs,
+                    order_amount_usdt,
+                    max_position_usdt,
+                    order_interval_seconds,
+                    1 if is_enabled else 0,
+                ),
+            )
+            connection.commit()
+
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    user_id,
+                    name,
+                    strategy_type,
+                    annualized_rate_threshold,
+                    spread_rate_threshold,
+                    max_spread_rate_threshold,
+                    max_pairs,
+                    order_amount_usdt,
+                    max_position_usdt,
+                    order_interval_seconds,
+                    is_enabled,
+                    created_at,
+                    updated_at
+                FROM strategy_rules
+                WHERE id = %s
+                LIMIT 1
+                """,
+                (cursor.lastrowid,),
+            )
+            row = cursor.fetchone()
+            assert row is not None
+            return self._build_strategy_rule(row)
+
+    def update_strategy_rule(
+        self,
+        *,
+        rule_id: int,
+        user_id: int,
+        name: str,
+        strategy_type: str,
+        annualized_rate_threshold: float,
+        spread_rate_threshold: float,
+        max_spread_rate_threshold: float,
+        max_pairs: int,
+        order_amount_usdt: float,
+        max_position_usdt: float,
+        order_interval_seconds: int,
+        is_enabled: bool,
+    ) -> StrategyRule | None:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                UPDATE strategy_rules
+                SET
+                    name = %s,
+                    strategy_type = %s,
+                    annualized_rate_threshold = %s,
+                    spread_rate_threshold = %s,
+                    max_spread_rate_threshold = %s,
+                    max_pairs = %s,
+                    order_amount_usdt = %s,
+                    max_position_usdt = %s,
+                    order_interval_seconds = %s,
+                    is_enabled = %s
+                WHERE id = %s AND user_id = %s
+                """,
+                (
+                    name,
+                    strategy_type,
+                    annualized_rate_threshold,
+                    spread_rate_threshold,
+                    max_spread_rate_threshold,
+                    max_pairs,
+                    order_amount_usdt,
+                    max_position_usdt,
+                    order_interval_seconds,
+                    1 if is_enabled else 0,
+                    rule_id,
+                    user_id,
+                ),
+            )
+            connection.commit()
+
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    user_id,
+                    name,
+                    strategy_type,
+                    annualized_rate_threshold,
+                    spread_rate_threshold,
+                    max_spread_rate_threshold,
+                    max_pairs,
+                    order_amount_usdt,
+                    max_position_usdt,
+                    order_interval_seconds,
+                    is_enabled,
+                    created_at,
+                    updated_at
+                FROM strategy_rules
+                WHERE id = %s AND user_id = %s
+                LIMIT 1
+                """,
+                (rule_id, user_id),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return self._build_strategy_rule(row)
+
+    def delete_strategy_rule(self, *, rule_id: int, user_id: int) -> bool:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                DELETE FROM strategy_rules
+                WHERE id = %s AND user_id = %s
+                """,
+                (rule_id, user_id),
+            )
+            connection.commit()
+            return cursor.rowcount > 0
+
     def list_accounts_with_address_by_user_id(self, user_id: int) -> List[Dict[str, Any]]:
         with mysql_manager.connection() as connection:
             cursor = connection.cursor(dictionary=True)
@@ -667,6 +892,24 @@ class MySQLAccountRepository:
             user_id=int(row["user_id"]),
             is_enabled=bool(row["is_enabled"]),
             trigger_ratio=float(row["trigger_ratio"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def _build_strategy_rule(self, row: Dict[str, Any]) -> StrategyRule:
+        return StrategyRule(
+            id=int(row["id"]),
+            user_id=int(row["user_id"]),
+            name=str(row["name"]),
+            strategy_type=str(row["strategy_type"]),
+            annualized_rate_threshold=float(row.get("annualized_rate_threshold") or 0),
+            spread_rate_threshold=float(row.get("spread_rate_threshold") or 0),
+            max_spread_rate_threshold=float(row.get("max_spread_rate_threshold") or 0),
+            max_pairs=int(row.get("max_pairs") or 0),
+            order_amount_usdt=float(row.get("order_amount_usdt") or 0),
+            max_position_usdt=float(row.get("max_position_usdt") or 0),
+            order_interval_seconds=int(row.get("order_interval_seconds") or 0),
+            is_enabled=bool(row.get("is_enabled")),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
