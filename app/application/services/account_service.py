@@ -518,13 +518,12 @@ class AccountService:
             total_available_value += available_value
 
         total_target_pool_value = total_available_value
-        total_configured_ratio = sum(item[3] for item in available_rows)
         result: List[Dict[str, str]] = []
 
         for row, available_value, available, funding_ratio_percent in available_rows:
             exchange = str(row.get("exchange") or "")
-            if total_configured_ratio > 0:
-                ratio = funding_ratio_percent / total_configured_ratio
+            if funding_ratio_percent > 0:
+                ratio = funding_ratio_percent / 100
             else:
                 ratio = (available_value / total_available_value) if total_available_value > 0 else 0
             target_value = int(round(total_target_pool_value * ratio))
