@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 class ExchangeConnectionService:
     """Calls a private exchange API to validate whether submitted credentials work."""
 
+    def build_exchange_client(self, payload: ExchangeConnectionTestRequest) -> Any:
+        normalized = self._normalize_payload(payload)
+        self._validate_payload(normalized)
+        return self._build_exchange(normalized)
+
     def test_connection(self, payload: ExchangeConnectionTestRequest) -> None:
         normalized = self._normalize_payload(payload)
         self._validate_payload(normalized)

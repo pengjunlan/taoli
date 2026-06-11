@@ -337,6 +337,7 @@ class AccountService:
                 amount=round(payload.amount, 2),
                 reason=reason,
                 status="created",
+                is_worker_enabled=True,
                 result="手动调拨已登记，等待后续执行。",
             )
         except Exception as exc:
@@ -396,6 +397,7 @@ class AccountService:
                 amount=round(float(candidate["amount"]), 2),
                 reason="自动调拨",
                 status="created",
+                is_worker_enabled=True,
                 result=(
                     f"自动调拨已生成，触发账户低于目标资金的 {int(config.trigger_ratio * 100)}%，"
                     f"本次按最小偏差值登记 {self._format_currency(float(candidate['amount']))}。"

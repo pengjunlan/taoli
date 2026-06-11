@@ -9,6 +9,7 @@ from app.application.services.account_monitor_service import account_monitor_ser
 from app.application.services.auto_transfer_monitor_service import auto_transfer_monitor_service
 from app.application.services.log_cleanup_service import organize_legacy_root_logs
 from app.application.services.opportunity_runtime_service import opportunity_runtime_service
+from app.application.services.transfer_execution_monitor_service import transfer_execution_monitor_service
 from app.controller.api_controller import router as api_router
 from app.controller.page_controller import router as page_router
 from app.infrastructure.cache import redis_session_cache
@@ -41,4 +42,5 @@ async def startup_event() -> None:
     redis_session_cache.initialize()
     account_monitor_service.start()
     auto_transfer_monitor_service.start()
+    transfer_execution_monitor_service.start()
     opportunity_runtime_service.start()

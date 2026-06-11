@@ -406,6 +406,7 @@ class MySQLAccountRepository:
         reason: str,
         status: str,
         result: str,
+        is_worker_enabled: bool = False,
     ) -> TransferRecord:
         with mysql_manager.connection() as connection:
             cursor = connection.cursor(dictionary=True)
@@ -418,11 +419,12 @@ class MySQLAccountRepository:
                     amount,
                     reason,
                     status,
+                    is_worker_enabled,
                     result
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (user_id, from_account_id, to_account_id, amount, reason, status, result),
+                (user_id, from_account_id, to_account_id, amount, reason, status, 1 if is_worker_enabled else 0, result),
             )
             connection.commit()
 
@@ -448,6 +450,138 @@ class MySQLAccountRepository:
             row = cursor.fetchone()
             assert row is not None
             return self._build_transfer_record(row)
+
+    def list_pending_worker_transfer_records(self, limit: int = 20) -> List[Dict[str, Any]]:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    user_id,
+                    from_account_id,
+                    to_account_id,
+                    amount,
+                    reason,
+                    status,
+                    is_worker_enabled,
+                    result,
+                    created_at,
+                    updated_at
+                FROM account_transfer_records
+                WHERE is_worker_enabled = 1
+                  AND status = 'created'
+                ORDER BY id ASC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            return list(cursor.fetchall())
+
+    def mark_transfer_record_processing(self, record_id: int) -> bool:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                UPDATE account_transfer_records
+                SET
+                    status = 'processing',
+                    result = '后台线程已接单，开始执行调拨。',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                  AND is_worker_enabled = 1
+                  AND status = 'created'
+                """,
+                (record_id,),
+            )
+            connection.commit()
+            return cursor.rowcount > 0
+
+    def update_transfer_record_status(self, record_id: int, *, status: str, result: str) -> bool:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                UPDATE account_transfer_records
+                SET
+                    status = %s,
+                    result = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (status, result, record_id),
+            )
+            connection.commit()
+            return cursor.rowcount > 0
+
+    def get_transfer_record_execution_context(self, record_id: int) -> Dict[str, Any] | None:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT
+                    tr.id,
+                    tr.user_id,
+                    tr.from_account_id,
+                    tr.to_account_id,
+                    tr.amount,
+                    tr.reason,
+                    tr.status,
+                    tr.is_worker_enabled,
+                    tr.result,
+                    tr.created_at,
+                    tr.updated_at,
+                    fa.id AS from_id,
+                    fa.user_id AS from_user_id,
+                    fa.market_type AS from_market_type,
+                    fa.exchange_code AS from_exchange_code,
+                    fa.account_name AS from_account_name,
+                    fa.api_key AS from_api_key,
+                    fa.api_secret AS from_api_secret,
+                    fa.api_passphrase AS from_api_passphrase,
+                    fa.connection_test_status AS from_connection_test_status,
+                    fa.funding_ratio_percent AS from_funding_ratio_percent,
+                    fa.current_available_amount AS from_current_available_amount,
+                    fa.current_available_synced_at AS from_current_available_synced_at,
+                    fa.is_active AS from_is_active,
+                    fa.created_at AS from_created_at,
+                    fa.updated_at AS from_updated_at,
+                    faddr.network AS from_network,
+                    faddr.address_value AS from_address_value,
+                    faddr.memo_tag AS from_memo_tag,
+                    ta.id AS to_id,
+                    ta.user_id AS to_user_id,
+                    ta.market_type AS to_market_type,
+                    ta.exchange_code AS to_exchange_code,
+                    ta.account_name AS to_account_name,
+                    ta.api_key AS to_api_key,
+                    ta.api_secret AS to_api_secret,
+                    ta.api_passphrase AS to_api_passphrase,
+                    ta.connection_test_status AS to_connection_test_status,
+                    ta.funding_ratio_percent AS to_funding_ratio_percent,
+                    ta.current_available_amount AS to_current_available_amount,
+                    ta.current_available_synced_at AS to_current_available_synced_at,
+                    ta.is_active AS to_is_active,
+                    ta.created_at AS to_created_at,
+                    ta.updated_at AS to_updated_at,
+                    taddr.network AS to_network,
+                    taddr.address_value AS to_address_value,
+                    taddr.memo_tag AS to_memo_tag
+                FROM account_transfer_records AS tr
+                INNER JOIN exchange_accounts AS fa
+                    ON fa.id = tr.from_account_id
+                INNER JOIN exchange_accounts AS ta
+                    ON ta.id = tr.to_account_id
+                LEFT JOIN account_funding_addresses AS faddr
+                    ON faddr.account_id = fa.id
+                LEFT JOIN account_funding_addresses AS taddr
+                    ON taddr.account_id = ta.id
+                WHERE tr.id = %s
+                LIMIT 1
+                """,
+                (record_id,),
+            )
+            return cursor.fetchone()
 
     def list_transfer_records_by_user_id(self, user_id: int) -> List[Dict[str, Any]]:
         with mysql_manager.connection() as connection:

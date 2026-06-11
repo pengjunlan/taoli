@@ -166,11 +166,13 @@ class MySQLConnectionManager:
                 amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
                 reason VARCHAR(255) NOT NULL DEFAULT '手动调拨',
                 status VARCHAR(32) NOT NULL DEFAULT 'created',
+                is_worker_enabled TINYINT(1) NOT NULL DEFAULT 0,
                 result VARCHAR(255) NOT NULL DEFAULT '手动调拨已登记，等待后续执行。',
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                     ON UPDATE CURRENT_TIMESTAMP,
                 KEY idx_account_transfer_records_user_id (user_id),
+                KEY idx_account_transfer_records_worker_status (is_worker_enabled, status),
                 KEY idx_account_transfer_records_from_account_id (from_account_id),
                 KEY idx_account_transfer_records_to_account_id (to_account_id),
                 CONSTRAINT fk_account_transfer_records_user
@@ -409,6 +411,39 @@ class MySQLConnectionManager:
                     )
                 except MySQLError as exc:
                     if "Duplicate column name" not in str(exc):
+                        raise
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s
+                  AND TABLE_NAME = 'account_transfer_records'
+                  AND COLUMN_NAME = 'is_worker_enabled'
+                """,
+                (mysql_config.database,),
+            )
+            has_transfer_worker_enabled = int(cursor.fetchone()[0]) > 0
+            if not has_transfer_worker_enabled:
+                try:
+                    cursor.execute(
+                        """
+                        ALTER TABLE account_transfer_records
+                        ADD COLUMN is_worker_enabled TINYINT(1) NOT NULL DEFAULT 0
+                        AFTER status
+                        """
+                    )
+                except MySQLError as exc:
+                    if "Duplicate column name" not in str(exc):
+                        raise
+                try:
+                    cursor.execute(
+                        """
+                        ALTER TABLE account_transfer_records
+                        ADD KEY idx_account_transfer_records_worker_status (is_worker_enabled, status)
+                        """
+                    )
+                except MySQLError as exc:
+                    if "Duplicate key name" not in str(exc):
                         raise
             cursor.execute(
                 """
