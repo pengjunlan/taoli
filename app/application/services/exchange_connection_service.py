@@ -79,7 +79,13 @@ class ExchangeConnectionService:
         exchange = self._build_exchange(normalized)
         try:
             balance = exchange.fetch_balance()
-            return float(self._extract_available_balance(balance, normalized["market_type"]))
+            return float(
+                self._extract_available_balance(
+                    balance,
+                    normalized["market_type"],
+                    normalized["exchange_code"],
+                )
+            )
         except (ccxt.AuthenticationError, ccxt.PermissionDenied) as exc:
             logger.warning(
                 "Fetch balance auth failed: exchange=%s market_type=%s detail=%s",
@@ -171,26 +177,75 @@ class ExchangeConnectionService:
             return "binanceusdm"
         return EXCHANGE_IDS[exchange_code]
 
-    def _extract_available_balance(self, balance: Any, market_type: str) -> float:
+    def _extract_available_balance(self, balance: Any, market_type: str, exchange_code: str) -> float:
         if not isinstance(balance, dict):
             return 0.0
 
-        total = 0.0
         if market_type == "swap":
+            preferred_codes = ("USDT", "USD", "USDC")
+
+            if exchange_code == "binance":
+                for code in preferred_codes:
+                    asset_info = balance.get(code)
+                    if not isinstance(asset_info, dict):
+                        continue
+                    candidate = self._pick_first_numeric(
+                        asset_info,
+                        ("free", "total", "availableBalance", "maxWithdrawAmount", "walletBalance"),
+                    )
+                    if candidate is not None:
+                        return max(candidate, 0.0)
+
+                info = balance.get("info")
+                if isinstance(info, dict):
+                    assets = info.get("assets")
+                    if isinstance(assets, list):
+                        for code in preferred_codes:
+                            matched = next(
+                                (
+                                    item
+                                    for item in assets
+                                    if isinstance(item, dict) and str(item.get("asset") or "").upper() == code
+                                ),
+                                None,
+                            )
+                            if matched is None:
+                                continue
+                            candidate = self._pick_first_numeric(
+                                matched,
+                                ("availableBalance", "maxWithdrawAmount", "walletBalance", "marginBalance"),
+                            )
+                            if candidate is not None:
+                                return max(candidate, 0.0)
+
+                    candidate = self._pick_first_numeric(
+                        info,
+                        ("availableBalance", "maxWithdrawAmount", "totalWalletBalance", "totalMarginBalance"),
+                    )
+                    if candidate is not None:
+                        return max(candidate, 0.0)
+
+            for code in preferred_codes:
+                asset_info = balance.get(code)
+                if not isinstance(asset_info, dict):
+                    continue
+                candidate = self._pick_first_numeric(
+                    asset_info,
+                    ("free", "total", "availableBalance", "maxWithdrawAmount", "walletBalance"),
+                )
+                if candidate is not None:
+                    return max(candidate, 0.0)
+
+            total = 0.0
             for code, asset_info in balance.items():
                 if code in {"info", "free", "used", "total", "timestamp", "datetime"}:
                     continue
                 if not isinstance(asset_info, dict):
                     continue
-                candidate = asset_info.get("free")
-                if candidate is None:
-                    candidate = asset_info.get("total")
+                candidate = self._pick_first_numeric(asset_info, ("free", "total"))
                 if candidate is None:
                     continue
-                try:
-                    total += float(candidate or 0)
-                except (TypeError, ValueError):
-                    continue
+                total += candidate
             return max(total, 0.0)
 
         free_balances = balance.get("free")
@@ -214,6 +269,17 @@ class ExchangeConnectionService:
             return max(total, 0.0)
 
         return 0.0
+
+    def _pick_first_numeric(self, source: Dict[str, Any], keys: tuple[str, ...]) -> float | None:
+        for key in keys:
+            candidate = source.get(key)
+            if candidate is None:
+                continue
+            try:
+                return float(candidate or 0)
+            except (TypeError, ValueError):
+                continue
+        return None
 
     def _build_connection_error_message(self, error: Exception) -> str:
         return self._map_exchange_error(str(error), prefix="连接测试失败")
