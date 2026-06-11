@@ -185,17 +185,6 @@ class ExchangeConnectionService:
             preferred_codes = ("USDT", "USD", "USDC")
 
             if exchange_code == "binance":
-                for code in preferred_codes:
-                    asset_info = balance.get(code)
-                    if not isinstance(asset_info, dict):
-                        continue
-                    candidate = self._pick_first_numeric(
-                        asset_info,
-                        ("free", "total", "availableBalance", "maxWithdrawAmount", "walletBalance"),
-                    )
-                    if candidate is not None:
-                        return max(candidate, 0.0)
-
                 info = balance.get("info")
                 if isinstance(info, dict):
                     assets = info.get("assets")
@@ -213,14 +202,25 @@ class ExchangeConnectionService:
                                 continue
                             candidate = self._pick_first_numeric(
                                 matched,
-                                ("availableBalance", "maxWithdrawAmount", "walletBalance", "marginBalance"),
+                                ("maxWithdrawAmount", "availableBalance", "walletBalance", "marginBalance"),
                             )
                             if candidate is not None:
                                 return max(candidate, 0.0)
 
                     candidate = self._pick_first_numeric(
                         info,
-                        ("availableBalance", "maxWithdrawAmount", "totalWalletBalance", "totalMarginBalance"),
+                        ("availableBalance", "maxWithdrawAmount"),
+                    )
+                    if candidate is not None:
+                        return max(candidate, 0.0)
+
+                for code in preferred_codes:
+                    asset_info = balance.get(code)
+                    if not isinstance(asset_info, dict):
+                        continue
+                    candidate = self._pick_first_numeric(
+                        asset_info,
+                        ("maxWithdrawAmount", "free", "availableBalance", "walletBalance", "marginBalance"),
                     )
                     if candidate is not None:
                         return max(candidate, 0.0)

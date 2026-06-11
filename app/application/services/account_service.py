@@ -46,6 +46,7 @@ NETWORK_LABELS = {
     "arbitrum": "Arbitrum One",
     "optimism": "Optimism",
     "polygon": "Polygon",
+    "plasma": "Plasma",
     "solana": "Solana",
     "omni": "OMNI",
     "internal": "内部划转",
