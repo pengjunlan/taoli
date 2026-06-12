@@ -139,32 +139,8 @@ class OpportunityRuntimeService:
                 "symbol_normalized": str(pair["symbol_normalized"]),
             }
 
-        refreshed_count = 0
-        funding_count = 0
-        for item in watch_targets.values():
-            try:
-                ticker_data = self._fetch_public_ticker(
-                    exchange_code=item["exchange_code"],
-                    market_type=item["market_type"],
-                    symbol=item["symbol"],
-                )
-                market_runtime_cache.set_ticker(ticker_data)
-                refreshed_count += 1
-
-                if item["market_type"] == "swap":
-                    funding_data = self._fetch_public_funding_rate(
-                        exchange_code=item["exchange_code"],
-                        symbol=item["symbol"],
-                    )
-                    if funding_data is not None:
-                        market_runtime_cache.set_funding_rate(funding_data)
-                        funding_count += 1
-            except Exception as exc:  # noqa: BLE001
-                monitor_center_service.add_log(
-                    self._monitor_key,
-                    "warning",
-                    f"{item['exchange_code']} {item['symbol']} 行情刷新失败: {exc}",
-                )
+        refreshed_count = self._refresh_public_tickers_in_batch(list(watch_targets.values()))
+        funding_count = self._refresh_public_funding_rates_in_batch(list(watch_targets.values()))
 
         if watch_targets:
             monitor_center_service.add_log(
@@ -258,8 +234,6 @@ class OpportunityRuntimeService:
         for pair in pair_rows:
             left_account = account_map.get((str(pair["left_exchange_code"]), "swap"))
             right_account = account_map.get((str(pair["right_exchange_code"]), "swap"))
-            if left_account is None or right_account is None:
-                continue
 
             left_ticker = market_runtime_cache.get_ticker(
                 str(pair["left_exchange_code"]),
@@ -286,9 +260,15 @@ class OpportunityRuntimeService:
             spread_percent = self._calc_spread_percent(left_ticker.last_price, right_ticker.last_price)
 
             left_available = float(left_account.get("current_available_amount") or 0)
+            if left_account is None:
+                left_available = 0.0
             right_available = float(right_account.get("current_available_amount") or 0)
+            if right_account is None:
+                right_available = 0.0
             qty_left = self._estimate_quantity(left_available, left_ticker.last_price)
             qty_right = self._estimate_quantity(right_available, right_ticker.last_price)
+            has_required_accounts = left_account is not None and right_account is not None
+            execution_ready = has_required_accounts and qty_left > 0 and qty_right > 0
 
             next_funding_at = left_funding.next_funding_at or right_funding.next_funding_at
             settlement = self._format_remaining(next_funding_at)
@@ -305,8 +285,8 @@ class OpportunityRuntimeService:
                         4,
                     ),
                     "spread": format_signed_percent(spread_percent, 2),
-                    "long_fee_rate": self._resolve_fee_rate_display(left_account),
-                    "short_fee_rate": self._resolve_fee_rate_display(right_account),
+                    "long_fee_rate": self._resolve_fee_rate_display(left_account, market_type="swap"),
+                    "short_fee_rate": self._resolve_fee_rate_display(right_account, market_type="swap"),
                     "qty_long": self._format_quantity(qty_left, str(pair["base_asset"])),
                     "qty_short": self._format_quantity(qty_right, str(pair["base_asset"])),
                     "avg_long": self._format_price(left_ticker.last_price),
@@ -314,6 +294,8 @@ class OpportunityRuntimeService:
                     "value_long": format_usd_compact(qty_left * left_ticker.last_price),
                     "value_short": format_usd_compact(qty_right * right_ticker.last_price),
                     "settlement": settlement,
+                    "has_required_accounts": has_required_accounts,
+                    "execution_ready": execution_ready,
                 }
             )
 
@@ -339,8 +321,6 @@ class OpportunityRuntimeService:
             right_market_type = str(pair["right_market_type"])
             left_account = account_map.get((str(pair["left_exchange_code"]), left_market_type))
             right_account = account_map.get((str(pair["right_exchange_code"]), right_market_type))
-            if left_account is None or right_account is None:
-                continue
 
             left_ticker = market_runtime_cache.get_ticker(
                 str(pair["left_exchange_code"]),
@@ -358,14 +338,20 @@ class OpportunityRuntimeService:
                 continue
 
             latest_spread = ((right_ticker.bid_price - left_ticker.ask_price) / left_ticker.ask_price) * 100
-            left_fee = self._resolve_fee_rate_value(left_account)
-            right_fee = self._resolve_fee_rate_value(right_account)
+            left_fee = self._resolve_fee_rate_value(left_account, market_type=left_market_type)
+            right_fee = self._resolve_fee_rate_value(right_account, market_type=right_market_type)
             net_spread = latest_spread - left_fee - right_fee
 
             left_available = float(left_account.get("current_available_amount") or 0)
+            if left_account is None:
+                left_available = 0.0
             right_available = float(right_account.get("current_available_amount") or 0)
+            if right_account is None:
+                right_available = 0.0
             qty_left = self._estimate_quantity(left_available, left_ticker.ask_price)
             qty_right = self._estimate_quantity(right_available, right_ticker.bid_price)
+            has_required_accounts = left_account is not None and right_account is not None
+            execution_ready = has_required_accounts and qty_left > 0 and qty_right > 0
 
             result.append(
                 {
@@ -375,8 +361,8 @@ class OpportunityRuntimeService:
                     "sell_exchange": self._exchange_label(str(pair["right_exchange_code"])),
                     "latest_spread": format_signed_percent(latest_spread, 2),
                     "net_spread": format_signed_percent(net_spread, 2),
-                    "buy_fee_rate": self._resolve_fee_rate_display(left_account),
-                    "sell_fee_rate": self._resolve_fee_rate_display(right_account),
+                    "buy_fee_rate": self._resolve_fee_rate_display(left_account, market_type=left_market_type),
+                    "sell_fee_rate": self._resolve_fee_rate_display(right_account, market_type=right_market_type),
                     "qty_long": self._format_quantity(qty_left, str(pair["base_asset"])),
                     "qty_short": self._format_quantity(qty_right, str(pair["base_asset"])),
                     "avg_long": self._format_price(left_ticker.ask_price),
@@ -384,6 +370,8 @@ class OpportunityRuntimeService:
                     "value_long": format_usd_compact(qty_left * left_ticker.ask_price),
                     "value_short": format_usd_compact(qty_right * right_ticker.bid_price),
                     "opportunity_time": self._format_datetime(left_ticker.synced_at or right_ticker.synced_at),
+                    "has_required_accounts": has_required_accounts,
+                    "execution_ready": execution_ready,
                 }
             )
 
@@ -488,11 +476,146 @@ class OpportunityRuntimeService:
             lookup[(exchange_code, market_code)] = row
         return lookup
 
-    def _resolve_fee_rate_display(self, account_row: Dict[str, Any]) -> str:
-        return f"{self._resolve_fee_rate_value(account_row):.2f}%"
+    def _refresh_public_tickers_in_batch(self, watch_targets: List[Dict[str, str]]) -> int:
+        grouped: Dict[Tuple[str, str], List[Dict[str, str]]] = {}
+        for item in watch_targets:
+            grouped.setdefault((item["exchange_code"], item["market_type"]), []).append(item)
 
-    def _resolve_fee_rate_value(self, account_row: Dict[str, Any]) -> float:
-        market_type = self._market_code_from_label(str(account_row.get("market_type") or ""))
+        refreshed_count = 0
+        for (exchange_code, market_type), items in grouped.items():
+            symbols = sorted({str(item["symbol"]) for item in items})
+            try:
+                batch = self._fetch_public_tickers(exchange_code=exchange_code, market_type=market_type, symbols=symbols)
+            except Exception as exc:  # noqa: BLE001
+                monitor_center_service.add_log(
+                    self._monitor_key,
+                    "warning",
+                    f"{exchange_code} {market_type} 批量行情刷新失败: {exc}",
+                )
+                batch = {}
+
+            for item in items:
+                ticker_data = batch.get(str(item["symbol"]))
+                if ticker_data is None:
+                    try:
+                        ticker_data = self._fetch_public_ticker(
+                            exchange_code=item["exchange_code"],
+                            market_type=item["market_type"],
+                            symbol=item["symbol"],
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        monitor_center_service.add_log(
+                            self._monitor_key,
+                            "warning",
+                            f"{item['exchange_code']} {item['symbol']} 行情刷新失败: {exc}",
+                        )
+                        continue
+                market_runtime_cache.set_ticker(ticker_data)
+                refreshed_count += 1
+        return refreshed_count
+
+    def _refresh_public_funding_rates_in_batch(self, watch_targets: List[Dict[str, str]]) -> int:
+        grouped: Dict[str, List[str]] = {}
+        for item in watch_targets:
+            if item["market_type"] != "swap":
+                continue
+            grouped.setdefault(item["exchange_code"], []).append(str(item["symbol"]))
+
+        refreshed_count = 0
+        for exchange_code, symbols in grouped.items():
+            unique_symbols = sorted(set(symbols))
+            try:
+                batch = self._fetch_public_funding_rates(exchange_code=exchange_code, symbols=unique_symbols)
+            except Exception as exc:  # noqa: BLE001
+                monitor_center_service.add_log(
+                    self._monitor_key,
+                    "warning",
+                    f"{exchange_code} 批量资金费刷新失败: {exc}",
+                )
+                batch = {}
+
+            for symbol in unique_symbols:
+                funding_data = batch.get(symbol)
+                if funding_data is None:
+                    try:
+                        funding_data = self._fetch_public_funding_rate(
+                            exchange_code=exchange_code,
+                            symbol=symbol,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        monitor_center_service.add_log(
+                            self._monitor_key,
+                            "warning",
+                            f"{exchange_code} {symbol} 资金费刷新失败: {exc}",
+                        )
+                        continue
+                if funding_data is None:
+                    continue
+                market_runtime_cache.set_funding_rate(funding_data)
+                refreshed_count += 1
+        return refreshed_count
+
+    def _fetch_public_tickers(self, *, exchange_code: str, market_type: str, symbols: List[str]) -> Dict[str, TickerCacheItem]:
+        exchange = self._build_public_exchange(exchange_code=exchange_code, market_type=market_type)
+        try:
+            payload = exchange.fetch_tickers(symbols)
+            synced_at = datetime.now()
+            result: Dict[str, TickerCacheItem] = {}
+            for symbol, ticker in payload.items():
+                normalized_symbol = str((ticker or {}).get("symbol") or symbol or "")
+                result[normalized_symbol] = TickerCacheItem(
+                    exchange_code=exchange_code,
+                    market_type=market_type,
+                    symbol=normalized_symbol,
+                    last_price=float((ticker or {}).get("last") or (ticker or {}).get("close") or 0),
+                    bid_price=float((ticker or {}).get("bid") or (ticker or {}).get("last") or 0),
+                    ask_price=float((ticker or {}).get("ask") or (ticker or {}).get("last") or 0),
+                    quote_volume=float((ticker or {}).get("quoteVolume") or 0),
+                    synced_at=synced_at,
+                )
+            return result
+        finally:
+            try:
+                exchange.close()
+            except Exception:
+                pass
+
+    def _fetch_public_funding_rates(self, *, exchange_code: str, symbols: List[str]) -> Dict[str, FundingRateCacheItem]:
+        exchange = self._build_public_exchange(exchange_code=exchange_code, market_type="swap")
+        try:
+            if not exchange.has.get("fetchFundingRates"):
+                return {}
+            payload = exchange.fetch_funding_rates(symbols)
+            result: Dict[str, FundingRateCacheItem] = {}
+            for symbol, item in payload.items():
+                row = item or {}
+                normalized_symbol = str(row.get("symbol") or symbol or "")
+                next_funding_timestamp = row.get("nextFundingTimestamp")
+                next_funding_at = (
+                    datetime.fromtimestamp(next_funding_timestamp / 1000)
+                    if next_funding_timestamp
+                    else None
+                )
+                result[normalized_symbol] = FundingRateCacheItem(
+                    exchange_code=exchange_code,
+                    symbol=normalized_symbol,
+                    funding_rate_percent=float(row.get("fundingRate") or 0) * 100,
+                    next_funding_at=next_funding_at,
+                    synced_at=datetime.now(),
+                )
+            return result
+        finally:
+            try:
+                exchange.close()
+            except Exception:
+                pass
+
+    def _resolve_fee_rate_display(self, account_row: Dict[str, Any] | None, *, market_type: str) -> str:
+        return f"{self._resolve_fee_rate_value(account_row, market_type=market_type):.2f}%"
+
+    def _resolve_fee_rate_value(self, account_row: Dict[str, Any] | None, *, market_type: str) -> float:
+        if account_row is not None:
+            market_type = self._market_code_from_label(str(account_row.get("market_type") or market_type))
         if market_type == "spot":
             return 0.10
         return 0.05
