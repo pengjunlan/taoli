@@ -8,6 +8,20 @@
             <h1>{{ page_title }}</h1>
             <p>{{ page_subtitle }}</p>
         </div>
+        <div class="section-tools">
+            <div class="inline-note" data-runtime-generated-at>最近生成：{{ generated_at }}</div>
+        </div>
+    </section>
+
+    <section class="card card--section runtime-status-card" data-runtime-status-card hidden>
+        <div class="runtime-banner">
+            <span class="pill pill--neutral" data-runtime-status-pill>预热中</span>
+            <div class="runtime-banner__text">
+                <strong data-runtime-status-label>正在初始化策略运行态</strong>
+                <span data-runtime-status-message>页面会优先展示最近一次成功快照。</span>
+            </div>
+            <div class="runtime-banner__meta" data-runtime-status-meta>--</div>
+        </div>
     </section>
 
     <section class="summary-grid">
@@ -19,11 +33,11 @@
     <section class="card card--section">
         <div class="card__header card__header--row">
             <div>
-                <h2>当前持仓</h2>
-                <p>优先看对冲是否完整、仓位是否偏离和浮动盈亏，布局与机会列表保持一致。</p>
+                <h2>规则命中候选</h2>
+                <p>这里展示规则命中后的候选持仓视图，用来确认主腿、对冲腿、计划资金和触发原因是否连贯。</p>
             </div>
             <div class="section-tools">
-                <div class="inline-note">共 {{ positions_rows|length }} 条持仓</div>
+                <div class="inline-note" data-runtime-candidate-count>候选 {{ positions_rows|length }} 条</div>
             </div>
         </div>
         <div class="table-wrap">
@@ -33,34 +47,34 @@
                         <th>交易对</th>
                         <th>执行规则</th>
                         <th>对冲组合</th>
-                        <th>仓位规模</th>
-                        <th>对冲状态</th>
+                        <th>计划规模</th>
+                        <th>状态</th>
                         <th>浮盈亏</th>
+                        <th>触发原因</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody data-positions-table-body>
                     {% for row in positions_rows %}
                     <tr>
                         <td>
                             <div class="spread-symbol">
                                 <strong>{{ row.symbol }}</strong>
-                                <span class="spread-symbol__hint">{{ row.symbol.replace('USDT', '/USDT') }}</span>
+                                <span class="spread-symbol__hint">{{ row.status or row.symbol.replace('USDT', '/USDT') }}</span>
                             </div>
                         </td>
                         <td>{{ row.strategy }}</td>
                         <td>
                             <div class="pair-cell pair-cell--spread">
-                                <span class="pair-cell__line is-positive">多头 · {{ row.long_exchange }}</span>
-                                <span class="pair-cell__line is-negative">空头 · {{ row.short_exchange }}</span>
+                                <span class="pair-cell__line is-positive">主腿 / {{ row.long_exchange }}</span>
+                                <span class="pair-cell__line is-negative">对冲 / {{ row.short_exchange }}</span>
                             </div>
                         </td>
                         <td class="spread-metric spread-metric--strong">{{ row.size }}</td>
                         <td>
-                            <span class="pill pill--{{ 'positive' if row.hedge == '完整' else 'warning' }}">
-                                {{ row.hedge }}
-                            </span>
+                            <span class="pill pill--warning">{{ row.hedge }}</span>
                         </td>
-                        <td class="spread-value {{ 'is-positive' if '+' in row.pnl else 'is-negative' }}">{{ row.pnl }}</td>
+                        <td class="spread-value">{{ row.pnl }}</td>
+                        <td>{{ row.reason or '--' }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -71,11 +85,11 @@
     <section class="card card--section">
         <div class="card__header card__header--row">
             <div>
-                <h2>未成交订单</h2>
-                <p>把待成交、部分成交、待撤单集中展示，便于和机会页的候选机会一一对应。</p>
+                <h2>候选执行记录</h2>
+                <p>这里是规则命中后生成的候选执行记录。当前先用于监控，不会在页面上伪装成已经真实下单。</p>
             </div>
             <div class="section-tools">
-                <div class="inline-note">共 {{ order_rows|length }} 条异常订单</div>
+                <div class="inline-note">共 {{ order_rows|length }} 条待评估记录</div>
             </div>
         </div>
         <div class="table-wrap">
@@ -85,25 +99,29 @@
                         <th>时间</th>
                         <th>交易对</th>
                         <th>交易所</th>
-                        <th>方向</th>
+                        <th>动作</th>
                         <th>状态</th>
                         <th>规模</th>
+                        <th>触发原因</th>
+                        <th>执行状态</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody data-orders-table-body>
                     {% for row in order_rows %}
                     <tr>
                         <td class="spread-metric">{{ row.time }}</td>
                         <td>
                             <div class="spread-symbol">
                                 <strong>{{ row.symbol }}</strong>
-                                <span class="spread-symbol__hint">{{ row.symbol.replace('USDT', '/USDT') }}</span>
+                                <span class="spread-symbol__hint">{{ row.strategy or row.symbol.replace('USDT', '/USDT') }}</span>
                             </div>
                         </td>
                         <td>{{ row.exchange }}</td>
-                        <td class="spread-value {{ 'is-positive' if row.side == '买入' else 'is-negative' }}">{{ row.side }}</td>
-                        <td>{{ row.status }}</td>
+                        <td class="spread-value">{{ row.side }}</td>
+                        <td><span class="pill pill--{{ row.status_tone or 'brand' }}">{{ row.status }}</span></td>
                         <td class="spread-metric">{{ row.size }}</td>
+                        <td>{{ row.reason or '--' }}</td>
+                        <td class="spread-metric">未下单</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -114,11 +132,11 @@
     <section class="card card--section">
         <div class="card__header card__header--row">
             <div>
-            <h2>最近成交</h2>
-            <p>后面真实成交回报接进来后，这里就是复盘入口之一，表格样式与上方保持统一。</p>
+                <h2>真实成交回报</h2>
+                <p>真实成交回报还没有接到交易所执行引擎前，这里会保持为空，用来明确区分“候选执行”和“已真实成交”。</p>
             </div>
             <div class="section-tools">
-                <div class="inline-note">共 {{ fill_rows|length }} 条最近成交</div>
+                <div class="inline-note">共 {{ fill_rows|length }} 条真实回报</div>
             </div>
         </div>
         <div class="table-wrap">
@@ -133,7 +151,7 @@
                         <th>规模</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody data-fills-table-body>
                     {% for row in fill_rows %}
                     <tr>
                         <td class="spread-metric">{{ row.time }}</td>
@@ -144,7 +162,7 @@
                             </div>
                         </td>
                         <td>{{ row.exchange }}</td>
-                        <td class="spread-value {{ 'is-positive' if row.side == '买入' else 'is-negative' }}">{{ row.side }}</td>
+                        <td class="spread-value">{{ row.side }}</td>
                         <td class="spread-metric">{{ row.price }}</td>
                         <td class="spread-metric">{{ row.size }}</td>
                     </tr>

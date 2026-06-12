@@ -275,6 +275,23 @@ class MySQLConnectionManager:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """,
             """
+            CREATE TABLE IF NOT EXISTS opportunity_snapshots (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                user_id BIGINT UNSIGNED NOT NULL,
+                channel VARCHAR(32) NOT NULL,
+                snapshot_json LONGTEXT NOT NULL,
+                row_count INT NOT NULL DEFAULT 0,
+                generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_opportunity_snapshots_user_channel (user_id, channel),
+                KEY idx_opportunity_snapshots_channel (channel),
+                CONSTRAINT fk_opportunity_snapshots_user
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                    ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            """
             CREATE TABLE IF NOT EXISTS system_exchange_configs (
                 id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 exchange_code VARCHAR(32) NOT NULL,

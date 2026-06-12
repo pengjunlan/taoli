@@ -33,12 +33,24 @@ class FundingRateCacheItem:
     synced_at: datetime | None
 
 
+@dataclass(frozen=True)
+class OpportunityRowsState:
+    channel: str
+    user_id: int
+    rows: List[dict]
+    is_ready: bool
+    source: str
+    generated_at: datetime | None
+    updated_at: datetime | None
+    message: str
+
+
 class MarketRuntimeCache:
     def __init__(self) -> None:
         self._tickers: Dict[TickerCacheKey, TickerCacheItem] = {}
         self._funding_rates: Dict[FundingRateCacheKey, FundingRateCacheItem] = {}
-        self._funding_rows_by_user: Dict[int, List[dict]] = {}
-        self._spread_rows_by_user: Dict[int, List[dict]] = {}
+        self._funding_rows_by_user: Dict[int, OpportunityRowsState] = {}
+        self._spread_rows_by_user: Dict[int, OpportunityRowsState] = {}
         self._lock = RLock()
 
     def set_ticker(self, item: TickerCacheItem) -> None:
@@ -61,21 +73,70 @@ class MarketRuntimeCache:
         with self._lock:
             return self._funding_rates.get((exchange_code, symbol))
 
-    def set_user_rows(self, channel: str, user_id: int, rows: List[dict]) -> None:
+    def set_user_rows(
+        self,
+        channel: str,
+        user_id: int,
+        rows: List[dict],
+        *,
+        is_ready: bool = True,
+        source: str = "runtime",
+        generated_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        message: str = "",
+    ) -> None:
         with self._lock:
+            state = OpportunityRowsState(
+                channel=channel,
+                user_id=user_id,
+                rows=list(rows),
+                is_ready=is_ready,
+                source=source,
+                generated_at=generated_at,
+                updated_at=updated_at or datetime.now(),
+                message=message,
+            )
             if channel == "funding":
-                self._funding_rows_by_user[user_id] = list(rows)
+                self._funding_rows_by_user[user_id] = state
                 return
             if channel == "spread":
-                self._spread_rows_by_user[user_id] = list(rows)
+                self._spread_rows_by_user[user_id] = state
 
     def get_user_rows(self, channel: str, user_id: int) -> List[dict]:
+        state = self.get_user_rows_state(channel, user_id)
+        return list(state.rows) if state is not None else []
+
+    def get_user_rows_state(self, channel: str, user_id: int) -> Optional[OpportunityRowsState]:
         with self._lock:
             if channel == "funding":
-                return list(self._funding_rows_by_user.get(user_id, []))
+                state = self._funding_rows_by_user.get(user_id)
+                if state is None:
+                    return None
+                return OpportunityRowsState(
+                    channel=state.channel,
+                    user_id=state.user_id,
+                    rows=list(state.rows),
+                    is_ready=state.is_ready,
+                    source=state.source,
+                    generated_at=state.generated_at,
+                    updated_at=state.updated_at,
+                    message=state.message,
+                )
             if channel == "spread":
-                return list(self._spread_rows_by_user.get(user_id, []))
-            return []
+                state = self._spread_rows_by_user.get(user_id)
+                if state is None:
+                    return None
+                return OpportunityRowsState(
+                    channel=state.channel,
+                    user_id=state.user_id,
+                    rows=list(state.rows),
+                    is_ready=state.is_ready,
+                    source=state.source,
+                    generated_at=state.generated_at,
+                    updated_at=state.updated_at,
+                    message=state.message,
+                )
+            return None
 
     def clear_user_rows(self, channel: str, user_id: int) -> None:
         with self._lock:

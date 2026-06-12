@@ -13,12 +13,20 @@
     <section class="card card--section">
         <div class="card__header card__header--row">
             <div>
-                <h2>资费差机会列表</h2>
-                <p>这里展示的是扫描引擎筛出的候选机会，命中你的自动规则后即可直接进入执行队列。</p>
+                <h2>资金费机会列表</h2>
+                <p>这里展示的是扫描引擎筛出的候选机会。页面会先加载最近一次成功结果，实时行情恢复后自动切到最新数据。</p>
             </div>
             <div class="section-tools">
                 <div class="inline-note" data-funding-count>加载中...</div>
             </div>
+        </div>
+        <div class="runtime-banner" data-runtime-banner hidden>
+            <span class="pill pill--neutral" data-runtime-banner-pill>预热中</span>
+            <div class="runtime-banner__text">
+                <strong data-runtime-banner-label>正在初始化资金费机会链路</strong>
+                <span data-runtime-banner-message>页面会优先展示最近一次成功快照，实时行情恢复后自动切换。</span>
+            </div>
+            <div class="runtime-banner__meta" data-runtime-banner-meta>--</div>
         </div>
 
         <div class="table-wrap">

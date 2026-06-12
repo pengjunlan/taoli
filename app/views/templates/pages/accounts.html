@@ -156,7 +156,7 @@
     <div class="account-confirm__dialog card balance-config-dialog transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="auto-transfer-title">
         <div class="account-confirm__content">
             <h2 id="auto-transfer-title">自动调拨配置</h2>
-            <p>当账户当前资金低于目标资金的一定比例时，自动从溢出资金最多的账户转出，并按最小偏差值生成调拨记录。</p>
+            <p>当账户当前资金低于目标资金的一定比例时，自动从溢出资金最多的账户转出，并按最小偏差值生成真实调拨任务。</p>
             <form class="form-stack" data-auto-transfer-form>
                 <label class="field">
                     <span class="field__label">触发比例（%）</span>
@@ -201,7 +201,7 @@
     <div class="account-confirm__dialog card balance-config-dialog transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="transfer-title">
         <div class="account-confirm__content">
             <h2 id="transfer-title">手动调拨</h2>
-            <p>选择转入账户并填写划转金额，当前只做调拨登记，后续再接真实划转接口。</p>
+            <p data-transfer-notice>当前仅支持 Binance / OKX 的真实调拨路径，提交后会进入后台真实执行，请确认账户、网络与金额无误。</p>
             <form class="form-stack" data-transfer-form>
                 <input type="hidden" name="from_account_id" value="">
                 <label class="field">
@@ -214,6 +214,7 @@
                         <option value="">请选择转入账户</option>
                     </select>
                 </label>
+                <div class="inline-note" data-transfer-option-summary>正在读取可执行目标...</div>
                 <label class="field">
                     <span class="field__label">划转金额</span>
                     <input class="field__control" type="number" name="amount" min="0" step="0.01" value="" placeholder="请输入划转金额">
@@ -258,7 +259,7 @@
         </div>
         <div class="account-confirm__actions">
             <button class="button button--ghost" type="button" data-transfer-close>取消</button>
-            <button class="button button--primary" type="button" data-transfer-save>保存</button>
+            <button class="button button--primary" type="button" data-transfer-save>提交真实调拨</button>
         </div>
     </div>
 </div>

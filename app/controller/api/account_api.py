@@ -86,8 +86,39 @@ async def create_account_transfer_api(
 
     return {
         "success": True,
-        "message": "调拨记录已保存。",
+        "message": "真实调拨任务已创建，后台开始执行。",
         "transfer_id": result.transfer_record.id,
+    }
+
+
+@router.get("/api/accounts/{account_id}/transfer-options")
+async def get_account_transfer_options_api(
+    account_id: int,
+    current_user: AuthUser = Depends(require_api_user),
+) -> Dict[str, object]:
+    try:
+        result = account_service.build_transfer_options_for_user(account_id, current_user.id)
+    except AccountNotFoundError as exc:
+        return AccountResponse(success=False, message=str(exc)).to_dict()
+    except AccountError as exc:
+        return AccountResponse(success=False, message=str(exc)).to_dict()
+    except Exception:
+        logger.exception(
+            "Get transfer options failed unexpectedly for user_id=%s account_id=%s",
+            current_user.id,
+            account_id,
+        )
+        return AccountResponse(success=False, message="读取可执行调拨目标失败：服务内部异常，请查看后端日志。").to_dict()
+
+    return {
+        "success": True,
+        "message": "可执行调拨目标读取成功。",
+        "from_account_id": result["from_account_id"],
+        "from_account_name": result["from_account_name"],
+        "options": result["options"],
+        "option_count": result["option_count"],
+        "blocked_count": result["blocked_count"],
+        "notice": result["notice"],
     }
 
 
@@ -154,7 +185,7 @@ async def execute_auto_transfer_api(
 
     return {
         "success": True,
-        "message": "自动调拨记录已生成。",
+        "message": "自动真实调拨任务已创建，后台开始执行。",
         "transfer_id": result.transfer_record.id,
     }
 

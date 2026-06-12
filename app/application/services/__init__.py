@@ -20,7 +20,16 @@ from app.application.services.opportunity_runtime_service import (
     OpportunityRuntimeService,
     opportunity_runtime_service,
 )
+from app.application.services.opportunity_snapshot_service import (
+    OpportunitySnapshotService,
+    opportunity_snapshot_service,
+)
+from app.application.services.opportunity_status_service import (
+    OpportunityStatusService,
+    opportunity_status_service,
+)
 from app.application.services.strategy_rule_service import StrategyRuleService, strategy_rule_service
+from app.application.services.strategy_runtime_service import StrategyRuntimeService, strategy_runtime_service
 from app.application.services.system_exchange_config_service import (
     SystemExchangeConfigService,
     system_exchange_config_service,
@@ -54,8 +63,14 @@ __all__ = [
     "market_sync_service",
     "OpportunityRuntimeService",
     "opportunity_runtime_service",
+    "OpportunitySnapshotService",
+    "opportunity_snapshot_service",
+    "OpportunityStatusService",
+    "opportunity_status_service",
     "StrategyRuleService",
     "strategy_rule_service",
+    "StrategyRuntimeService",
+    "strategy_runtime_service",
     "SystemExchangeConfigService",
     "system_exchange_config_service",
     "TransferExecutionMonitorService",

@@ -15,6 +15,33 @@
     padding-bottom: 20px;
 }
 
+.page-positions_orders .runtime-status-card {
+    overflow: visible;
+}
+
+.page-positions_orders .runtime-banner {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    padding: 16px 18px;
+}
+
+.page-positions_orders .runtime-banner__text {
+    display: grid;
+    gap: 4px;
+}
+
+.page-positions_orders .runtime-banner__text strong {
+    font-size: 0.95rem;
+}
+
+.page-positions_orders .runtime-banner__text span,
+.page-positions_orders .runtime-banner__meta {
+    color: var(--text-soft);
+    font-size: 0.9rem;
+}
+
 .page-positions_orders .positions-table thead th:nth-child(1),
 .page-positions_orders .positions-table tbody td:nth-child(1) {
     width: 150px;
@@ -25,7 +52,23 @@
     min-width: 220px;
 }
 
+.page-positions_orders .positions-table thead th:nth-child(7),
+.page-positions_orders .positions-table tbody td:nth-child(7),
+.page-positions_orders .orders-table thead th:nth-child(7),
+.page-positions_orders .orders-table tbody td:nth-child(7) {
+    min-width: 260px;
+}
+
+.page-positions_orders .orders-table thead th:nth-child(8),
+.page-positions_orders .orders-table tbody td:nth-child(8) {
+    min-width: 96px;
+}
+
 @media (max-width: 860px) {
+    .page-positions_orders .runtime-banner {
+        grid-template-columns: 1fr;
+    }
+
     .page-positions_orders .table-wrap {
         padding-left: 16px;
         padding-right: 16px;

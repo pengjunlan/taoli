@@ -12,8 +12,11 @@ import ccxt
 
 from app.application.services.account_service import account_service
 from app.application.services.monitor_center_service import monitor_center_service
+from app.application.services.opportunity_snapshot_service import opportunity_snapshot_service
 from app.application.services.system_exchange_config_service import system_exchange_config_service
+from app.application.services.trade_decision_service import trade_decision_service
 from app.infrastructure.cache import FundingRateCacheItem, TickerCacheItem, market_runtime_cache
+from app.infrastructure.cache import strategy_runtime_cache
 from app.infrastructure.persistence.account_repository import account_repository
 from app.infrastructure.persistence.market_repository import market_repository
 from app.shared.utils.formatters import format_countdown, format_percent, format_signed_percent, format_usd_compact
@@ -46,6 +49,7 @@ class OpportunityRuntimeService:
                 status="starting",
                 detail="准备同步市场、配对与套利机会数据",
             )
+            self._warm_caches_from_snapshot()
             self._thread = threading.Thread(
                 target=self._run_loop,
                 name="opportunity-runtime-monitor",
@@ -68,6 +72,21 @@ class OpportunityRuntimeService:
                 logger.exception("Opportunity runtime refresh failed: %s", exc)
                 monitor_center_service.mark_error(self._monitor_key, f"套利机会同步异常: {exc}")
             time.sleep(self._interval_seconds)
+
+    def _warm_caches_from_snapshot(self) -> None:
+        all_accounts = account_repository.list_all_accounts_with_address()
+        user_ids = sorted({int(row["user_id"]) for row in all_accounts})
+        warmed_count = 0
+        for user_id in user_ids:
+            result = opportunity_snapshot_service.warm_runtime_cache_from_snapshot(user_id)
+            if any(result.values()):
+                warmed_count += 1
+        if warmed_count > 0:
+            monitor_center_service.add_log(
+                self._monitor_key,
+                "info",
+                f"冷启动已恢复 {warmed_count} 个用户的历史机会快照",
+            )
 
     def _ensure_daily_market_sync(self) -> None:
         today_key = datetime.now().strftime("%Y-%m-%d")
@@ -164,14 +183,61 @@ class OpportunityRuntimeService:
         for stale_user_id in market_runtime_cache.list_user_ids("spread"):
             if stale_user_id not in user_ids:
                 market_runtime_cache.clear_user_rows("spread", stale_user_id)
+        for stale_user_id in strategy_runtime_cache.list_user_ids():
+            if stale_user_id not in user_ids:
+                strategy_runtime_cache.clear_user_payload(stale_user_id)
 
         for user_id in user_ids:
             account_rows = account_service.build_account_rows_for_user(user_id)
             strategy_rows = account_repository.list_strategy_rules_by_user_id(user_id)
             funding_rows = self._build_funding_rows_for_user(account_rows, strategy_rows)
             spread_rows = self._build_spread_rows_for_user(account_rows, strategy_rows)
-            market_runtime_cache.set_user_rows("funding", user_id, funding_rows)
-            market_runtime_cache.set_user_rows("spread", user_id, spread_rows)
+            generated_at = datetime.now()
+            market_runtime_cache.set_user_rows(
+                "funding",
+                user_id,
+                funding_rows,
+                is_ready=True,
+                source="runtime",
+                generated_at=generated_at,
+                updated_at=generated_at,
+                message="资金费机会已按最新实时行情刷新。",
+            )
+            market_runtime_cache.set_user_rows(
+                "spread",
+                user_id,
+                spread_rows,
+                is_ready=True,
+                source="runtime",
+                generated_at=generated_at,
+                updated_at=generated_at,
+                message="价差机会已按最新实时行情刷新。",
+            )
+            opportunity_snapshot_service.persist_opportunity_rows(
+                user_id=user_id,
+                channel="funding",
+                rows=funding_rows,
+                generated_at=generated_at,
+            )
+            opportunity_snapshot_service.persist_opportunity_rows(
+                user_id=user_id,
+                channel="spread",
+                rows=spread_rows,
+                generated_at=generated_at,
+            )
+            strategy_payload = trade_decision_service.build_runtime_payload(
+                user_id=user_id,
+                account_rows=account_rows,
+                strategy_rows=strategy_rows,
+                funding_rows=funding_rows,
+                spread_rows=spread_rows,
+            )
+            strategy_payload["is_ready"] = True
+            strategy_payload["source"] = "runtime"
+            strategy_payload["status_message"] = "策略运行态已按最新候选机会刷新。"
+            strategy_payload["updated_at"] = generated_at
+            strategy_runtime_cache.set_user_payload(user_id, strategy_payload)
+            opportunity_snapshot_service.persist_strategy_payload(user_id=user_id, payload=strategy_payload)
 
         monitor_center_service.mark_success(
             self._monitor_key,
@@ -415,20 +481,38 @@ class OpportunityRuntimeService:
                 pass
 
     def _build_public_exchange(self, *, exchange_code: str, market_type: str):
-        exchange_class = getattr(ccxt, exchange_code)
+        exchange_class_name = self._resolve_exchange_class_name(exchange_code=exchange_code, market_type=market_type)
+        exchange_class = getattr(ccxt, exchange_class_name)
         params = {
             "enableRateLimit": True,
-            "timeout": 10000,
+            "timeout": 20000,
             "options": {
-                "defaultType": market_type,
+                "defaultType": self._resolve_default_type(exchange_code=exchange_code, market_type=market_type),
             },
         }
+        if exchange_code == "okx":
+            params["options"]["fetchMarkets"] = {"types": [self._resolve_okx_market_fetch_type(market_type)]}
         exchange = exchange_class(params)
         try:
             exchange.session.trust_env = False
         except Exception:
             pass
         return exchange
+
+    def _resolve_exchange_class_name(self, *, exchange_code: str, market_type: str) -> str:
+        if exchange_code == "binance" and market_type == "swap":
+            return "binanceusdm"
+        return exchange_code
+
+    def _resolve_default_type(self, *, exchange_code: str, market_type: str) -> str:
+        if exchange_code == "binance" and market_type == "swap":
+            return "swap"
+        return market_type
+
+    def _resolve_okx_market_fetch_type(self, market_type: str) -> str:
+        if market_type == "swap":
+            return "swap"
+        return "spot"
 
     def _build_account_lookup(self, rows: List[Dict[str, Any]]) -> Dict[Tuple[str, str], Dict[str, Any]]:
         lookup: Dict[Tuple[str, str], Dict[str, Any]] = {}

@@ -478,6 +478,34 @@ class MySQLAccountRepository:
             )
             return list(cursor.fetchall())
 
+    def get_open_worker_transfer_record_by_user_id(self, user_id: int) -> Dict[str, Any] | None:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    user_id,
+                    from_account_id,
+                    to_account_id,
+                    amount,
+                    reason,
+                    status,
+                    is_worker_enabled,
+                    result,
+                    created_at,
+                    updated_at
+                FROM account_transfer_records
+                WHERE user_id = %s
+                  AND is_worker_enabled = 1
+                  AND status IN ('created', 'processing')
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            return cursor.fetchone()
+
     def mark_transfer_record_processing(self, record_id: int) -> bool:
         with mysql_manager.connection() as connection:
             cursor = connection.cursor()

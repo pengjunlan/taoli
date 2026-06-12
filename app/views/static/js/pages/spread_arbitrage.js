@@ -62,8 +62,8 @@ function renderSpreadRows(rows) {
           </td>
           <td>
             <div class="pair-cell pair-cell--spread">
-              <span class="pair-cell__line is-positive">买入 ${escapeHtml(row.symbol)}/USDT · ${escapeHtml(row.buy_exchange)}</span>
-              <span class="pair-cell__line is-negative">卖出 ${escapeHtml(row.symbol)}/USDT · ${escapeHtml(row.sell_exchange)}</span>
+              <span class="pair-cell__line is-positive">买入 ${escapeHtml(row.symbol)}/USDT / ${escapeHtml(row.buy_exchange)}</span>
+              <span class="pair-cell__line is-negative">卖出 ${escapeHtml(row.symbol)}/USDT / ${escapeHtml(row.sell_exchange)}</span>
             </div>
           </td>
           <td>
@@ -114,6 +114,40 @@ function renderSpreadRows(rows) {
     .join("");
 }
 
+function updateRuntimeBanner(runtimeStatus, diagnostics) {
+  const banner = document.querySelector("[data-runtime-banner]");
+  if (!banner) return;
+
+  const status = runtimeStatus || {};
+  const state = String(status.state || "").trim();
+  const pill = banner.querySelector("[data-runtime-banner-pill]");
+  const label = banner.querySelector("[data-runtime-banner-label]");
+  const message = banner.querySelector("[data-runtime-banner-message]");
+  const meta = banner.querySelector("[data-runtime-banner-meta]");
+
+  if (state === "ready") {
+    banner.hidden = true;
+    return;
+  }
+
+  banner.hidden = false;
+  if (pill) {
+    pill.textContent = String(status.label || "预热中");
+    pill.className = `pill pill--${String(status.tone || "neutral")}`;
+  }
+  if (label) {
+    label.textContent = state === "stale" ? "当前展示历史快照" : "当前正在初始化机会链路";
+  }
+  if (message) {
+    message.textContent = String(status.message || "");
+  }
+  if (meta) {
+    const generatedAt = String(status.generated_at || "--");
+    const pairCount = Number(diagnostics?.active_pair_count || 0);
+    meta.textContent = `配对 ${pairCount} 条 / 数据时间 ${generatedAt}`;
+  }
+}
+
 async function refreshSpreadRows() {
   const result = await getJson("/api/spread-opportunities");
   if (!result.success) {
@@ -126,8 +160,12 @@ async function refreshSpreadRows() {
     body.innerHTML = renderSpreadRows(result.rows || []);
   }
   if (count) {
-    count.textContent = `共 ${Number(result.opportunity_count || 0)} 个机会`;
+    const runtimeStatus = result.runtime_status || {};
+    const suffix = runtimeStatus.is_ready ? "实时" : runtimeStatus.state === "stale" ? "快照" : "预热";
+    count.textContent = `共 ${Number(result.opportunity_count || 0)} 个机会 · ${suffix}`;
   }
+
+  updateRuntimeBanner(result.runtime_status, result.diagnostics);
   refreshListPagination(document);
 }
 

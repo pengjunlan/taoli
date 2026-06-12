@@ -7,12 +7,18 @@ import threading
 import time
 
 from app.application.services.monitor_center_service import monitor_center_service
+from app.application.services.account_support import MANUAL_TRANSFER_EXECUTION_MODE
 from app.application.services.transfer_execution_service import transfer_execution_service
 from app.infrastructure.persistence.account_repository import account_repository
 from app.shared.exceptions import ExchangeError
 
 
 logger = logging.getLogger(__name__)
+
+
+# Current business behavior is intentionally preserved:
+# worker-enabled manual transfer records are still executed by this background monitor.
+WORKER_EXECUTION_SCOPE = MANUAL_TRANSFER_EXECUTION_MODE
 
 
 class TransferExecutionMonitorService:

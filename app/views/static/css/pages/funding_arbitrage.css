@@ -25,6 +25,33 @@
     font-size: 0.92rem;
 }
 
+.page-funding_arbitrage .runtime-banner {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    margin: 0 24px;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 250, 253, 0.96));
+}
+
+.page-funding_arbitrage .runtime-banner__text {
+    display: grid;
+    gap: 4px;
+}
+
+.page-funding_arbitrage .runtime-banner__text strong {
+    font-size: 0.95rem;
+}
+
+.page-funding_arbitrage .runtime-banner__text span,
+.page-funding_arbitrage .runtime-banner__meta {
+    color: var(--text-soft);
+    font-size: 0.9rem;
+}
+
 @media (max-width: 1180px) {
     .filter-card {
         position: static;
@@ -32,6 +59,10 @@
 }
 
 @media (max-width: 860px) {
+    .page-funding_arbitrage .runtime-banner {
+        grid-template-columns: 1fr;
+    }
+
     .page-funding_arbitrage .table-wrap {
         padding-left: 16px;
         padding-right: 16px;

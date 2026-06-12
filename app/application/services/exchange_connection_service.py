@@ -167,6 +167,10 @@ class ExchangeConnectionService:
                 "defaultType": "spot" if payload["market_type"] == "spot" else "swap",
             },
         }
+        if payload["exchange_code"] == "okx":
+            options["options"]["fetchMarkets"] = {
+                "types": ["spot" if payload["market_type"] == "spot" else "swap"]
+            }
         if payload["api_passphrase"]:
             options["password"] = payload["api_passphrase"]
 

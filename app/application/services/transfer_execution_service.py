@@ -10,6 +10,7 @@ from typing import Any, Dict
 import ccxt
 
 from app.application.dto.requests.exchange_requests import ExchangeConnectionTestRequest
+from app.application.services.account_support import MANUAL_TRANSFER_EXECUTION_MODE
 from app.application.services.exchange_connection_service import exchange_connection_service
 from app.shared.exceptions import ExchangeConnectionError, ExchangeError, ExchangeValidationError
 
@@ -17,6 +18,7 @@ from app.shared.exceptions import ExchangeConnectionError, ExchangeError, Exchan
 logger = logging.getLogger(__name__)
 
 TRANSFER_ASSET_CODE = "USDT"
+EXECUTION_MODE = MANUAL_TRANSFER_EXECUTION_MODE
 
 BINANCE_INTERNAL_ACCOUNT_BY_MARKET = {
     "spot": "spot",

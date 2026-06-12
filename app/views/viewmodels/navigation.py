@@ -15,7 +15,7 @@ NAV_ITEMS: Tuple[NavItem, ...] = (
     NavItem(key="funding_arbitrage", label="资金费套利", href="/funding-arbitrage"),
     NavItem(key="spread_arbitrage", label="价差套利", href="/spread-arbitrage"),
     NavItem(key="strategy_list", label="规则管理", href="/strategies"),
-    NavItem(key="positions_orders", label="持仓订单", href="/positions-orders"),
+    NavItem(key="positions_orders", label="运行监控", href="/positions-orders"),
     NavItem(key="accounts", label="账户调度", href="/accounts"),
     NavItem(key="risk_alerts", label="风控告警", href="/risk-alerts"),
     NavItem(key="system_settings", label="系统配置", href="/system-settings"),

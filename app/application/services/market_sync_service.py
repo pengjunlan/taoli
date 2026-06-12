@@ -107,20 +107,39 @@ class MarketSyncService:
                 pass
 
     def _build_public_exchange(self, *, exchange_code: str, market_type: str):
-        exchange_class = getattr(ccxt, exchange_code)
-        params = {
+        exchange_class_name = self._resolve_exchange_class_name(exchange_code=exchange_code, market_type=market_type)
+        exchange_class = getattr(ccxt, exchange_class_name)
+        options = {
             "enableRateLimit": True,
-            "timeout": 10000,
+            "timeout": 20000,
             "options": {
-                "defaultType": market_type,
+                "defaultType": self._resolve_default_type(exchange_code=exchange_code, market_type=market_type),
             },
         }
-        exchange = exchange_class(params)
+        if exchange_code == "okx":
+            options["options"]["fetchMarkets"] = {"types": [self._resolve_okx_market_fetch_type(market_type)]}
+
+        exchange = exchange_class(options)
         try:
             exchange.session.trust_env = False
         except Exception:
             pass
         return exchange
+
+    def _resolve_exchange_class_name(self, *, exchange_code: str, market_type: str) -> str:
+        if exchange_code == "binance" and market_type == "swap":
+            return "binanceusdm"
+        return exchange_code
+
+    def _resolve_default_type(self, *, exchange_code: str, market_type: str) -> str:
+        if exchange_code == "binance" and market_type == "swap":
+            return "swap"
+        return market_type
+
+    def _resolve_okx_market_fetch_type(self, market_type: str) -> str:
+        if market_type == "swap":
+            return "swap"
+        return "spot"
 
     def _build_funding_pairs(self) -> List[Dict[str, Any]]:
         rows = market_repository.list_active_markets(market_type="swap")
