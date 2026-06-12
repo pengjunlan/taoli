@@ -249,20 +249,7 @@ class OpportunityRuntimeService:
         account_rows: List[Dict[str, Any]],
         strategy_rows: List[Dict[str, Any]],
     ) -> List[dict]:
-        enabled_rules = [
-            row
-            for row in strategy_rows
-            if str(row.get("strategy_type") or "") == "funding" and bool(row.get("is_enabled"))
-        ]
-        if not enabled_rules:
-            return []
-
-        threshold = min((float(row.get("annualized_rate_threshold") or 0) for row in enabled_rules), default=0)
-        max_spread_limit = max(
-            (float(row.get("max_spread_rate_threshold") or 0) for row in enabled_rules),
-            default=0,
-        )
-        max_pairs = max((int(row.get("max_pairs") or 0) for row in enabled_rules), default=20)
+        _ = strategy_rows
 
         account_map = self._build_account_lookup(account_rows)
         pair_rows = market_repository.list_active_pairs(pair_type="funding")
@@ -298,17 +285,10 @@ class OpportunityRuntimeService:
             annualized = (left_funding.funding_rate_percent - right_funding.funding_rate_percent) * 3 * 365
             spread_percent = self._calc_spread_percent(left_ticker.last_price, right_ticker.last_price)
 
-            if threshold > 0 and annualized < threshold:
-                continue
-            if max_spread_limit > 0 and abs(spread_percent) > max_spread_limit:
-                continue
-
             left_available = float(left_account.get("current_available_amount") or 0)
             right_available = float(right_account.get("current_available_amount") or 0)
             qty_left = self._estimate_quantity(left_available, left_ticker.last_price)
             qty_right = self._estimate_quantity(right_available, right_ticker.last_price)
-            if qty_left <= 0 and qty_right <= 0:
-                continue
 
             next_funding_at = left_funding.next_funding_at or right_funding.next_funding_at
             settlement = self._format_remaining(next_funding_at)
@@ -337,7 +317,7 @@ class OpportunityRuntimeService:
                 }
             )
 
-        ordered = sorted(result, key=lambda item: item["rank_sort"], reverse=True)[:max_pairs]
+        ordered = sorted(result, key=lambda item: item["rank_sort"], reverse=True)
         for index, row in enumerate(ordered, start=1):
             row["rank"] = index
             row.pop("rank_sort", None)
@@ -348,20 +328,7 @@ class OpportunityRuntimeService:
         account_rows: List[Dict[str, Any]],
         strategy_rows: List[Dict[str, Any]],
     ) -> List[dict]:
-        enabled_rules = [
-            row
-            for row in strategy_rows
-            if str(row.get("strategy_type") or "") == "spread" and bool(row.get("is_enabled"))
-        ]
-        if not enabled_rules:
-            return []
-
-        threshold = min((float(row.get("spread_rate_threshold") or 0) for row in enabled_rules), default=0)
-        max_spread_limit = max(
-            (float(row.get("max_spread_rate_threshold") or 0) for row in enabled_rules),
-            default=0,
-        )
-        max_pairs = max((int(row.get("max_pairs") or 0) for row in enabled_rules), default=20)
+        _ = strategy_rows
 
         account_map = self._build_account_lookup(account_rows)
         pair_rows = market_repository.list_active_pairs(pair_type="spread")
@@ -391,11 +358,6 @@ class OpportunityRuntimeService:
                 continue
 
             latest_spread = ((right_ticker.bid_price - left_ticker.ask_price) / left_ticker.ask_price) * 100
-            if threshold > 0 and latest_spread < threshold:
-                continue
-            if max_spread_limit > 0 and latest_spread > max_spread_limit:
-                continue
-
             left_fee = self._resolve_fee_rate_value(left_account)
             right_fee = self._resolve_fee_rate_value(right_account)
             net_spread = latest_spread - left_fee - right_fee
@@ -404,8 +366,6 @@ class OpportunityRuntimeService:
             right_available = float(right_account.get("current_available_amount") or 0)
             qty_left = self._estimate_quantity(left_available, left_ticker.ask_price)
             qty_right = self._estimate_quantity(right_available, right_ticker.bid_price)
-            if qty_left <= 0 and qty_right <= 0:
-                continue
 
             result.append(
                 {
@@ -427,7 +387,7 @@ class OpportunityRuntimeService:
                 }
             )
 
-        ordered = sorted(result, key=lambda item: item["rank_sort"], reverse=True)[:max_pairs]
+        ordered = sorted(result, key=lambda item: item["rank_sort"], reverse=True)
         for index, row in enumerate(ordered, start=1):
             row["rank"] = index
             row.pop("rank_sort", None)
