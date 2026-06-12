@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from math import ceil
 from typing import Any, Dict
 
+from app.application.services.account_holding_service import account_holding_service
 from app.application.services.monitor_center_service import monitor_center_service
 from app.infrastructure.cache import market_runtime_cache, strategy_runtime_cache
 from app.infrastructure.persistence import opportunity_snapshot_repository
@@ -12,16 +14,38 @@ from app.infrastructure.persistence.market_repository import market_repository
 
 
 class OpportunityStatusService:
-    def build_channel_payload(self, *, channel: str, user_id: int) -> Dict[str, object]:
+    def build_channel_payload(
+        self,
+        *,
+        channel: str,
+        user_id: int,
+        page: int = 1,
+        page_size: int = 5,
+    ) -> Dict[str, object]:
         state = market_runtime_cache.get_user_rows_state(channel, user_id)
         rows = list(state.rows) if state is not None else []
+        total_rows = len(rows)
+        safe_page_size = max(1, int(page_size or 5))
+        total_pages = max(1, ceil(total_rows / safe_page_size)) if total_rows else 1
+        safe_page = min(max(1, int(page or 1)), total_pages)
+        start_index = (safe_page - 1) * safe_page_size
+        end_index = start_index + safe_page_size
+        page_rows = rows[start_index:end_index]
+        page_rows = account_holding_service.enrich_opportunity_rows(
+            user_id=user_id,
+            channel=channel,
+            rows=page_rows,
+        )
         status = self._resolve_channel_status(channel=channel, state=state)
         diagnostics = self._build_channel_diagnostics(channel=channel, user_id=user_id, state=state)
 
         return {
             "channel": channel,
-            "rows": rows,
-            "opportunity_count": len(rows),
+            "rows": page_rows,
+            "opportunity_count": total_rows,
+            "page": safe_page,
+            "page_size": safe_page_size,
+            "page_count": total_pages,
             "runtime_status": status,
             "diagnostics": diagnostics,
         }

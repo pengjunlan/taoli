@@ -1,5 +1,8 @@
-import { bindListPagination, bindPrototypeActions, refreshListPagination } from "../core/prototype.js";
+import { bindPrototypeActions } from "../core/prototype.js";
 import { bindLogoutAction, showToast } from "../core/utils.js";
+
+const PAGE_SIZE = 5;
+let currentPage = 1;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -114,6 +117,58 @@ function renderSpreadRows(rows) {
     .join("");
 }
 
+function renderPagination(totalItems, page, pageCount) {
+  const start = totalItems === 0 ? 0 : ((page - 1) * PAGE_SIZE) + 1;
+  const end = Math.min(page * PAGE_SIZE, totalItems);
+  return `
+    <div class="pagination-bar">
+      <div class="pagination-bar__meta">显示 ${start}-${end} / 共 ${totalItems} 条</div>
+      <div class="pagination-bar__actions">
+        <button class="table-action table-action--primary pagination-bar__more" type="button" data-page-action="more"${page >= pageCount ? " disabled" : ""}>更多</button>
+        <button class="table-action pagination-bar__prev" type="button" data-page-action="prev"${page <= 1 ? " disabled" : ""}>上一页</button>
+        <div class="pagination-bar__pages">
+          ${Array.from({ length: pageCount }, (_, index) => index + 1)
+            .map((item) => `<button class="table-action pagination-bar__page${item === page ? " is-active" : ""}" type="button" data-page-number="${item}">${item}</button>`)
+            .join("")}
+        </div>
+        <button class="table-action pagination-bar__next" type="button" data-page-action="next"${page >= pageCount ? " disabled" : ""}>下一页</button>
+      </div>
+    </div>
+  `;
+}
+
+function bindPagination(pageCount) {
+  const host = document.querySelector("[data-spread-pagination]");
+  if (!host) return;
+
+  host.querySelectorAll("[data-page-number]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const page = Number(button.dataset.pageNumber || 1);
+      if (page === currentPage) return;
+      currentPage = page;
+      refreshSpreadRows().catch((error) => {
+        showToast(error?.message || "读取价差套利机会失败，请稍后再试。");
+      });
+    });
+  });
+
+  host.querySelectorAll("[data-page-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = String(button.dataset.pageAction || "");
+      if (action === "prev" && currentPage > 1) {
+        currentPage -= 1;
+      } else if ((action === "next" || action === "more") && currentPage < pageCount) {
+        currentPage += 1;
+      } else {
+        return;
+      }
+      refreshSpreadRows().catch((error) => {
+        showToast(error?.message || "读取价差套利机会失败，请稍后再试。");
+      });
+    });
+  });
+}
+
 function updateRuntimeBanner(runtimeStatus, diagnostics) {
   const banner = document.querySelector("[data-runtime-banner]");
   if (!banner) return;
@@ -149,13 +204,15 @@ function updateRuntimeBanner(runtimeStatus, diagnostics) {
 }
 
 async function refreshSpreadRows() {
-  const result = await getJson("/api/spread-opportunities");
+  const result = await getJson(`/api/spread-opportunities?page=${currentPage}&page_size=${PAGE_SIZE}`);
   if (!result.success) {
     throw new Error(result.message || "读取价差套利机会失败。");
   }
 
   const body = document.querySelector("[data-spread-table-body]");
   const count = document.querySelector("[data-spread-count]");
+  const pager = document.querySelector("[data-spread-pagination]");
+
   if (body) {
     body.innerHTML = renderSpreadRows(result.rows || []);
   }
@@ -164,13 +221,19 @@ async function refreshSpreadRows() {
     const suffix = runtimeStatus.is_ready ? "实时" : runtimeStatus.state === "stale" ? "快照" : "预热";
     count.textContent = `共 ${Number(result.opportunity_count || 0)} 个机会 · ${suffix}`;
   }
+  if (pager) {
+    pager.innerHTML = renderPagination(
+      Number(result.opportunity_count || 0),
+      Number(result.page || 1),
+      Number(result.page_count || 1),
+    );
+    bindPagination(Number(result.page_count || 1));
+  }
 
   updateRuntimeBanner(result.runtime_status, result.diagnostics);
-  refreshListPagination(document);
 }
 
 bindPrototypeActions();
-bindListPagination();
 bindLogoutAction();
 refreshSpreadRows().catch((error) => {
   showToast(error?.message || "读取价差套利机会失败，请稍后再试。");
