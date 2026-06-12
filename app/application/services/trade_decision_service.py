@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List
 
+from app.application.services.local_position_service import local_position_service
+
 
 class TradeDecisionService:
     def build_runtime_payload(
@@ -24,9 +26,13 @@ class TradeDecisionService:
         candidates.extend(self._build_funding_candidates(funding_rows, funding_rules))
         candidates.extend(self._build_spread_candidates(spread_rows, spread_rules))
 
-        positions_rows = self._build_position_rows(candidates)
-        order_rows = self._build_order_rows(candidates)
-        fill_rows = self._build_fill_rows()
+        runtime_tables = local_position_service.build_runtime_tables(
+            user_id=user_id,
+            candidates=candidates,
+        )
+        positions_rows = list(runtime_tables.get("positions_rows") or [])
+        order_rows = list(runtime_tables.get("order_rows") or [])
+        fill_rows = list(runtime_tables.get("fill_rows") or [])
         summary_cards = self._build_summary_cards(candidates, positions_rows, order_rows, fill_rows)
 
         return {
@@ -168,46 +174,6 @@ class TradeDecisionService:
                 }
             )
         return result
-
-    def _build_position_rows(self, candidates: List[Dict[str, object]]) -> List[Dict[str, str]]:
-        rows: List[Dict[str, str]] = []
-        for candidate in candidates[:10]:
-            rows.append(
-                {
-                    "symbol": f"{candidate['symbol']}USDT",
-                    "strategy": str(candidate["rule_name"]),
-                    "long_exchange": str(candidate["open_exchange"]),
-                    "short_exchange": str(candidate["hedge_exchange"]),
-                    "size": str(candidate["position_size_text"]),
-                    "hedge": "候选对冲",
-                    "pnl": "--",
-                    "status": str(candidate["status_label"]),
-                    "reason": str(candidate["reason"]),
-                }
-            )
-        return rows
-
-    def _build_order_rows(self, candidates: List[Dict[str, object]]) -> List[Dict[str, str]]:
-        now_text = datetime.now().strftime("%H:%M:%S")
-        rows: List[Dict[str, str]] = []
-        for candidate in candidates[:20]:
-            rows.append(
-                {
-                    "time": now_text,
-                    "symbol": f"{candidate['symbol']}USDT",
-                    "exchange": str(candidate["open_exchange"]),
-                    "side": str(candidate["action_label"]),
-                    "status": str(candidate["status_label"]),
-                    "size": str(candidate["position_size_text"]),
-                    "strategy": str(candidate["rule_name"]),
-                    "reason": str(candidate["reason"]),
-                    "status_tone": str(candidate["status_tone"]),
-                }
-            )
-        return rows
-
-    def _build_fill_rows(self) -> List[Dict[str, str]]:
-        return []
 
     def _build_summary_cards(
         self,

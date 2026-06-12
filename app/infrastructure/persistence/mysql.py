@@ -275,6 +275,172 @@ class MySQLConnectionManager:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """,
             """
+            CREATE TABLE IF NOT EXISTS arbitrage_executions (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                user_id BIGINT UNSIGNED NOT NULL,
+                strategy_type VARCHAR(32) NOT NULL,
+                strategy_rule_id BIGINT UNSIGNED NULL,
+                strategy_rule_name VARCHAR(128) NOT NULL DEFAULT '',
+                symbol VARCHAR(128) NOT NULL,
+                base_asset VARCHAR(64) NOT NULL DEFAULT '',
+                quote_asset VARCHAR(64) NOT NULL DEFAULT 'USDT',
+                left_exchange_code VARCHAR(32) NOT NULL DEFAULT '',
+                right_exchange_code VARCHAR(32) NOT NULL DEFAULT '',
+                left_market_type VARCHAR(32) NOT NULL DEFAULT '',
+                right_market_type VARCHAR(32) NOT NULL DEFAULT '',
+                left_symbol VARCHAR(128) NOT NULL DEFAULT '',
+                right_symbol VARCHAR(128) NOT NULL DEFAULT '',
+                planned_order_amount_usdt DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+                max_position_usdt DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+                trigger_metric_primary VARCHAR(64) NOT NULL DEFAULT '',
+                trigger_metric_secondary VARCHAR(64) NOT NULL DEFAULT '',
+                trigger_metric_risk VARCHAR(64) NOT NULL DEFAULT '',
+                trigger_reason VARCHAR(255) NOT NULL DEFAULT '',
+                status VARCHAR(32) NOT NULL DEFAULT 'created',
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    ON UPDATE CURRENT_TIMESTAMP,
+                KEY idx_arbitrage_executions_user_status (user_id, status),
+                KEY idx_arbitrage_executions_strategy_type (strategy_type),
+                KEY idx_arbitrage_executions_symbol (symbol),
+                CONSTRAINT fk_arbitrage_executions_user
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                    ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS arbitrage_order_legs (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                execution_id BIGINT UNSIGNED NOT NULL,
+                user_id BIGINT UNSIGNED NOT NULL,
+                exchange_account_id BIGINT UNSIGNED NULL,
+                leg_role VARCHAR(16) NOT NULL DEFAULT 'unknown',
+                position_side VARCHAR(16) NOT NULL DEFAULT 'net',
+                exchange_code VARCHAR(32) NOT NULL DEFAULT '',
+                market_type VARCHAR(32) NOT NULL DEFAULT '',
+                symbol VARCHAR(128) NOT NULL DEFAULT '',
+                side VARCHAR(16) NOT NULL DEFAULT '',
+                order_type VARCHAR(16) NOT NULL DEFAULT 'market',
+                client_order_id VARCHAR(128) NULL,
+                exchange_order_id VARCHAR(128) NULL,
+                requested_price DECIMAL(28,12) NOT NULL DEFAULT 0.000000000000,
+                requested_quantity DECIMAL(28,12) NOT NULL DEFAULT 0.000000000000,
+                requested_value_usdt DECIMAL(28,12) NOT NULL DEFAULT 0.000000000000,
+                average_fill_price DECIMAL(28,12) NOT NULL DEFAULT 0.000000000000,
+                filled_quantity DECIMAL(28,12) NOT NULL DEFAULT 0.000000000000,
+                filled_value_usdt DECIMAL(28,12) NOT NULL DEFAULT 0.000000000000,
+                status VARCHAR(32) NOT NULL DEFAULT 'created',
+                status_message VARCHAR(255) NOT NULL DEFAULT '',
+                submitted_at DATETIME NULL,
+                acknowledged_at DATETIME NULL,
+                closed_at DATETIME NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    ON UPDATE CURRENT_TIMESTAMP,
+                KEY idx_arbitrage_order_legs_execution_id (execution_id),
+                KEY idx_arbitrage_order_legs_user_status (user_id, status),
+                KEY idx_arbitrage_order_legs_exchange_order_id (exchange_order_id),
+                CONSTRAINT fk_arbitrage_order_legs_execution
+                    FOREIGN KEY (execution_id) REFERENCES arbitrage_executions (id)
+                    ON DELETE CASCADE,
+                CONSTRAINT fk_arbitrage_order_legs_user
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                    ON DELETE CASCADE,
+                CONSTRAINT fk_arbitrage_order_legs_account
+                    FOREIGN KEY (exchange_account_id) REFERENCES exchange_accounts (id)
+                    ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS arbitrage_fill_records (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                execution_id BIGINT UNSIGNED NOT NULL,
+                order_leg_id BIGINT UNSIGNED NOT NULL,
+                user_id BIGINT UNSIGNED NOT NULL,
+                exchange_account_id BIGINT UNSIGNED NULL,
+                exchange_code VARCHAR(32) NOT NULL DEFAULT '',
+                market_type VARCHAR(32) NOT NULL DEFAULT '',
+                symbol VARCHAR(128) NOT NULL DEFAULT '',
+                position_side VARCHAR(16) NOT NULL DEFAULT 'net',
+                side VARCHAR(16) NOT NULL DEFAULT '',
+                exchange_fill_id VARCHAR(128) NULL,
+                fill_price DECIMAL(28,12) NOT NULL DEFAULT 0.000000000000,
+                fill_quantity DECIMAL(28,12) NOT NULL DEFAULT 0.000000000000,
+                fill_value_usdt DECIMAL(28,12) NOT NULL DEFAULT 0.000000000000,
+                fee_amount DECIMAL(28,12) NOT NULL DEFAULT 0.000000000000,
+                fee_asset VARCHAR(32) NOT NULL DEFAULT '',
+                liquidity VARCHAR(16) NOT NULL DEFAULT '',
+                filled_at DATETIME NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                KEY idx_arbitrage_fill_records_execution_id (execution_id),
+                KEY idx_arbitrage_fill_records_order_leg_id (order_leg_id),
+                KEY idx_arbitrage_fill_records_user_id (user_id),
+                KEY idx_arbitrage_fill_records_symbol (symbol),
+                CONSTRAINT fk_arbitrage_fill_records_execution
+                    FOREIGN KEY (execution_id) REFERENCES arbitrage_executions (id)
+                    ON DELETE CASCADE,
+                CONSTRAINT fk_arbitrage_fill_records_order_leg
+                    FOREIGN KEY (order_leg_id) REFERENCES arbitrage_order_legs (id)
+                    ON DELETE CASCADE,
+                CONSTRAINT fk_arbitrage_fill_records_user
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                    ON DELETE CASCADE,
+                CONSTRAINT fk_arbitrage_fill_records_account
+                    FOREIGN KEY (exchange_account_id) REFERENCES exchange_accounts (id)
+                    ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS arbitrage_positions (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                user_id BIGINT UNSIGNED NOT NULL,
+                exchange_account_id BIGINT UNSIGNED NULL,
+                exchange_code VARCHAR(32) NOT NULL DEFAULT '',
+                market_type VARCHAR(32) NOT NULL DEFAULT '',
+                symbol VARCHAR(128) NOT NULL DEFAULT '',
+                base_asset VARCHAR(64) NOT NULL DEFAULT '',
+                quote_asset VARCHAR(64) NOT NULL DEFAULT 'USDT',
+                position_side VARCHAR(16) NOT NULL DEFAULT 'net',
+                quantity DECIMAL(28,12) NOT NULL DEFAULT 0.000000000000,
+                avg_entry_price DECIMAL(28,12) NOT NULL DEFAULT 0.000000000000,
+                mark_price DECIMAL(28,12) NOT NULL DEFAULT 0.000000000000,
+                market_value_usdt DECIMAL(28,12) NOT NULL DEFAULT 0.000000000000,
+                realized_pnl_usdt DECIMAL(28,12) NOT NULL DEFAULT 0.000000000000,
+                unrealized_pnl_usdt DECIMAL(28,12) NOT NULL DEFAULT 0.000000000000,
+                opened_by_execution_id BIGINT UNSIGNED NULL,
+                last_order_leg_id BIGINT UNSIGNED NULL,
+                last_fill_id BIGINT UNSIGNED NULL,
+                status VARCHAR(32) NOT NULL DEFAULT 'open',
+                last_synced_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_arbitrage_positions_account_symbol_side (
+                    exchange_account_id,
+                    market_type,
+                    symbol,
+                    position_side
+                ),
+                KEY idx_arbitrage_positions_user_status (user_id, status),
+                KEY idx_arbitrage_positions_symbol (symbol),
+                CONSTRAINT fk_arbitrage_positions_user
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                    ON DELETE CASCADE,
+                CONSTRAINT fk_arbitrage_positions_account
+                    FOREIGN KEY (exchange_account_id) REFERENCES exchange_accounts (id)
+                    ON DELETE SET NULL,
+                CONSTRAINT fk_arbitrage_positions_execution
+                    FOREIGN KEY (opened_by_execution_id) REFERENCES arbitrage_executions (id)
+                    ON DELETE SET NULL,
+                CONSTRAINT fk_arbitrage_positions_order_leg
+                    FOREIGN KEY (last_order_leg_id) REFERENCES arbitrage_order_legs (id)
+                    ON DELETE SET NULL,
+                CONSTRAINT fk_arbitrage_positions_fill
+                    FOREIGN KEY (last_fill_id) REFERENCES arbitrage_fill_records (id)
+                    ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            """
             CREATE TABLE IF NOT EXISTS opportunity_snapshots (
                 id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 user_id BIGINT UNSIGNED NOT NULL,

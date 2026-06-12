@@ -8,6 +8,7 @@ from app.domain.entities import AuthUser
 from app.infrastructure.cache import market_runtime_cache
 
 from .account_service import account_service
+from .local_position_service import local_position_service
 from .monitor_center_service import monitor_center_service
 
 
@@ -19,8 +20,12 @@ class DashboardService:
             account_rows,
             auto_transfer_config.trigger_ratio,
         )
-        funding_rows = market_runtime_cache.get_user_rows("funding", current_user.id)
-        spread_rows = market_runtime_cache.get_user_rows("spread", current_user.id)
+        funding_rows = local_position_service.enrich_opportunity_rows(
+            rows=market_runtime_cache.get_user_rows("funding", current_user.id)
+        )
+        spread_rows = local_position_service.enrich_opportunity_rows(
+            rows=market_runtime_cache.get_user_rows("spread", current_user.id)
+        )
         workers = monitor_center_service.snapshot()
 
         summary_cards = self._build_summary_cards(

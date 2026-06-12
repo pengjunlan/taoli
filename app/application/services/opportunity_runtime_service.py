@@ -123,36 +123,20 @@ class OpportunityRuntimeService:
         )
 
     def _refresh_public_market_runtime(self) -> None:
-        active_pairs = market_repository.list_active_pairs()
+        active_markets = market_repository.list_active_markets()
         watch_targets: Dict[Tuple[str, str, str], Dict[str, str]] = {}
 
-        for pair in active_pairs:
-            left_exchange_code = str(pair["left_exchange_code"])
-            right_exchange_code = str(pair["right_exchange_code"])
-            left_market_type = str(pair["left_market_type"])
-            right_market_type = str(pair["right_market_type"])
-
-            left_key = (
-                left_exchange_code,
-                left_market_type,
-                str(pair["left_symbol"]),
+        for market in active_markets:
+            market_key = (
+                str(market["exchange_code"]),
+                str(market["market_type"]),
+                str(market["symbol"]),
             )
-            right_key = (
-                right_exchange_code,
-                right_market_type,
-                str(pair["right_symbol"]),
-            )
-            watch_targets[left_key] = {
-                "exchange_code": left_key[0],
-                "market_type": left_key[1],
-                "symbol": left_key[2],
-                "symbol_normalized": str(pair["symbol_normalized"]),
-            }
-            watch_targets[right_key] = {
-                "exchange_code": right_key[0],
-                "market_type": right_key[1],
-                "symbol": right_key[2],
-                "symbol_normalized": str(pair["symbol_normalized"]),
+            watch_targets[market_key] = {
+                "exchange_code": market_key[0],
+                "market_type": market_key[1],
+                "symbol": market_key[2],
+                "symbol_normalized": str(market["symbol_normalized"]),
             }
 
         refreshed_count = self._refresh_public_tickers_in_batch(list(watch_targets.values()))
@@ -162,7 +146,7 @@ class OpportunityRuntimeService:
             monitor_center_service.add_log(
                 self._monitor_key,
                 "info",
-                f"公共行情已刷新 {refreshed_count} 个 ticker，{funding_count} 个 funding rate",
+                f"公共行情已刷新 {refreshed_count} 个 ticker，{funding_count} 个 funding rate，覆盖 {len(watch_targets)} 个市场",
             )
 
     def _refresh_user_opportunity_rows(self) -> None:
@@ -299,10 +283,15 @@ class OpportunityRuntimeService:
 
             left_available = float(left_account.get("current_available_amount") or 0) if left_account is not None else 0.0
             right_available = float(right_account.get("current_available_amount") or 0) if right_account is not None else 0.0
-            qty_left = self._estimate_quantity(left_available, left_ticker.last_price if left_ticker is not None else 0)
-            qty_right = self._estimate_quantity(right_available, right_ticker.last_price if right_ticker is not None else 0)
+            executable_qty_left = self._estimate_quantity(left_available, left_ticker.last_price if left_ticker is not None else 0)
+            executable_qty_right = self._estimate_quantity(right_available, right_ticker.last_price if right_ticker is not None else 0)
             has_required_accounts = left_account is not None and right_account is not None
-            execution_ready = has_required_accounts and has_market_data and qty_left > 0 and qty_right > 0
+            execution_ready = (
+                has_required_accounts
+                and has_market_data
+                and executable_qty_left > 0
+                and executable_qty_right > 0
+            )
 
             next_funding_at = None
             if left_funding is not None:
@@ -337,12 +326,12 @@ class OpportunityRuntimeService:
                     "spread": format_signed_percent(spread_percent, 2) if has_market_data else "--",
                     "long_fee_rate": self._resolve_fee_rate_display(left_account, market_type="swap"),
                     "short_fee_rate": self._resolve_fee_rate_display(right_account, market_type="swap"),
-                    "qty_long": self._format_quantity(qty_left, str(pair["base_asset"])),
-                    "qty_short": self._format_quantity(qty_right, str(pair["base_asset"])),
+                    "qty_long": self._format_quantity(0, str(pair["base_asset"])),
+                    "qty_short": self._format_quantity(0, str(pair["base_asset"])),
                     "avg_long": self._format_price(left_ticker.last_price) if left_ticker is not None else "--",
                     "avg_short": self._format_price(right_ticker.last_price) if right_ticker is not None else "--",
-                    "value_long": format_usd_compact(qty_left * left_ticker.last_price) if left_ticker is not None else "--",
-                    "value_short": format_usd_compact(qty_right * right_ticker.last_price) if right_ticker is not None else "--",
+                    "value_long": "$0",
+                    "value_short": "$0",
                     "settlement": settlement if has_market_data else "--",
                     "has_required_accounts": has_required_accounts,
                     "execution_ready": execution_ready,
@@ -401,10 +390,15 @@ class OpportunityRuntimeService:
 
             left_available = float(left_account.get("current_available_amount") or 0) if left_account is not None else 0.0
             right_available = float(right_account.get("current_available_amount") or 0) if right_account is not None else 0.0
-            qty_left = self._estimate_quantity(left_available, left_ticker.ask_price if left_ticker is not None else 0)
-            qty_right = self._estimate_quantity(right_available, right_ticker.bid_price if right_ticker is not None else 0)
+            executable_qty_left = self._estimate_quantity(left_available, left_ticker.ask_price if left_ticker is not None else 0)
+            executable_qty_right = self._estimate_quantity(right_available, right_ticker.bid_price if right_ticker is not None else 0)
             has_required_accounts = left_account is not None and right_account is not None
-            execution_ready = has_required_accounts and has_market_data and qty_left > 0 and qty_right > 0
+            execution_ready = (
+                has_required_accounts
+                and has_market_data
+                and executable_qty_left > 0
+                and executable_qty_right > 0
+            )
 
             result.append(
                 {
@@ -424,12 +418,12 @@ class OpportunityRuntimeService:
                     "net_spread": format_signed_percent(net_spread, 2) if has_market_data else "--",
                     "buy_fee_rate": self._resolve_fee_rate_display(left_account, market_type=left_market_type),
                     "sell_fee_rate": self._resolve_fee_rate_display(right_account, market_type=right_market_type),
-                    "qty_long": self._format_quantity(qty_left, str(pair["base_asset"])),
-                    "qty_short": self._format_quantity(qty_right, str(pair["base_asset"])),
+                    "qty_long": self._format_quantity(0, str(pair["base_asset"])),
+                    "qty_short": self._format_quantity(0, str(pair["base_asset"])),
                     "avg_long": self._format_price(left_ticker.ask_price) if left_ticker is not None else "--",
                     "avg_short": self._format_price(right_ticker.bid_price) if right_ticker is not None else "--",
-                    "value_long": format_usd_compact(qty_left * left_ticker.ask_price) if left_ticker is not None else "--",
-                    "value_short": format_usd_compact(qty_right * right_ticker.bid_price) if right_ticker is not None else "--",
+                    "value_long": "$0",
+                    "value_short": "$0",
                     "opportunity_time": self._format_datetime(left_ticker.synced_at or right_ticker.synced_at) if has_market_data and left_ticker is not None and right_ticker is not None else "--",
                     "has_required_accounts": has_required_accounts,
                     "execution_ready": execution_ready,

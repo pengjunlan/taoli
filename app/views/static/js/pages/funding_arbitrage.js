@@ -95,8 +95,8 @@ function renderFundingRows(rows) {
           </td>
           <td>
             <div class="pair-cell pair-cell--hedge">
-              <span class="pair-cell__line pair-cell__line--hedge is-positive">${escapeHtml(row.avg_long)}</span>
-              <span class="pair-cell__line pair-cell__line--hedge is-negative">${escapeHtml(row.avg_short)}</span>
+              <span class="pair-cell__line pair-cell__line--hedge is-positive">${escapeHtml(row.long_exchange)} ${escapeHtml(row.avg_long)}</span>
+              <span class="pair-cell__line pair-cell__line--hedge is-negative">${escapeHtml(row.short_exchange)} ${escapeHtml(row.avg_short)}</span>
             </div>
           </td>
           <td>
@@ -117,9 +117,35 @@ function renderFundingRows(rows) {
     .join("");
 }
 
+function buildPageItems(page, pageCount) {
+  if (pageCount <= 7) {
+    return Array.from({ length: pageCount }, (_, index) => index + 1);
+  }
+
+  const items = [1];
+  const start = Math.max(2, page - 2);
+  const end = Math.min(pageCount - 1, page + 2);
+
+  if (start > 2) {
+    items.push("ellipsis-left");
+  }
+
+  for (let value = start; value <= end; value += 1) {
+    items.push(value);
+  }
+
+  if (end < pageCount - 1) {
+    items.push("ellipsis-right");
+  }
+
+  items.push(pageCount);
+  return items;
+}
+
 function renderPagination(totalItems, page, pageCount) {
   const start = totalItems === 0 ? 0 : ((page - 1) * PAGE_SIZE) + 1;
   const end = Math.min(page * PAGE_SIZE, totalItems);
+  const pageItems = buildPageItems(page, pageCount);
   return `
     <div class="pagination-bar">
       <div class="pagination-bar__meta">显示 ${start}-${end} / 共 ${totalItems} 条</div>
@@ -127,8 +153,13 @@ function renderPagination(totalItems, page, pageCount) {
         <button class="table-action table-action--primary pagination-bar__more" type="button" data-page-action="more"${page >= pageCount ? " disabled" : ""}>更多</button>
         <button class="table-action pagination-bar__prev" type="button" data-page-action="prev"${page <= 1 ? " disabled" : ""}>上一页</button>
         <div class="pagination-bar__pages">
-          ${Array.from({ length: pageCount }, (_, index) => index + 1)
-            .map((item) => `<button class="table-action pagination-bar__page${item === page ? " is-active" : ""}" type="button" data-page-number="${item}">${item}</button>`)
+          ${pageItems
+            .map((item) => {
+              if (typeof item !== "number") {
+                return `<span class="pagination-bar__ellipsis">...</span>`;
+              }
+              return `<button class="table-action pagination-bar__page${item === page ? " is-active" : ""}" type="button" data-page-number="${item}">${item}</button>`;
+            })
             .join("")}
         </div>
         <button class="table-action pagination-bar__next" type="button" data-page-action="next"${page >= pageCount ? " disabled" : ""}>下一页</button>
@@ -157,8 +188,10 @@ function bindPagination(pageCount) {
       const action = String(button.dataset.pageAction || "");
       if (action === "prev" && currentPage > 1) {
         currentPage -= 1;
-      } else if ((action === "next" || action === "more") && currentPage < pageCount) {
+      } else if (action === "next" && currentPage < pageCount) {
         currentPage += 1;
+      } else if (action === "more" && currentPage < pageCount) {
+        currentPage = Math.min(currentPage + 5, pageCount);
       } else {
         return;
       }

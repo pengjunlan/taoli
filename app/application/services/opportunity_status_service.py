@@ -6,7 +6,7 @@ from datetime import datetime
 from math import ceil
 from typing import Any, Dict
 
-from app.application.services.account_holding_service import account_holding_service
+from app.application.services.local_position_service import local_position_service
 from app.application.services.monitor_center_service import monitor_center_service
 from app.infrastructure.cache import market_runtime_cache, strategy_runtime_cache
 from app.infrastructure.persistence import opportunity_snapshot_repository
@@ -31,11 +31,7 @@ class OpportunityStatusService:
         start_index = (safe_page - 1) * safe_page_size
         end_index = start_index + safe_page_size
         page_rows = rows[start_index:end_index]
-        page_rows = account_holding_service.enrich_opportunity_rows(
-            user_id=user_id,
-            channel=channel,
-            rows=page_rows,
-        )
+        page_rows = local_position_service.enrich_opportunity_rows(rows=page_rows)
         status = self._resolve_channel_status(channel=channel, state=state)
         diagnostics = self._build_channel_diagnostics(channel=channel, user_id=user_id, state=state)
 
