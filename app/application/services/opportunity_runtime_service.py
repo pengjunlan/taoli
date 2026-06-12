@@ -66,7 +66,15 @@ class OpportunityRuntimeService:
                     detail="线程心跳正常，准备刷新市场与机会缓存",
                 )
                 self._ensure_daily_market_sync()
-                self._refresh_public_market_runtime()
+                try:
+                    self._refresh_public_market_runtime()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Public market runtime refresh degraded: %s", exc)
+                    monitor_center_service.add_log(
+                        self._monitor_key,
+                        "warning",
+                        f"公共行情刷新未完成，先继续生成配对列表：{exc}",
+                    )
                 self._refresh_user_opportunity_rows()
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Opportunity runtime refresh failed: %s", exc)
@@ -275,11 +283,23 @@ class OpportunityRuntimeService:
                 str(pair["right_exchange_code"]),
                 str(pair["right_symbol"]),
             )
-            if left_ticker is None or right_ticker is None or left_funding is None or right_funding is None:
-                continue
+            has_market_data = (
+                left_ticker is not None
+                and right_ticker is not None
+                and left_funding is not None
+                and right_funding is not None
+            )
 
-            annualized = (left_funding.funding_rate_percent - right_funding.funding_rate_percent) * 3 * 365
-            spread_percent = self._calc_spread_percent(left_ticker.last_price, right_ticker.last_price)
+            annualized = (
+                (left_funding.funding_rate_percent - right_funding.funding_rate_percent) * 3 * 365
+                if has_market_data
+                else 0.0
+            )
+            spread_percent = (
+                self._calc_spread_percent(left_ticker.last_price, right_ticker.last_price)
+                if has_market_data and left_ticker is not None and right_ticker is not None
+                else 0.0
+            )
 
             left_available = float(left_account.get("current_available_amount") or 0)
             if left_account is None:
@@ -287,12 +307,16 @@ class OpportunityRuntimeService:
             right_available = float(right_account.get("current_available_amount") or 0)
             if right_account is None:
                 right_available = 0.0
-            qty_left = self._estimate_quantity(left_available, left_ticker.last_price)
-            qty_right = self._estimate_quantity(right_available, right_ticker.last_price)
+            qty_left = self._estimate_quantity(left_available, left_ticker.last_price if left_ticker is not None else 0)
+            qty_right = self._estimate_quantity(right_available, right_ticker.last_price if right_ticker is not None else 0)
             has_required_accounts = left_account is not None and right_account is not None
-            execution_ready = has_required_accounts and qty_left > 0 and qty_right > 0
+            execution_ready = has_required_accounts and has_market_data and qty_left > 0 and qty_right > 0
 
-            next_funding_at = left_funding.next_funding_at or right_funding.next_funding_at
+            next_funding_at = None
+            if left_funding is not None:
+                next_funding_at = left_funding.next_funding_at
+            if next_funding_at is None and right_funding is not None:
+                next_funding_at = right_funding.next_funding_at
             settlement = self._format_remaining(next_funding_at)
 
             result.append(
@@ -301,23 +325,28 @@ class OpportunityRuntimeService:
                     "symbol": str(pair["base_asset"]),
                     "long_exchange": self._exchange_label(str(pair["left_exchange_code"])),
                     "short_exchange": self._exchange_label(str(pair["right_exchange_code"])),
-                    "annual": format_percent(annualized, 2),
-                    "net_rate": format_percent(
-                        left_funding.funding_rate_percent - right_funding.funding_rate_percent,
-                        4,
+                    "annual": format_percent(annualized, 2) if has_market_data else "--",
+                    "net_rate": (
+                        format_percent(
+                            left_funding.funding_rate_percent - right_funding.funding_rate_percent,
+                            4,
+                        )
+                        if has_market_data and left_funding is not None and right_funding is not None
+                        else "--"
                     ),
-                    "spread": format_signed_percent(spread_percent, 2),
+                    "spread": format_signed_percent(spread_percent, 2) if has_market_data else "--",
                     "long_fee_rate": self._resolve_fee_rate_display(left_account, market_type="swap"),
                     "short_fee_rate": self._resolve_fee_rate_display(right_account, market_type="swap"),
                     "qty_long": self._format_quantity(qty_left, str(pair["base_asset"])),
                     "qty_short": self._format_quantity(qty_right, str(pair["base_asset"])),
-                    "avg_long": self._format_price(left_ticker.last_price),
-                    "avg_short": self._format_price(right_ticker.last_price),
-                    "value_long": format_usd_compact(qty_left * left_ticker.last_price),
-                    "value_short": format_usd_compact(qty_right * right_ticker.last_price),
-                    "settlement": settlement,
+                    "avg_long": self._format_price(left_ticker.last_price) if left_ticker is not None else "--",
+                    "avg_short": self._format_price(right_ticker.last_price) if right_ticker is not None else "--",
+                    "value_long": format_usd_compact(qty_left * left_ticker.last_price) if left_ticker is not None else "--",
+                    "value_short": format_usd_compact(qty_right * right_ticker.last_price) if right_ticker is not None else "--",
+                    "settlement": settlement if has_market_data else "--",
                     "has_required_accounts": has_required_accounts,
                     "execution_ready": execution_ready,
+                    "has_market_data": has_market_data,
                 }
             )
 
@@ -354,15 +383,21 @@ class OpportunityRuntimeService:
                 right_market_type,
                 str(pair["right_symbol"]),
             )
-            if left_ticker is None or right_ticker is None:
-                continue
-            if left_ticker.ask_price <= 0 or right_ticker.bid_price <= 0:
-                continue
+            has_market_data = (
+                left_ticker is not None
+                and right_ticker is not None
+                and left_ticker.ask_price > 0
+                and right_ticker.bid_price > 0
+            )
 
-            latest_spread = ((right_ticker.bid_price - left_ticker.ask_price) / left_ticker.ask_price) * 100
+            latest_spread = (
+                ((right_ticker.bid_price - left_ticker.ask_price) / left_ticker.ask_price) * 100
+                if has_market_data and left_ticker is not None and right_ticker is not None
+                else 0.0
+            )
             left_fee = self._resolve_fee_rate_value(left_account, market_type=left_market_type)
             right_fee = self._resolve_fee_rate_value(right_account, market_type=right_market_type)
-            net_spread = latest_spread - left_fee - right_fee
+            net_spread = latest_spread - left_fee - right_fee if has_market_data else 0.0
 
             left_available = float(left_account.get("current_available_amount") or 0)
             if left_account is None:
@@ -370,10 +405,10 @@ class OpportunityRuntimeService:
             right_available = float(right_account.get("current_available_amount") or 0)
             if right_account is None:
                 right_available = 0.0
-            qty_left = self._estimate_quantity(left_available, left_ticker.ask_price)
-            qty_right = self._estimate_quantity(right_available, right_ticker.bid_price)
+            qty_left = self._estimate_quantity(left_available, left_ticker.ask_price if left_ticker is not None else 0)
+            qty_right = self._estimate_quantity(right_available, right_ticker.bid_price if right_ticker is not None else 0)
             has_required_accounts = left_account is not None and right_account is not None
-            execution_ready = has_required_accounts and qty_left > 0 and qty_right > 0
+            execution_ready = has_required_accounts and has_market_data and qty_left > 0 and qty_right > 0
 
             result.append(
                 {
@@ -381,19 +416,20 @@ class OpportunityRuntimeService:
                     "symbol": str(pair["base_asset"]),
                     "buy_exchange": self._exchange_label(str(pair["left_exchange_code"])),
                     "sell_exchange": self._exchange_label(str(pair["right_exchange_code"])),
-                    "latest_spread": format_signed_percent(latest_spread, 2),
-                    "net_spread": format_signed_percent(net_spread, 2),
+                    "latest_spread": format_signed_percent(latest_spread, 2) if has_market_data else "--",
+                    "net_spread": format_signed_percent(net_spread, 2) if has_market_data else "--",
                     "buy_fee_rate": self._resolve_fee_rate_display(left_account, market_type=left_market_type),
                     "sell_fee_rate": self._resolve_fee_rate_display(right_account, market_type=right_market_type),
                     "qty_long": self._format_quantity(qty_left, str(pair["base_asset"])),
                     "qty_short": self._format_quantity(qty_right, str(pair["base_asset"])),
-                    "avg_long": self._format_price(left_ticker.ask_price),
-                    "avg_short": self._format_price(right_ticker.bid_price),
-                    "value_long": format_usd_compact(qty_left * left_ticker.ask_price),
-                    "value_short": format_usd_compact(qty_right * right_ticker.bid_price),
-                    "opportunity_time": self._format_datetime(left_ticker.synced_at or right_ticker.synced_at),
+                    "avg_long": self._format_price(left_ticker.ask_price) if left_ticker is not None else "--",
+                    "avg_short": self._format_price(right_ticker.bid_price) if right_ticker is not None else "--",
+                    "value_long": format_usd_compact(qty_left * left_ticker.ask_price) if left_ticker is not None else "--",
+                    "value_short": format_usd_compact(qty_right * right_ticker.bid_price) if right_ticker is not None else "--",
+                    "opportunity_time": self._format_datetime(left_ticker.synced_at or right_ticker.synced_at) if has_market_data and left_ticker is not None and right_ticker is not None else "--",
                     "has_required_accounts": has_required_accounts,
                     "execution_ready": execution_ready,
+                    "has_market_data": has_market_data,
                 }
             )
 
