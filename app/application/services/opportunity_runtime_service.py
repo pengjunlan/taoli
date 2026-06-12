@@ -112,18 +112,40 @@ class OpportunityRuntimeService:
         )
 
     def _refresh_public_market_runtime(self) -> None:
+        account_rows = account_repository.list_all_accounts_with_address()
+        relevant_accounts = {
+            (str(row.get("exchange_code") or ""), str(row.get("market_type") or ""))
+            for row in account_rows
+            if str(row.get("exchange_code") or "").strip() and str(row.get("market_type") or "").strip()
+        }
         active_pairs = market_repository.list_active_pairs()
         watch_targets: Dict[Tuple[str, str, str], Dict[str, str]] = {}
 
         for pair in active_pairs:
+            left_exchange_code = str(pair["left_exchange_code"])
+            right_exchange_code = str(pair["right_exchange_code"])
+            left_market_type = str(pair["left_market_type"])
+            right_market_type = str(pair["right_market_type"])
+            pair_type = str(pair.get("pair_type") or "")
+
+            if pair_type == "funding":
+                left_required = (left_exchange_code, "swap")
+                right_required = (right_exchange_code, "swap")
+            else:
+                left_required = (left_exchange_code, left_market_type)
+                right_required = (right_exchange_code, right_market_type)
+
+            if left_required not in relevant_accounts and right_required not in relevant_accounts:
+                continue
+
             left_key = (
-                str(pair["left_exchange_code"]),
-                str(pair["left_market_type"]),
+                left_exchange_code,
+                left_market_type,
                 str(pair["left_symbol"]),
             )
             right_key = (
-                str(pair["right_exchange_code"]),
-                str(pair["right_market_type"]),
+                right_exchange_code,
+                right_market_type,
                 str(pair["right_symbol"]),
             )
             watch_targets[left_key] = {
