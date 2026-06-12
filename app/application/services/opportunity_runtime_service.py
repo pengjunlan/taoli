@@ -34,6 +34,8 @@ class OpportunityRuntimeService:
         self._monitor_key = "opportunity_runtime_sync"
         self._last_market_sync_date = ""
         self._last_market_sync_success = False
+        self._ticker_batch_size = 80
+        self._funding_batch_size = 40
 
     def start(self) -> None:
         with self._lock:
@@ -121,12 +123,6 @@ class OpportunityRuntimeService:
         )
 
     def _refresh_public_market_runtime(self) -> None:
-        account_rows = account_repository.list_all_accounts_with_address()
-        relevant_accounts = {
-            (str(row.get("exchange_code") or ""), str(row.get("market_type") or ""))
-            for row in account_rows
-            if str(row.get("exchange_code") or "").strip() and str(row.get("market_type") or "").strip()
-        }
         active_pairs = market_repository.list_active_pairs()
         watch_targets: Dict[Tuple[str, str, str], Dict[str, str]] = {}
 
@@ -135,17 +131,6 @@ class OpportunityRuntimeService:
             right_exchange_code = str(pair["right_exchange_code"])
             left_market_type = str(pair["left_market_type"])
             right_market_type = str(pair["right_market_type"])
-            pair_type = str(pair.get("pair_type") or "")
-
-            if pair_type == "funding":
-                left_required = (left_exchange_code, "swap")
-                right_required = (right_exchange_code, "swap")
-            else:
-                left_required = (left_exchange_code, left_market_type)
-                right_required = (right_exchange_code, right_market_type)
-
-            if left_required not in relevant_accounts and right_required not in relevant_accounts:
-                continue
 
             left_key = (
                 left_exchange_code,
@@ -545,15 +530,22 @@ class OpportunityRuntimeService:
         refreshed_count = 0
         for (exchange_code, market_type), items in grouped.items():
             symbols = sorted({str(item["symbol"]) for item in items})
-            try:
-                batch = self._fetch_public_tickers(exchange_code=exchange_code, market_type=market_type, symbols=symbols)
-            except Exception as exc:  # noqa: BLE001
-                monitor_center_service.add_log(
-                    self._monitor_key,
-                    "warning",
-                    f"{exchange_code} {market_type} 批量行情刷新失败: {exc}",
-                )
-                batch = {}
+            batch: Dict[str, TickerCacheItem] = {}
+            for symbol_chunk in self._chunk_symbols(symbols, self._ticker_batch_size):
+                try:
+                    batch.update(
+                        self._fetch_public_tickers(
+                            exchange_code=exchange_code,
+                            market_type=market_type,
+                            symbols=symbol_chunk,
+                        )
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    monitor_center_service.add_log(
+                        self._monitor_key,
+                        "warning",
+                        f"{exchange_code} {market_type} 批量行情刷新失败: {exc}",
+                    )
 
             for item in items:
                 ticker_data = batch.get(str(item["symbol"]))
@@ -585,15 +577,21 @@ class OpportunityRuntimeService:
         refreshed_count = 0
         for exchange_code, symbols in grouped.items():
             unique_symbols = sorted(set(symbols))
-            try:
-                batch = self._fetch_public_funding_rates(exchange_code=exchange_code, symbols=unique_symbols)
-            except Exception as exc:  # noqa: BLE001
-                monitor_center_service.add_log(
-                    self._monitor_key,
-                    "warning",
-                    f"{exchange_code} 批量资金费刷新失败: {exc}",
-                )
-                batch = {}
+            batch: Dict[str, FundingRateCacheItem] = {}
+            for symbol_chunk in self._chunk_symbols(unique_symbols, self._funding_batch_size):
+                try:
+                    batch.update(
+                        self._fetch_public_funding_rates(
+                            exchange_code=exchange_code,
+                            symbols=symbol_chunk,
+                        )
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    monitor_center_service.add_log(
+                        self._monitor_key,
+                        "warning",
+                        f"{exchange_code} 批量资金费刷新失败: {exc}",
+                    )
 
             for symbol in unique_symbols:
                 funding_data = batch.get(symbol)
@@ -615,6 +613,11 @@ class OpportunityRuntimeService:
                 market_runtime_cache.set_funding_rate(funding_data)
                 refreshed_count += 1
         return refreshed_count
+
+    def _chunk_symbols(self, symbols: List[str], chunk_size: int) -> List[List[str]]:
+        if chunk_size <= 0:
+            return [list(symbols)]
+        return [symbols[index:index + chunk_size] for index in range(0, len(symbols), chunk_size)]
 
     def _fetch_public_tickers(self, *, exchange_code: str, market_type: str, symbols: List[str]) -> Dict[str, TickerCacheItem]:
         exchange = self._build_public_exchange(exchange_code=exchange_code, market_type=market_type)

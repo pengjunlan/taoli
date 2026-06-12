@@ -52,6 +52,8 @@ class TradeDecisionService:
         default_rule = rule_rows[0]
         result: List[Dict[str, object]] = []
         for rank, row in enumerate(opportunity_rows, start=1):
+            if not bool(row.get("execution_ready")):
+                continue
             annualized = self._parse_percent(row.get("annual"))
             net_rate = self._parse_percent(row.get("net_rate"))
             spread = abs(self._parse_percent(row.get("spread")))
@@ -114,6 +116,8 @@ class TradeDecisionService:
         default_rule = rule_rows[0]
         result: List[Dict[str, object]] = []
         for rank, row in enumerate(opportunity_rows, start=1):
+            if not bool(row.get("execution_ready")):
+                continue
             latest_spread = self._parse_percent(row.get("latest_spread"))
             net_spread = self._parse_percent(row.get("net_spread"))
             matched_rule = next(
