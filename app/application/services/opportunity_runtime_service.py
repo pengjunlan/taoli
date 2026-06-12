@@ -312,12 +312,8 @@ class OpportunityRuntimeService:
                 else 0.0
             )
 
-            left_available = float(left_account.get("current_available_amount") or 0)
-            if left_account is None:
-                left_available = 0.0
-            right_available = float(right_account.get("current_available_amount") or 0)
-            if right_account is None:
-                right_available = 0.0
+            left_available = float(left_account.get("current_available_amount") or 0) if left_account is not None else 0.0
+            right_available = float(right_account.get("current_available_amount") or 0) if right_account is not None else 0.0
             qty_left = self._estimate_quantity(left_available, left_ticker.last_price if left_ticker is not None else 0)
             qty_right = self._estimate_quantity(right_available, right_ticker.last_price if right_ticker is not None else 0)
             has_required_accounts = left_account is not None and right_account is not None
@@ -410,12 +406,8 @@ class OpportunityRuntimeService:
             right_fee = self._resolve_fee_rate_value(right_account, market_type=right_market_type)
             net_spread = latest_spread - left_fee - right_fee if has_market_data else 0.0
 
-            left_available = float(left_account.get("current_available_amount") or 0)
-            if left_account is None:
-                left_available = 0.0
-            right_available = float(right_account.get("current_available_amount") or 0)
-            if right_account is None:
-                right_available = 0.0
+            left_available = float(left_account.get("current_available_amount") or 0) if left_account is not None else 0.0
+            right_available = float(right_account.get("current_available_amount") or 0) if right_account is not None else 0.0
             qty_left = self._estimate_quantity(left_available, left_ticker.ask_price if left_ticker is not None else 0)
             qty_right = self._estimate_quantity(right_available, right_ticker.bid_price if right_ticker is not None else 0)
             has_required_accounts = left_account is not None and right_account is not None
