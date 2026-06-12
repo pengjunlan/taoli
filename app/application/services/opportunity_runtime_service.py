@@ -66,6 +66,7 @@ class OpportunityRuntimeService:
                     detail="线程心跳正常，准备刷新市场与机会缓存",
                 )
                 self._ensure_daily_market_sync()
+                self._refresh_user_opportunity_rows()
                 try:
                     self._refresh_public_market_runtime()
                 except Exception as exc:  # noqa: BLE001
@@ -199,25 +200,35 @@ class OpportunityRuntimeService:
             funding_rows = self._build_funding_rows_for_user(account_rows, strategy_rows)
             spread_rows = self._build_spread_rows_for_user(account_rows, strategy_rows)
             generated_at = datetime.now()
+            funding_ready = bool(funding_rows) and all(bool(row.get("has_market_data")) for row in funding_rows)
+            spread_ready = bool(spread_rows) and all(bool(row.get("has_market_data")) for row in spread_rows)
             market_runtime_cache.set_user_rows(
                 "funding",
                 user_id,
                 funding_rows,
-                is_ready=True,
+                is_ready=funding_ready,
                 source="runtime",
                 generated_at=generated_at,
                 updated_at=generated_at,
-                message="资金费机会已按最新实时行情刷新。",
+                message=(
+                    "资金费机会已按最新实时行情刷新。"
+                    if funding_ready
+                    else "资金费配对列表已生成，正在补充实时行情与资金费数据。"
+                ),
             )
             market_runtime_cache.set_user_rows(
                 "spread",
                 user_id,
                 spread_rows,
-                is_ready=True,
+                is_ready=spread_ready,
                 source="runtime",
                 generated_at=generated_at,
                 updated_at=generated_at,
-                message="价差机会已按最新实时行情刷新。",
+                message=(
+                    "价差机会已按最新实时行情刷新。"
+                    if spread_ready
+                    else "价差配对列表已生成，正在补充实时行情数据。"
+                ),
             )
             opportunity_snapshot_service.persist_opportunity_rows(
                 user_id=user_id,
