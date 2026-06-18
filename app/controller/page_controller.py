@@ -6,6 +6,7 @@ from app.controller.pages.dashboard_controller import router as dashboard_router
 from app.controller.pages.funding_arbitrage_controller import router as funding_arbitrage_router
 from app.controller.pages.login_controller import router as login_router
 from app.controller.pages.positions_orders_controller import router as positions_orders_router
+from app.controller.pages.redis_inspector_controller import router as redis_inspector_router
 from app.controller.pages.register_controller import router as register_router
 from app.controller.pages.risk_alerts_controller import router as risk_alerts_router
 from app.controller.pages.spread_arbitrage_controller import router as spread_arbitrage_router
@@ -33,3 +34,4 @@ router.include_router(positions_orders_router)
 router.include_router(accounts_router)
 router.include_router(transfer_records_router)
 router.include_router(risk_alerts_router)
+router.include_router(redis_inspector_router)

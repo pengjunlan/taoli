@@ -62,7 +62,7 @@ function renderRows(rows) {
   if (!Array.isArray(rows) || !rows.length) {
     return `
       <tr class="table-empty-row">
-        <td colspan="10" class="spread-metric">暂无系统交易所配置</td>
+        <td colspan="11" class="spread-metric">暂无系统交易所配置</td>
       </tr>
     `;
   }
@@ -75,6 +75,14 @@ function renderRows(rows) {
           <td><span class="pill pill--${escapeHtml(row.status_tone)}">${escapeHtml(row.status_label)}</span></td>
           <td class="spread-metric">${escapeHtml(row.mode_label)}</td>
           <td><span class="pill pill--${escapeHtml(row.config_tone)}">${escapeHtml(row.config_status)}</span></td>
+          <td>
+            <button
+              class="pill pill--${escapeHtml(row.market_feed_status_tone)} system-settings-table__status-button"
+              type="button"
+              data-system-symbols-open="${escapeHtml(row.exchange_code)}"
+              title="${escapeHtml(row.market_feed_status_detail)}"
+            >${escapeHtml(row.market_feed_status_label)}</button>
+          </td>
           <td class="spread-metric">${escapeHtml(row.api_key)}</td>
           <td class="spread-metric">${escapeHtml(row.api_secret)}</td>
           <td class="spread-metric">${escapeHtml(row.api_passphrase)}</td>
@@ -92,26 +100,35 @@ function renderRows(rows) {
 }
 
 let latestRows = [];
+let systemConfigsRefreshLock = false;
 
 async function refreshSystemConfigs() {
+  if (systemConfigsRefreshLock) {
+    return;
+  }
+  systemConfigsRefreshLock = true;
   const result = await getJson("/api/system-exchanges/list");
-  if (!result.success) {
-    throw new Error(result.message || "读取系统交易所配置失败。");
-  }
+  try {
+    if (!result.success) {
+      throw new Error(result.message || "读取系统交易所配置失败。");
+    }
 
-  latestRows = Array.isArray(result.config_rows) ? result.config_rows : [];
-  updateSummaryCards(result.summary_cards || []);
+    latestRows = Array.isArray(result.config_rows) ? result.config_rows : [];
+    updateSummaryCards(result.summary_cards || []);
 
-  const body = document.querySelector("[data-system-config-table-body]");
-  const count = document.querySelector("[data-system-config-count]");
-  if (body) {
-    body.innerHTML = renderRows(latestRows);
-  }
-  if (count) {
-    count.textContent = `共 ${Number(result.config_count || 0)} 个交易所`;
-  }
+    const body = document.querySelector("[data-system-config-table-body]");
+    const count = document.querySelector("[data-system-config-count]");
+    if (body) {
+      body.innerHTML = renderRows(latestRows);
+    }
+    if (count) {
+      count.textContent = `共 ${Number(result.config_count || 0)} 个交易所`;
+    }
 
-  refreshListPagination(document);
+    refreshListPagination(document);
+  } finally {
+    systemConfigsRefreshLock = false;
+  }
 }
 
 function bindSystemConfigModal() {
@@ -234,10 +251,133 @@ function bindSystemConfigModal() {
   syncPrivateFields();
 }
 
+function renderSwapSymbols(symbols) {
+  const items = Array.isArray(symbols) ? symbols : [];
+  if (!items.length) {
+    return `<div class="system-symbols-modal__empty">当前没有可展示的永续交易对</div>`;
+  }
+
+  return items
+    .map(
+      (symbol) => `
+        <div class="system-symbols-modal__item">${escapeHtml(symbol)}</div>
+      `,
+    )
+    .join("");
+}
+
+function bindSystemSymbolsModal() {
+  const modal = document.querySelector("[data-system-symbols-modal]");
+  const summary = document.querySelector("[data-system-symbols-summary]");
+  const list = document.querySelector("[data-system-symbols-list]");
+  const closeButtons = document.querySelectorAll("[data-system-symbols-close]");
+  const refreshButton = document.querySelector("[data-system-symbols-refresh]");
+  let activeExchangeCode = "";
+
+  if (!modal || !summary || !list) {
+    return;
+  }
+
+  const openModal = () => {
+    modal.hidden = false;
+    document.body.style.overflow = "hidden";
+  };
+
+  const closeModal = () => {
+    modal.hidden = true;
+    document.body.style.overflow = "";
+    activeExchangeCode = "";
+    summary.textContent = "正在读取数据库中的永续交易对...";
+    list.innerHTML = `<div class="system-symbols-modal__empty">加载中...</div>`;
+  };
+
+  document.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-system-symbols-open]");
+    if (!button) return;
+
+    const exchangeCode = String(button.getAttribute("data-system-symbols-open") || "").trim();
+    activeExchangeCode = exchangeCode;
+    button.disabled = true;
+    openModal();
+    try {
+      const result = await getJson(`/api/system-exchanges/${exchangeCode}/swap-symbols`);
+      if (!result.success) {
+        summary.textContent = result.message || "读取永续交易对失败";
+        list.innerHTML = `<div class="system-symbols-modal__empty">暂无数据</div>`;
+        return;
+      }
+
+      summary.textContent = `${String(result.exchange_label || exchangeCode)} 共 ${Number(result.symbol_count || 0)} 个永续交易对`;
+      list.innerHTML = renderSwapSymbols(result.symbols || []);
+    } catch (error) {
+      summary.textContent = error?.message || "读取永续交易对失败";
+      list.innerHTML = `<div class="system-symbols-modal__empty">暂无数据</div>`;
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  closeButtons.forEach((button) => {
+    button.addEventListener("click", closeModal);
+  });
+
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) {
+      closeModal();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !modal.hidden) {
+      closeModal();
+    }
+  });
+
+  if (refreshButton) {
+    refreshButton.addEventListener("click", async () => {
+      if (!activeExchangeCode) {
+        showToast("请先选择一个交易所");
+        return;
+      }
+
+      refreshButton.disabled = true;
+      const originalLabel = refreshButton.textContent;
+      refreshButton.textContent = "更新中...";
+      summary.textContent = "正在从交易所拉取最新永续交易对并更新数据库...";
+      try {
+        const result = await postJson(`/api/system-exchanges/${activeExchangeCode}/swap-symbols/refresh`, {});
+        if (!result.success) {
+          showToast(result.message || "更新永续交易对失败");
+          summary.textContent = result.message || "更新永续交易对失败";
+          return;
+        }
+
+        summary.textContent =
+          `${String(result.exchange_label || activeExchangeCode)} 共 ${Number(result.symbol_count || 0)} 个永续交易对` +
+          `，新增 ${Number(result.added_count || 0)}，恢复 ${Number(result.reactivated_count || 0)}，作废 ${Number(result.marked_inactive_count || 0)}`;
+        list.innerHTML = renderSwapSymbols(result.symbols || []);
+        await refreshSystemConfigs();
+        showToast(result.message || "永续交易对更新成功");
+      } catch (error) {
+        const message = error?.message || "更新永续交易对失败，请稍后再试。";
+        summary.textContent = message;
+        showToast(message);
+      } finally {
+        refreshButton.textContent = originalLabel;
+        refreshButton.disabled = false;
+      }
+    });
+  }
+}
+
 bindPrototypeActions();
 bindListPagination();
 bindLogoutAction();
 bindSystemConfigModal();
+bindSystemSymbolsModal();
 refreshSystemConfigs().catch((error) => {
   showToast(error?.message || "读取系统交易所配置失败，请稍后再试。");
 });
+window.setInterval(() => {
+  refreshSystemConfigs().catch(() => {});
+}, 5000);

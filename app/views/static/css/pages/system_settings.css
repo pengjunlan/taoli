@@ -81,8 +81,51 @@
   white-space: nowrap;
 }
 
+.system-settings-table td .pill {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.system-settings-table__status-button {
+  border: 0;
+  cursor: pointer;
+}
+
 .system-settings-modal__dialog {
   width: min(760px, calc(100vw - 32px));
+}
+
+.system-symbols-modal__dialog {
+  width: min(720px, calc(100vw - 32px));
+}
+
+.system-symbols-modal__body {
+  padding: 0 24px 24px;
+}
+
+.system-symbols-modal__list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.system-symbols-modal__item,
+.system-symbols-modal__empty {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 12px 14px;
+  color: var(--text-main);
+}
+
+.system-symbols-modal__empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--text-soft);
 }
 
 .system-settings-form__grid {
@@ -119,6 +162,10 @@
   }
 
   .system-settings-form__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .system-symbols-modal__list {
     grid-template-columns: minmax(0, 1fr);
   }
 }

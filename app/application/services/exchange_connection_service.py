@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 import logging
+from dataclasses import dataclass
+from threading import RLock
 from typing import Any, Dict
 
 import ccxt
@@ -22,8 +25,19 @@ EXCHANGE_IDS = {
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class BalanceSnapshot:
+    available_amount: float
+    frozen_amount: float
+    total_amount: float
+
+
 class ExchangeConnectionService:
     """Calls a private exchange API to validate whether submitted credentials work."""
+
+    def __init__(self) -> None:
+        self._position_mode_cache: Dict[str, tuple[str, datetime]] = {}
+        self._position_mode_lock = RLock()
 
     def build_exchange_client(self, payload: ExchangeConnectionTestRequest) -> Any:
         normalized = self._normalize_payload(payload)
@@ -78,18 +92,35 @@ class ExchangeConnectionService:
                 pass
 
     def fetch_available_balance(self, payload: ExchangeConnectionTestRequest) -> float:
+        snapshot = self.fetch_balance_snapshot(payload)
+        return float(snapshot.available_amount)
+
+    def fetch_balance_snapshot(self, payload: ExchangeConnectionTestRequest) -> BalanceSnapshot:
         normalized = self._normalize_payload(payload)
         self._validate_payload(normalized)
 
         exchange = self._build_exchange(normalized)
         try:
             balance = exchange.fetch_balance()
-            return float(
+            available_amount = float(
                 self._extract_available_balance(
                     balance,
                     normalized["market_type"],
                     normalized["exchange_code"],
                 )
+            )
+            total_amount = float(
+                self._extract_total_balance(
+                    balance,
+                    normalized["market_type"],
+                    normalized["exchange_code"],
+                )
+            )
+            frozen_amount = max(total_amount - available_amount, 0.0)
+            return BalanceSnapshot(
+                available_amount=max(available_amount, 0.0),
+                frozen_amount=max(frozen_amount, 0.0),
+                total_amount=max(total_amount, available_amount, 0.0),
             )
         except (ccxt.AuthenticationError, ccxt.PermissionDenied) as exc:
             logger.warning(
@@ -133,6 +164,33 @@ class ExchangeConnectionService:
                 exchange.close()
             except Exception:
                 pass
+
+    def get_position_mode(self, client: Any, payload: ExchangeConnectionTestRequest) -> str:
+        normalized = self._normalize_payload(payload)
+        if normalized["market_type"] != "swap":
+            return "oneway"
+
+        cache_key = self._position_mode_cache_key(payload.account_id, normalized)
+        cached_mode = self._read_cached_position_mode(cache_key)
+        if cached_mode:
+            return cached_mode
+
+        resolved_mode = "unknown"
+        try:
+            if hasattr(client, "fetch_position_mode"):
+                resolved_mode = self._normalize_position_mode(client.fetch_position_mode())
+            elif hasattr(client, "fetchPositionMode"):
+                resolved_mode = self._normalize_position_mode(client.fetchPositionMode())
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "Fetch position mode failed: account_id=%s exchange=%s detail=%s",
+                payload.account_id,
+                normalized["exchange_code"],
+                exc,
+            )
+
+        self._write_cached_position_mode(cache_key, resolved_mode)
+        return resolved_mode
 
     def _normalize_payload(self, payload: ExchangeConnectionTestRequest) -> Dict[str, str]:
         return {
@@ -279,6 +337,93 @@ class ExchangeConnectionService:
 
         return 0.0
 
+    def _extract_total_balance(self, balance: Any, market_type: str, exchange_code: str) -> float:
+        if not isinstance(balance, dict):
+            return 0.0
+
+        if market_type == "swap":
+            preferred_codes = ("USDT", "USD", "USDC")
+
+            if exchange_code == "binance":
+                info = balance.get("info")
+                if isinstance(info, dict):
+                    assets = info.get("assets")
+                    if isinstance(assets, list):
+                        for code in preferred_codes:
+                            matched = next(
+                                (
+                                    item
+                                    for item in assets
+                                    if isinstance(item, dict) and str(item.get("asset") or "").upper() == code
+                                ),
+                                None,
+                            )
+                            if matched is None:
+                                continue
+                            candidate = self._pick_first_numeric(
+                                matched,
+                                ("walletBalance", "marginBalance", "availableBalance", "maxWithdrawAmount"),
+                            )
+                            if candidate is not None:
+                                return max(candidate, 0.0)
+
+                for code in preferred_codes:
+                    asset_info = balance.get(code)
+                    if not isinstance(asset_info, dict):
+                        continue
+                    candidate = self._pick_first_numeric(
+                        asset_info,
+                        ("total", "walletBalance", "marginBalance", "free", "availableBalance"),
+                    )
+                    if candidate is not None:
+                        return max(candidate, 0.0)
+
+            for code in preferred_codes:
+                asset_info = balance.get(code)
+                if not isinstance(asset_info, dict):
+                    continue
+                candidate = self._pick_first_numeric(
+                    asset_info,
+                    ("total", "walletBalance", "marginBalance", "free", "availableBalance"),
+                )
+                if candidate is not None:
+                    return max(candidate, 0.0)
+
+            total = 0.0
+            for code, asset_info in balance.items():
+                if code in {"info", "free", "used", "total", "timestamp", "datetime"}:
+                    continue
+                if not isinstance(asset_info, dict):
+                    continue
+                candidate = self._pick_first_numeric(asset_info, ("total", "walletBalance", "marginBalance", "free"))
+                if candidate is None:
+                    continue
+                total += candidate
+            return max(total, 0.0)
+
+        total_balances = balance.get("total")
+        if isinstance(total_balances, dict):
+            preferred_codes = ("USDT", "USD", "USDC")
+            for code in preferred_codes:
+                candidate = total_balances.get(code)
+                if candidate is None:
+                    continue
+                try:
+                    return max(float(candidate or 0), 0.0)
+                except (TypeError, ValueError):
+                    continue
+
+            total = 0.0
+            for candidate in total_balances.values():
+                try:
+                    total += float(candidate or 0)
+                except (TypeError, ValueError):
+                    continue
+            return max(total, 0.0)
+
+        available_amount = self._extract_available_balance(balance, market_type, exchange_code)
+        return max(float(available_amount or 0), 0.0)
+
     def _pick_first_numeric(self, source: Dict[str, Any], keys: tuple[str, ...]) -> float | None:
         for key in keys:
             candidate = source.get(key)
@@ -301,6 +446,51 @@ class ExchangeConnectionService:
             "连接测试失败：交易所接口暂时不可用，或服务器到交易所的网络异常。\n"
             f"原始原因：{self._truncate_message(str(error))}"
         )
+
+    def _position_mode_cache_key(self, account_id: int, payload: Dict[str, str]) -> str:
+        return f"{int(account_id or 0)}:{payload['exchange_code']}:{payload['market_type']}"
+
+    def _read_cached_position_mode(self, cache_key: str) -> str:
+        with self._position_mode_lock:
+            cached = self._position_mode_cache.get(cache_key)
+            if cached is None:
+                return ""
+            mode, expires_at = cached
+            if expires_at <= datetime.now():
+                self._position_mode_cache.pop(cache_key, None)
+                return ""
+            return mode
+
+    def _write_cached_position_mode(self, cache_key: str, mode: str) -> None:
+        with self._position_mode_lock:
+            self._position_mode_cache[cache_key] = (
+                str(mode or "unknown"),
+                datetime.now() + timedelta(minutes=5),
+            )
+
+    def _normalize_position_mode(self, payload: Any) -> str:
+        if isinstance(payload, bool):
+            return "hedge" if payload else "oneway"
+
+        if isinstance(payload, dict):
+            for key in ("hedged", "dualSidePosition", "dualSide", "isHedged"):
+                if key not in payload:
+                    continue
+                return self._normalize_position_mode(payload.get(key))
+
+            for key in ("positionMode", "position_mode", "mode"):
+                text = str(payload.get(key) or "").strip().lower()
+                if text in {"hedge", "hedged", "long_short_mode"}:
+                    return "hedge"
+                if text in {"oneway", "one-way", "single", "net_mode"}:
+                    return "oneway"
+
+        text = str(payload or "").strip().lower()
+        if text in {"true", "1", "hedge", "hedged"}:
+            return "hedge"
+        if text in {"false", "0", "oneway", "one-way", "single"}:
+            return "oneway"
+        return "unknown"
 
     def _map_exchange_error(self, message: str, *, prefix: str) -> str:
         lowered = message.lower()

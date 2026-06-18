@@ -191,13 +191,8 @@ export function renderAddressTableRows(rows) {
     .join("");
 }
 
-export async function refreshAccountTables() {
-  const result = await fetchAccountsList();
-  if (!result.success) {
-    throw new Error(result.message || "刷新账户列表失败。");
-  }
-
-  setLatestAccountsResult(result);
+export function applyAccountsPayload(result) {
+  setLatestAccountsResult(result || {});
 
   const balanceBody = document.querySelector("[data-balance-table-body]");
   const accountBody = document.querySelector("[data-account-table-body]");
@@ -228,5 +223,14 @@ export async function refreshAccountTables() {
   }
 
   refreshListPagination(document);
+}
+
+export async function refreshAccountTables() {
+  const result = await fetchAccountsList();
+  if (!result.success) {
+    throw new Error(result.message || "刷新账户列表失败。");
+  }
+
+  applyAccountsPayload(result);
   return result;
 }

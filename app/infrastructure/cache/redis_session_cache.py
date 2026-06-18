@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -21,10 +22,30 @@ class RedisSessionCache:
     def __init__(self) -> None:
         self._client: Optional[redis.Redis] = None
         self._available = False
+        self._initialized = False
+        self._last_connect_attempt_monotonic: float | None = None
+        self._connect_retry_interval_seconds = 5.0
 
     def initialize(self) -> None:
-        if not redis_config.enabled:
+        if self._initialized:
+            self._ensure_connected()
             return
+        self._initialized = True
+        self._ensure_connected()
+
+    def _ensure_connected(self, *, force_retry: bool = False) -> None:
+        if not redis_config.session_enabled:
+            return
+        if self._available and self._client is not None and not force_retry:
+            return
+        now = time.monotonic()
+        if (
+            not force_retry
+            and self._last_connect_attempt_monotonic is not None
+            and (now - self._last_connect_attempt_monotonic) < self._connect_retry_interval_seconds
+        ):
+            return
+        self._last_connect_attempt_monotonic = now
         try:
             self._client = redis.Redis(
                 host=redis_config.host,
@@ -33,9 +54,11 @@ class RedisSessionCache:
                 db=redis_config.db,
                 decode_responses=True,
                 socket_timeout=redis_config.socket_timeout,
+                socket_connect_timeout=redis_config.socket_timeout,
             )
             self._client.ping()
             self._available = True
+            self._last_connect_attempt_monotonic = None
         except Exception as exc:  # noqa: BLE001
             self._client = None
             self._available = False
@@ -46,12 +69,13 @@ class RedisSessionCache:
         return self._available and self._client is not None
 
     def store(self, session: AuthSession, ttl_seconds: int) -> None:
-        if not self.is_available:
+        client = self._get_client()
+        if client is None:
             return
 
-        assert self._client is not None
         key = self._build_key(session.session_token_hash)
-        self._client.hset(
+        try:
+            client.hset(
             key,
             mapping={
                 "user_id": session.user.id,
@@ -68,24 +92,40 @@ class RedisSessionCache:
                 "created_at": session.created_at.isoformat(),
             },
         )
-        self._client.expire(key, ttl_seconds)
+            client.expire(key, ttl_seconds)
+        except Exception as exc:  # noqa: BLE001
+            self._mark_unavailable(exc)
 
     def fetch(self, session_token_hash: str) -> Optional[AuthSession]:
-        if not self.is_available:
+        client = self._get_client()
+        if client is None:
             return None
 
-        assert self._client is not None
-        data = self._client.hgetall(self._build_key(session_token_hash))
+        try:
+            data = client.hgetall(self._build_key(session_token_hash))
+        except Exception as exc:  # noqa: BLE001
+            self._mark_unavailable(exc)
+            client = self._get_client(force_retry=True)
+            if client is None:
+                return None
+            try:
+                data = client.hgetall(self._build_key(session_token_hash))
+            except Exception as retry_exc:  # noqa: BLE001
+                self._mark_unavailable(retry_exc)
+                return None
         if not data:
             return None
         return self._build_session(session_token_hash, data)
 
     def delete(self, session_token_hash: str) -> None:
-        if not self.is_available:
+        client = self._get_client()
+        if client is None:
             return
 
-        assert self._client is not None
-        self._client.delete(self._build_key(session_token_hash))
+        try:
+            client.delete(self._build_key(session_token_hash))
+        except Exception as exc:  # noqa: BLE001
+            self._mark_unavailable(exc)
 
     def _build_key(self, session_token_hash: str) -> str:
         return f"{redis_config.key_prefix}{session_token_hash}"
@@ -109,6 +149,18 @@ class RedisSessionCache:
             expires_at=datetime.fromisoformat(str(data["expires_at"])),
             created_at=datetime.fromisoformat(str(data["created_at"])),
         )
+
+    def _get_client(self, *, force_retry: bool = False) -> Optional[redis.Redis]:
+        self._ensure_connected(force_retry=force_retry)
+        if not self._available or self._client is None:
+            return None
+        return self._client
+
+    def _mark_unavailable(self, exc: Exception) -> None:
+        self._client = None
+        self._available = False
+        self._last_connect_attempt_monotonic = None
+        logger.warning("Redis session cache connection lost: %s", exc)
 
 
 redis_session_cache = RedisSessionCache()

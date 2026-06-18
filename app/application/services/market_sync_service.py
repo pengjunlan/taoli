@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterable, List
 
 import ccxt
 
+from app.application.services.swap_market_rules import is_u_margin_linear_swap_market
 from app.infrastructure.persistence.market_repository import market_repository
 from app.application.services.system_exchange_config_service import system_exchange_config_service
 
@@ -15,7 +16,7 @@ from app.application.services.system_exchange_config_service import system_excha
 logger = logging.getLogger(__name__)
 
 
-SUPPORTED_MARKET_TYPES = ("spot", "swap")
+SUPPORTED_MARKET_TYPES = ("swap",)
 
 
 class MarketSyncService:
@@ -64,6 +65,39 @@ class MarketSyncService:
             "market_count": synced_market_count,
             "funding_pair_count": generated_funding_pairs,
             "spread_pair_count": generated_spread_pairs,
+        }
+
+    def sync_exchange_swap_markets_incremental(self, exchange_code: str) -> Dict[str, int]:
+        normalized_exchange_code = str(exchange_code or "").strip().lower()
+        if not normalized_exchange_code:
+            raise ValueError("exchange_code is required")
+
+        rows = self._fetch_exchange_markets(
+            exchange_code=normalized_exchange_code,
+            market_type="swap",
+        )
+        if not rows:
+            raise ValueError(f"{normalized_exchange_code} 未获取到任何永续交易对")
+
+        market_result = market_repository.sync_markets_incremental(
+            exchange_code=normalized_exchange_code,
+            market_type="swap",
+            rows=rows,
+        )
+
+        funding_pairs = self._build_funding_pairs()
+        spread_pairs = self._build_spread_pairs()
+        market_repository.replace_pairs(pair_type="funding", rows=funding_pairs)
+        market_repository.replace_pairs(pair_type="spread", rows=spread_pairs)
+
+        return {
+            "exchange_code": normalized_exchange_code,
+            "fetched_count": len(rows),
+            "added_count": int(market_result.get("added_count") or 0),
+            "reactivated_count": int(market_result.get("reactivated_count") or 0),
+            "marked_inactive_count": int(market_result.get("marked_inactive_count") or 0),
+            "funding_pair_count": len(funding_pairs),
+            "spread_pair_count": len(spread_pairs),
         }
 
     def _fetch_exchange_markets(self, *, exchange_code: str, market_type: str) -> List[Dict[str, Any]]:
@@ -142,17 +176,28 @@ class MarketSyncService:
         return "spot"
 
     def _build_funding_pairs(self) -> List[Dict[str, Any]]:
-        rows = market_repository.list_active_markets(market_type="swap")
-        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        enabled_exchange_codes = set(self.list_supported_exchange_codes())
+        rows = [
+            row
+            for row in market_repository.list_active_markets(market_type="swap")
+            if str(row.get("exchange_code") or "") in enabled_exchange_codes
+            and self._is_opportunity_supported_swap_market(row)
+        ]
+        grouped: Dict[tuple[str, str, str], List[Dict[str, Any]]] = {}
         for row in rows:
             if not bool(row.get("supports_funding")):
                 continue
-            key = str(row.get("symbol_normalized") or "")
+            symbol_key = str(row.get("symbol_normalized") or "")
+            settle_asset = str(row.get("settle_asset") or "").upper()
+            contract_type = "linear" if bool(row.get("is_linear")) else "inverse"
+            if not symbol_key or not settle_asset:
+                continue
+            key = (symbol_key, settle_asset, contract_type)
             grouped.setdefault(key, []).append(row)
 
         generated_at = datetime.now()
         pairs: List[Dict[str, Any]] = []
-        for symbol_key, items in grouped.items():
+        for (symbol_key, _settle_asset, _contract_type), items in grouped.items():
             ordered = sorted(items, key=lambda item: str(item.get("exchange_code") or ""))
             for left_index in range(len(ordered)):
                 for right_index in range(left_index + 1, len(ordered)):
@@ -180,28 +225,40 @@ class MarketSyncService:
         return pairs
 
     def _build_spread_pairs(self) -> List[Dict[str, Any]]:
-        rows = market_repository.list_active_markets()
-        grouped: Dict[tuple[str, str], List[Dict[str, Any]]] = {}
+        # User-confirmed rule: spread arbitrage only supports perpetual-perpetual pairs.
+        enabled_exchange_codes = set(self.list_supported_exchange_codes())
+        rows = [
+            row
+            for row in market_repository.list_active_markets(market_type="swap")
+            if str(row.get("exchange_code") or "") in enabled_exchange_codes
+            and self._is_opportunity_supported_swap_market(row)
+        ]
+        grouped: Dict[tuple[str, str, str], List[Dict[str, Any]]] = {}
         for row in rows:
-            key = (str(row.get("market_type") or ""), str(row.get("symbol_normalized") or ""))
+            symbol_key = str(row.get("symbol_normalized") or "")
+            settle_asset = str(row.get("settle_asset") or "").upper()
+            contract_type = "linear" if bool(row.get("is_linear")) else "inverse"
+            if not symbol_key or not settle_asset:
+                continue
+            key = (symbol_key, settle_asset, contract_type)
             grouped.setdefault(key, []).append(row)
 
         generated_at = datetime.now()
         pairs: List[Dict[str, Any]] = []
-        for (market_type, symbol_key), items in grouped.items():
+        for (symbol_key, _settle_asset, _contract_type), items in grouped.items():
             ordered = sorted(items, key=lambda item: str(item.get("exchange_code") or ""))
             for left_index in range(len(ordered)):
                 for right_index in range(left_index + 1, len(ordered)):
                     left = ordered[left_index]
                     right = ordered[right_index]
-                    pair_key = f"spread:{market_type}:{left['exchange_code']}:{right['exchange_code']}:{symbol_key}"
+                    pair_key = f"spread:swap:{left['exchange_code']}:{right['exchange_code']}:{symbol_key}"
                     pairs.append(
                         {
                             "pair_key": pair_key,
                             "left_exchange_code": left["exchange_code"],
                             "right_exchange_code": right["exchange_code"],
-                            "left_market_type": left["market_type"],
-                            "right_market_type": right["market_type"],
+                            "left_market_type": "swap",
+                            "right_market_type": "swap",
                             "symbol_normalized": symbol_key,
                             "left_symbol": left["symbol"],
                             "right_symbol": right["symbol"],
@@ -219,17 +276,23 @@ class MarketSyncService:
         if not bool(market.get("active", True)):
             return False
 
-        quote_asset = str(market.get("quote") or "").upper()
-        if quote_asset not in {"USDT", "USDC", "USD"}:
-            return False
-
         if market_type == "spot":
             return bool(market.get("spot"))
 
         if market_type == "swap":
-            return bool(market.get("swap"))
+            return is_u_margin_linear_swap_market(
+                {
+                    "market_type": market_type,
+                    "quote": market.get("quote"),
+                    "settle": market.get("settle"),
+                    "linear": market.get("linear"),
+                }
+            )
 
         return False
+
+    def _is_opportunity_supported_swap_market(self, row: Dict[str, Any]) -> bool:
+        return is_u_margin_linear_swap_market(row)
 
     def _normalize_symbol(self, base_asset: str, quote_asset: str) -> str:
         base = self._normalize_asset_code(base_asset)
@@ -241,8 +304,6 @@ class MarketSyncService:
         aliases = {
             "XBT": "BTC",
         }
-        if asset.startswith("1000") and len(asset) > 4:
-            asset = asset[4:]
         return aliases.get(asset, asset)
 
 

@@ -9,7 +9,10 @@ from app.application.dto.requests.strategy_requests import (
     StrategyRuleCreateRequest,
     StrategyRuleUpdateRequest,
 )
+from app.application.services.arbitrage_execution_plan_service import arbitrage_execution_plan_service
+from app.application.services.strategy_rule_runtime_service import strategy_rule_runtime_service
 from app.domain.entities import AuthUser, StrategyRule
+from app.infrastructure.persistence import arbitrage_execution_repository
 from app.infrastructure.persistence.account_repository import account_repository
 from app.shared.exceptions import AccountNotFoundError, AccountPersistenceError, AccountValidationError
 
@@ -41,7 +44,9 @@ class StrategyRuleService:
             name=payload.name,
             strategy_type=payload.strategy_type,
             annualized_rate_threshold=payload.annualized_rate_threshold,
+            min_net_funding_rate_threshold=payload.min_net_funding_rate_threshold,
             spread_rate_threshold=payload.spread_rate_threshold,
+            min_close_spread_rate_threshold=payload.min_close_spread_rate_threshold,
             max_spread_rate_threshold=payload.max_spread_rate_threshold,
             max_pairs=payload.max_pairs,
             order_amount_usdt=payload.order_amount_usdt,
@@ -67,11 +72,17 @@ class StrategyRuleService:
         payload: StrategyRuleUpdateRequest,
         current_user: AuthUser,
     ) -> StrategyRuleResult:
+        existing_rule = account_repository.get_strategy_rule_by_id(rule_id, current_user.id)
+        if existing_rule is None:
+            raise AccountNotFoundError("规则不存在，或你无权编辑该规则。")
+
         normalized = self._normalize_payload(
             name=payload.name,
             strategy_type=payload.strategy_type,
             annualized_rate_threshold=payload.annualized_rate_threshold,
+            min_net_funding_rate_threshold=payload.min_net_funding_rate_threshold,
             spread_rate_threshold=payload.spread_rate_threshold,
+            min_close_spread_rate_threshold=payload.min_close_spread_rate_threshold,
             max_spread_rate_threshold=payload.max_spread_rate_threshold,
             max_pairs=payload.max_pairs,
             order_amount_usdt=payload.order_amount_usdt,
@@ -92,6 +103,13 @@ class StrategyRuleService:
 
         if rule is None:
             raise AccountNotFoundError("规则不存在，或你无权编辑该规则。")
+
+        disabled_now = bool(existing_rule.get("is_enabled")) and not bool(normalized.get("is_enabled"))
+        if disabled_now and bool(payload.close_positions_on_disable):
+            self._schedule_close_for_rule_open_positions(
+                user_id=current_user.id,
+                strategy_rule_id=int(rule.id),
+            )
 
         return StrategyRuleResult(rule=rule)
 
@@ -129,14 +147,14 @@ class StrategyRuleService:
                 "key": "disabled_count",
                 "label": "已停用",
                 "value": str(disabled_count),
-                "change": "不会继续触发新开仓",
+                "change": "不会继续触发新的开仓",
                 "tone": "warning",
             },
             {
                 "key": "rule_scope",
                 "label": "控制维度",
                 "value": "阈值 / 价差 / 仓位",
-                "change": "统一控制触发阈值、最大价差、最大持仓和下单节奏",
+                "change": "统一控制开平仓阈值、最大价差、最大持仓和下单节奏",
                 "tone": "brand",
             },
         ]
@@ -147,7 +165,9 @@ class StrategyRuleService:
         name: str,
         strategy_type: str,
         annualized_rate_threshold: float,
+        min_net_funding_rate_threshold: float,
         spread_rate_threshold: float,
+        min_close_spread_rate_threshold: float,
         max_spread_rate_threshold: float,
         max_pairs: int,
         order_amount_usdt: float,
@@ -159,7 +179,9 @@ class StrategyRuleService:
             "name": str(name or "").strip(),
             "strategy_type": str(strategy_type or "").strip().lower(),
             "annualized_rate_threshold": round(float(annualized_rate_threshold or 0), 4),
+            "min_net_funding_rate_threshold": round(float(min_net_funding_rate_threshold or 0), 4),
             "spread_rate_threshold": round(float(spread_rate_threshold or 0), 4),
+            "min_close_spread_rate_threshold": round(float(min_close_spread_rate_threshold or 0), 4),
             "max_spread_rate_threshold": round(float(max_spread_rate_threshold or 0), 4),
             "max_pairs": int(max_pairs or 0),
             "order_amount_usdt": round(float(order_amount_usdt or 0), 2),
@@ -175,66 +197,134 @@ class StrategyRuleService:
         if strategy_type not in STRATEGY_TYPE_LABELS:
             raise AccountValidationError("规则类型不在支持范围内。")
         if int(payload["max_pairs"]) <= 0:
-            raise AccountValidationError("最大开仓交易对数必须大于 0。")
+            raise AccountValidationError("最大开仓交易对数量必须大于 0。")
         if float(payload["order_amount_usdt"]) <= 0:
             raise AccountValidationError("单笔下单金额必须大于 0。")
         if float(payload["max_position_usdt"]) <= 0:
             raise AccountValidationError("最大持仓必须大于 0。")
-        if float(payload["max_position_usdt"]) < float(payload["order_amount_usdt"]):
-            raise AccountValidationError("最大持仓不能小于单笔下单金额。")
         if float(payload["max_spread_rate_threshold"]) <= 0:
             raise AccountValidationError("最大价差阈值必须大于 0。")
-        if strategy_type == "spread" and float(payload["max_spread_rate_threshold"]) < float(payload["spread_rate_threshold"]):
-            raise AccountValidationError("最大价差阈值不能小于价差率阈值。")
         if int(payload["order_interval_seconds"]) < 0:
             raise AccountValidationError("下单间隔时间不能小于 0。")
         if strategy_type == "funding" and float(payload["annualized_rate_threshold"]) <= 0:
-            raise AccountValidationError("资金费套利规则的年化阈值必须大于 0。")
+            raise AccountValidationError("资金费套利规则的净资金费率必须大于 0。")
+        if strategy_type == "funding" and float(payload["min_net_funding_rate_threshold"]) <= 0:
+            raise AccountValidationError("资金费套利规则的最小净资金费率必须大于 0。")
+        if strategy_type == "funding" and float(payload["min_net_funding_rate_threshold"]) > float(payload["annualized_rate_threshold"]):
+            raise AccountValidationError("最小净资金费率不能大于净资金费率。")
         if strategy_type == "spread" and float(payload["spread_rate_threshold"]) <= 0:
             raise AccountValidationError("价差套利规则的价差率阈值必须大于 0。")
+        if strategy_type == "spread" and float(payload["min_close_spread_rate_threshold"]) <= 0:
+            raise AccountValidationError("价差套利规则的最小平仓价差阈值必须大于 0。")
+        if strategy_type == "spread" and float(payload["min_close_spread_rate_threshold"]) > float(payload["spread_rate_threshold"]):
+            raise AccountValidationError("最小平仓价差阈值不能大于开仓价差率阈值。")
 
     def _build_rule_row(self, row: Dict[str, object]) -> Dict[str, object]:
         strategy_type = str(row.get("strategy_type") or "")
-        annualized_threshold = float(row.get("annualized_rate_threshold") or 0)
+        runtime_rule = strategy_rule_runtime_service.build_runtime_view(row)
+        funding_open_threshold = float(row.get("annualized_rate_threshold") or 0)
+        min_net_funding_rate_threshold = float(row.get("min_net_funding_rate_threshold") or 0)
         spread_threshold = float(row.get("spread_rate_threshold") or 0)
-        max_spread_rate_threshold = float(row.get("max_spread_rate_threshold") or 0)
+        min_close_spread_rate_threshold = float(row.get("min_close_spread_rate_threshold") or 0)
+        max_spread_rate_threshold = runtime_rule.stop_loss_price_diff
         is_enabled = bool(row.get("is_enabled"))
         order_amount_usdt = float(row.get("order_amount_usdt") or 0)
-        max_position_usdt = float(row.get("max_position_usdt") or 0)
-        if max_position_usdt <= 0:
-            max_position_usdt = order_amount_usdt
+        max_position_quantity = runtime_rule.max_position_quantity
 
-        trigger_text = (
-            f"年化 >= {annualized_threshold:.2f}% / 价差 <= {max_spread_rate_threshold:.2f}%"
-            if strategy_type == "funding"
-            else f"价差 >= {spread_threshold:.2f}% / 价差 <= {max_spread_rate_threshold:.2f}%"
-        )
+        active_position_amount = 0.0
+        user_id = int(row.get("user_id") or 0)
+        rule_id = int(row.get("id") or 0)
+        if user_id > 0 and rule_id > 0:
+            active_position_amount = arbitrage_execution_repository.sum_live_position_quantity_by_rule(
+                user_id=user_id,
+                strategy_rule_id=rule_id,
+            )
+
+        if strategy_type == "funding":
+            trigger_text = (
+                f"开仓净资金费率 > {funding_open_threshold:.4f}% / "
+                f"平仓净资金费率 < {min_net_funding_rate_threshold:.4f}% / "
+                f"最大价差 <= {max_spread_rate_threshold:.6f}"
+            )
+            min_close_threshold_text = f"{min_net_funding_rate_threshold:.4f}%"
+        else:
+            trigger_text = (
+                f"开仓 >= {spread_threshold:.2f}% / "
+                f"平仓 <= {min_close_spread_rate_threshold:.2f}% / "
+                f"最大价差 <= {max_spread_rate_threshold:.6f}"
+            )
+            min_close_threshold_text = f"{min_close_spread_rate_threshold:.2f}%"
 
         return {
-            "id": int(row["id"]),
+            "id": rule_id,
             "name": str(row.get("name") or "--"),
             "strategy_type": strategy_type,
             "strategy_type_label": STRATEGY_TYPE_LABELS.get(strategy_type, strategy_type),
-            "annualized_rate_threshold": annualized_threshold,
+            "annualized_rate_threshold": funding_open_threshold,
+            "min_net_funding_rate_threshold": min_net_funding_rate_threshold,
+            "min_net_funding_rate_threshold_text": f"{min_net_funding_rate_threshold:.4f}%",
             "spread_rate_threshold": spread_threshold,
+            "min_close_spread_rate_threshold": min_close_spread_rate_threshold,
+            "min_close_spread_rate_threshold_text": f"{min_close_spread_rate_threshold:.2f}%",
+            "min_close_threshold_text": min_close_threshold_text,
             "max_spread_rate_threshold": max_spread_rate_threshold,
-            "max_spread_rate_threshold_text": f"{max_spread_rate_threshold:.2f}%",
+            "max_spread_rate_threshold_text": self._format_quantity_value(max_spread_rate_threshold),
             "trigger_text": trigger_text,
             "max_pairs": int(row.get("max_pairs") or 0),
             "order_amount_usdt": order_amount_usdt,
             "order_amount_text": self._format_money(order_amount_usdt),
-            "max_position_usdt": max_position_usdt,
-            "max_position_text": self._format_money(max_position_usdt),
+            "max_position_usdt": max_position_quantity,
+            "max_position_text": self._format_quantity_value(max_position_quantity),
             "order_interval_seconds": int(row.get("order_interval_seconds") or 0),
             "order_interval_text": f"{int(row.get('order_interval_seconds') or 0)} 秒",
             "is_enabled": is_enabled,
             "status_label": "已启用" if is_enabled else "已停用",
             "status_tone": "positive" if is_enabled else "warning",
             "updated_at": self._format_datetime(row.get("updated_at")),
+            "active_position_amount_usdt": float(active_position_amount or 0),
+            "active_position_quantity": float(active_position_amount or 0),
         }
+
+    def _schedule_close_for_rule_open_positions(self, *, user_id: int, strategy_rule_id: int) -> None:
+        executions = arbitrage_execution_repository.list_active_open_executions_for_user(
+            user_id=user_id,
+            limit=500,
+        )
+        for execution_row in executions:
+            if int(execution_row.get("strategy_rule_id") or 0) != strategy_rule_id:
+                continue
+            if str(execution_row.get("action") or "").strip().lower() != "open":
+                continue
+            if str(execution_row.get("status") or "").strip().lower() != "open":
+                continue
+            pair_key = str(execution_row.get("pair_key") or "")
+            if arbitrage_execution_repository.has_open_close_execution(
+                user_id=user_id,
+                strategy_rule_id=strategy_rule_id,
+                pair_key=pair_key,
+            ):
+                continue
+            result = arbitrage_execution_plan_service.create_close_execution(
+                execution_row=execution_row,
+                reason="规则已停用，按用户操作发起全部平仓",
+            )
+            if result is None:
+                continue
+            arbitrage_execution_repository.update_execution_status(
+                execution_id=int(execution_row.get("id") or 0),
+                status="closing",
+            )
 
     def _format_money(self, value: float) -> str:
         return f"${value:,.2f}".rstrip("0").rstrip(".")
+
+    def _format_quantity_value(self, value: float) -> str:
+        numeric = float(value or 0)
+        if numeric >= 1000:
+            return f"{numeric:,.0f}".rstrip("0").rstrip(".")
+        if numeric >= 1:
+            return f"{numeric:,.4f}".rstrip("0").rstrip(".")
+        return f"{numeric:,.8f}".rstrip("0").rstrip(".")
 
     def _format_datetime(self, value) -> str:
         if value is None:

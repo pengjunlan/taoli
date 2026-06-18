@@ -72,7 +72,16 @@ class AccountCommandService(AccountServiceSupport):
                 address_value=normalized["address_value"],
                 memo_tag=normalized["address_memo"],
             )
-            account_monitor_service.seed_account(account.id, 0, None)
+            account_monitor_service.seed_account(
+                account.id,
+                0,
+                None,
+                user_id=current_user.id,
+                exchange_code=normalized["exchange_code"],
+                market_type=normalized["market_type"],
+                frozen_amount=0,
+                total_amount=0,
+            )
         except Exception as exc:
             raise AccountPersistenceError("保存账户失败：写入数据库时出错。") from exc
 
@@ -148,7 +157,7 @@ class AccountCommandService(AccountServiceSupport):
 
         if not deleted:
             raise AccountNotFoundError("账户不存在，或你无权删除该账户。")
-        account_monitor_service.remove_account(account_id)
+        account_monitor_service.remove_account(account_id, user_id=current_user.id)
 
     def mark_connection_test_status(self, account_id: int, current_user: AuthUser, status: str) -> None:
         normalized_status = status.strip().lower()
@@ -171,7 +180,7 @@ class AccountCommandService(AccountServiceSupport):
             detail = account_repository.get_account_with_address_by_id(account_id, current_user.id)
             if detail is not None:
                 try:
-                    amount = exchange_connection_service.fetch_available_balance(
+                    snapshot = exchange_connection_service.fetch_balance_snapshot(
                         ExchangeConnectionTestRequest(
                             account_id=account_id,
                             market_type=str(detail.get("market_type") or ""),
@@ -184,10 +193,19 @@ class AccountCommandService(AccountServiceSupport):
                     synced_at = datetime.now()
                     account_repository.update_current_available_amount(
                         account_id=account_id,
-                        amount=round(float(amount or 0), 8),
+                        amount=round(float(snapshot.available_amount or 0), 8),
                         synced_at=synced_at,
                     )
-                    account_monitor_service.seed_account(account_id, round(float(amount or 0), 8), synced_at)
+                    account_monitor_service.seed_account(
+                        account_id,
+                        round(float(snapshot.available_amount or 0), 8),
+                        synced_at,
+                        user_id=current_user.id,
+                        exchange_code=str(detail.get("exchange_code") or ""),
+                        market_type=str(detail.get("market_type") or ""),
+                        frozen_amount=round(float(snapshot.frozen_amount or 0), 8),
+                        total_amount=round(float(snapshot.total_amount or 0), 8),
+                    )
                 except ExchangeError:
                     pass
                 except Exception:
@@ -245,7 +263,9 @@ class AccountCommandService(AccountServiceSupport):
                 to_account_id=payload.to_account_id,
                 amount=round(payload.amount, 2),
                 reason=reason,
-                status="created",
+                status="pending",
+                execute_status="pending_execute",
+                result_status="none",
                 is_worker_enabled=is_worker_enabled,
                 result=result_hint,
             )

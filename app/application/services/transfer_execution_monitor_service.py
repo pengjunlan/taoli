@@ -6,11 +6,12 @@ import logging
 import threading
 import time
 
-from app.application.services.monitor_center_service import monitor_center_service
 from app.application.services.account_support import MANUAL_TRANSFER_EXECUTION_MODE
+from app.application.services.auto_transfer_runtime_guard_service import auto_transfer_runtime_guard_service
+from app.application.services.monitor_center_service import monitor_center_service
 from app.application.services.transfer_execution_service import transfer_execution_service
 from app.infrastructure.persistence.account_repository import account_repository
-from app.shared.exceptions import ExchangeError
+from app.shared.exceptions import ExchangeError, ExchangeValidationError
 
 
 logger = logging.getLogger(__name__)
@@ -87,14 +88,21 @@ class TransferExecutionMonitorService:
                 record_id,
                 status="failed",
                 result="调拨记录不存在，无法执行。",
+                execute_status="processed",
+                result_status="failed",
+                failure_type="business",
+                failure_reason="调拨记录不存在，无法执行。",
             )
             return
+
         try:
             outcome = transfer_execution_service.execute(context)
             account_repository.update_transfer_record_status(
                 record_id,
                 status=outcome.status,
                 result=outcome.result,
+                execute_status="processed",
+                result_status="success",
             )
             monitor_center_service.add_log(
                 self._monitor_key,
@@ -102,11 +110,23 @@ class TransferExecutionMonitorService:
                 f"调拨记录 #{record_id} 执行成功: {outcome.result}",
             )
         except ExchangeError as exc:
+            failure_type = "config" if isinstance(exc, ExchangeValidationError) else "temporary"
             account_repository.update_transfer_record_status(
                 record_id,
                 status="failed",
                 result=str(exc),
+                execute_status="processed",
+                result_status="failed",
+                failure_type=failure_type,
+                failure_reason=str(exc),
             )
+            if isinstance(exc, ExchangeValidationError):
+                user_id = int(context.get("user_id") or 0)
+                if user_id > 0:
+                    auto_transfer_runtime_guard_service.mark_config_error(
+                        user_id=user_id,
+                        reason=str(exc),
+                    )
             monitor_center_service.add_log(
                 self._monitor_key,
                 "warning",
@@ -118,6 +138,10 @@ class TransferExecutionMonitorService:
                 record_id,
                 status="failed",
                 result=f"后台执行异常: {exc}",
+                execute_status="processed",
+                result_status="failed",
+                failure_type="temporary",
+                failure_reason=str(exc),
             )
             monitor_center_service.add_log(
                 self._monitor_key,

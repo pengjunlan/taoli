@@ -1,0 +1,57 @@
+{% extends 'base/layout.html' %}
+
+{% block content %}
+<div class="shell-container page-stack redis-page">
+    <section class="page-header redis-page__header">
+        <div>
+            <div class="eyebrow">REDIS INSPECTOR</div>
+            <h1>{{ page_title }}</h1>
+            <p>{{ page_subtitle }}</p>
+        </div>
+    </section>
+
+    <section class="card card--section redis-section">
+        <div class="card__header card__header--row redis-section__header">
+            <div class="redis-section__title">
+                <h2>Redis 数据表</h2>
+                <p>重点查看 key 和 value。每页显示 20 条数据，可直接翻页。</p>
+            </div>
+            <div class="redis-toolbar">
+                <button class="table-action redis-start-action" type="button" data-redis-start>重启 Redis</button>
+                <div class="redis-refresh-note" data-redis-refresh-note>加载中...</div>
+                <button class="table-action" type="button" data-redis-refresh>立即刷新</button>
+            </div>
+        </div>
+
+        <div class="redis-table-shell">
+            <div class="redis-group-tabs-shell">
+                <div class="redis-group-tabs" role="tablist" aria-label="Redis 数据分组" data-redis-group-tabs>
+                    <div class="redis-group-tabs__empty">正在加载分组...</div>
+                </div>
+                <div class="redis-group-summary" data-redis-group-summary>正在读取当前分组数据...</div>
+            </div>
+
+            <div class="redis-table-wrap">
+                <table class="redis-table">
+                    <thead>
+                        <tr>
+                            <th class="redis-col-index">序号</th>
+                            <th class="redis-col-key">Key</th>
+                            <th class="redis-col-value">Value</th>
+                            <th class="redis-col-meta">类型 / 来源</th>
+                            <th class="redis-col-ttl">TTL</th>
+                        </tr>
+                    </thead>
+                    <tbody data-redis-table-body>
+                        <tr>
+                            <td class="redis-empty" colspan="5">正在读取 Redis 数据...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="redis-table-footer" data-redis-pagination></div>
+        </div>
+    </section>
+</div>
+{% endblock %}

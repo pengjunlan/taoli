@@ -15,6 +15,16 @@ MAX_BYTES = 5 * 1024 * 1024
 BACKUP_COUNT = 5
 
 
+class SafeRotatingFileHandler(RotatingFileHandler):
+    def doRollover(self) -> None:
+        try:
+            super().doRollover()
+        except PermissionError:
+            # On Windows multiple processes can momentarily hold the same file.
+            # Skip the rollover and keep writing to the current file.
+            return
+
+
 def setup_logging() -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     RUNTIME_LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -68,7 +78,7 @@ def build_worker_logger(worker_key: str) -> logging.Logger:
 
 def _build_rotating_handler(path: Path, formatter: logging.Formatter, *, level: int = logging.INFO) -> RotatingFileHandler:
     path.parent.mkdir(parents=True, exist_ok=True)
-    handler = RotatingFileHandler(
+    handler = SafeRotatingFileHandler(
         filename=str(path),
         maxBytes=MAX_BYTES,
         backupCount=BACKUP_COUNT,

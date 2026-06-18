@@ -221,6 +221,7 @@ class LocalPositionService:
 
     def _format_order_status(self, status: str) -> str:
         mapping = {
+            "pending": "待提交",
             "created": "已创建",
             "submitting": "提交中",
             "submitted": "已提交",

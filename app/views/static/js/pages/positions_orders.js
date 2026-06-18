@@ -1,7 +1,10 @@
+import { createLiveSocket } from "../core/live-socket.js";
 import { bindListPagination, refreshListPagination } from "../core/prototype.js";
 import { bindLogoutAction, showToast } from "../core/utils.js";
 
-const POLL_INTERVAL_MS = 5000;
+let liveSocket = null;
+let latestPayload = {};
+let isClosingExecution = false;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -18,6 +21,31 @@ async function getJson(url) {
     headers: {
       "X-Requested-With": "XMLHttpRequest",
     },
+    credentials: "same-origin",
+  });
+
+  let data = {};
+  try {
+    data = await response.json();
+  } catch (error) {
+    data = { success: false, message: "服务响应格式错误。" };
+  }
+
+  if (!response.ok && !data.message) {
+    data.message = "请求失败，请稍后再试。";
+  }
+
+  return data;
+}
+
+async function postJson(url, payload = {}) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+    },
+    body: JSON.stringify(payload),
     credentials: "same-origin",
   });
 
@@ -88,11 +116,11 @@ function updateRuntimeStatus(runtimeStatus) {
   }
 }
 
-function renderPositionsRows(rows) {
+function renderActivePositionRows(rows) {
   if (!Array.isArray(rows) || !rows.length) {
     return `
       <tr class="table-empty-row">
-        <td colspan="7" class="spread-metric">当前还没有规则命中的候选持仓。</td>
+        <td colspan="13" class="spread-metric">当前还没有进入真实套利中的持仓组合。</td>
       </tr>
     `;
   }
@@ -101,36 +129,80 @@ function renderPositionsRows(rows) {
     .map(
       (row) => `
         <tr>
+          <td class="spread-metric">${escapeHtml(row.rank)}</td>
+          <td><span class="pill pill--${escapeHtml(row.type_tone || "brand")}">${escapeHtml(row.type_label)}</span></td>
           <td>
             <div class="spread-symbol">
               <strong>${escapeHtml(row.symbol)}</strong>
-              <span class="spread-symbol__hint">${escapeHtml(row.status || "候选中")}</span>
+              <span class="spread-symbol__hint">${escapeHtml(row.status || "--")}</span>
             </div>
           </td>
-          <td>${escapeHtml(row.strategy)}</td>
           <td>
             <div class="pair-cell pair-cell--spread">
-              <span class="pair-cell__line is-positive">主腿 / ${escapeHtml(row.long_exchange)}</span>
-              <span class="pair-cell__line is-negative">对冲 / ${escapeHtml(row.short_exchange)}</span>
+              <span class="pair-cell__line is-positive">${escapeHtml(row.pair_primary_text)}</span>
+              <span class="pair-cell__line is-negative">${escapeHtml(row.pair_secondary_text)}</span>
             </div>
           </td>
-          <td class="spread-metric spread-metric--strong">${escapeHtml(row.size)}</td>
+          <td class="spread-metric">${escapeHtml(row.net_spread || "--")}</td>
+          <td class="spread-metric">${escapeHtml(row.net_rate || "--")}</td>
           <td>
-            <span class="pill pill--warning">${escapeHtml(row.hedge)}</span>
+            <div class="pair-cell pair-cell--hedge">
+              <span class="pair-cell__line pair-cell__line--hedge is-positive">${escapeHtml(row.current_price_primary || "--")}</span>
+              <span class="pair-cell__line pair-cell__line--hedge is-negative">${escapeHtml(row.current_price_secondary || "--")}</span>
+            </div>
           </td>
-          <td class="spread-value">${escapeHtml(row.pnl)}</td>
-          <td>${escapeHtml(row.reason || "--")}</td>
+          <td>
+            <div class="pair-cell pair-cell--hedge">
+              <span class="pair-cell__line pair-cell__line--hedge is-positive">${escapeHtml(row.funding_rate_primary || "--")}</span>
+              <span class="pair-cell__line pair-cell__line--hedge is-negative">${escapeHtml(row.funding_rate_secondary || "--")}</span>
+            </div>
+          </td>
+          <td>
+            <div class="pair-cell pair-cell--hedge">
+              <span class="pair-cell__line pair-cell__line--hedge is-positive">${escapeHtml(row.fee_rate_primary || "--")}</span>
+              <span class="pair-cell__line pair-cell__line--hedge is-negative">${escapeHtml(row.fee_rate_secondary || "--")}</span>
+            </div>
+          </td>
+          <td>
+            <div class="pair-cell pair-cell--hedge">
+              <span class="pair-cell__line pair-cell__line--hedge is-positive">${escapeHtml(row.position_qty_primary || "--")}</span>
+              <span class="pair-cell__line pair-cell__line--hedge is-negative">${escapeHtml(row.position_qty_secondary || "--")}</span>
+            </div>
+          </td>
+          <td>
+            <div class="pair-cell pair-cell--hedge">
+              <span class="pair-cell__line pair-cell__line--hedge is-positive spread-metric--strong">${escapeHtml(row.position_value_primary || "--")}</span>
+              <span class="pair-cell__line pair-cell__line--hedge is-negative spread-metric--strong">${escapeHtml(row.position_value_secondary || "--")}</span>
+            </div>
+          </td>
+          <td>
+            <div class="spread-symbol">
+              <strong class="spread-metric spread-metric--strong">${escapeHtml(row.key_field_value || "--")}</strong>
+              <span class="spread-symbol__hint">${escapeHtml(row.key_field_label || "--")}</span>
+            </div>
+          </td>
+          <td>
+            <button
+              class="table-action table-action--danger runtime-close-action"
+              type="button"
+              data-runtime-close
+              data-execution-id="${escapeHtml(row.execution_id || 0)}"
+              ${row.can_close ? "" : "disabled"}
+            >
+              ${escapeHtml(row.close_button_text || "一键平仓")}
+            </button>
+          </td>
         </tr>
       `,
     )
     .join("");
 }
 
-function renderOrderRows(rows) {
+function renderActiveOrderRows(rows) {
   if (!Array.isArray(rows) || !rows.length) {
     return `
       <tr class="table-empty-row">
-        <td colspan="8" class="spread-metric">当前还没有候选执行记录。</td>
+        <td colspan="14" class="spread-metric">当前没有正在挂单或等待成交的实际订单。</td>
       </tr>
     `;
   }
@@ -139,30 +211,41 @@ function renderOrderRows(rows) {
     .map(
       (row) => `
         <tr>
+          <td class="spread-metric">${escapeHtml(row.row_code || row.pair_key || "--")}</td>
           <td class="spread-metric">${escapeHtml(row.time)}</td>
           <td>
             <div class="spread-symbol">
               <strong>${escapeHtml(row.symbol)}</strong>
-              <span class="spread-symbol__hint">${escapeHtml(row.strategy || "--")}</span>
+              <span class="spread-symbol__hint">${escapeHtml(row.strategy)}</span>
             </div>
           </td>
           <td>${escapeHtml(row.exchange)}</td>
-          <td class="spread-value">${escapeHtml(row.side)}</td>
+          <td>${escapeHtml(row.leg_role)}</td>
+          <td>
+            <div class="pair-cell pair-cell--hedge">
+              <span class="pair-cell__line pair-cell__line--hedge">${escapeHtml(row.execution_action)}</span>
+              <span class="pair-cell__line pair-cell__line--hedge">${escapeHtml(row.action)}</span>
+            </div>
+          </td>
           <td><span class="pill pill--${escapeHtml(row.status_tone || "brand")}">${escapeHtml(row.status)}</span></td>
-          <td class="spread-metric">${escapeHtml(row.size)}</td>
+          <td class="spread-metric">${escapeHtml(row.requested_price)}</td>
+          <td class="spread-metric">${escapeHtml(row.requested_quantity)}</td>
+          <td class="spread-metric">${escapeHtml(row.filled_quantity)}</td>
+          <td class="spread-metric">${escapeHtml(row.requested_value)}</td>
+          <td class="spread-metric">${escapeHtml(row.filled_value)}</td>
+          <td class="spread-metric">${escapeHtml(row.retry_count)}</td>
           <td>${escapeHtml(row.reason || "--")}</td>
-          <td class="spread-metric">未下单</td>
         </tr>
       `,
     )
     .join("");
 }
 
-function renderFillRows(rows) {
+function renderHistoryOrderRows(rows) {
   if (!Array.isArray(rows) || !rows.length) {
     return `
       <tr class="table-empty-row">
-        <td colspan="6" class="spread-metric">真实成交回报尚未接入，当前只展示规则命中与候选执行记录。</td>
+        <td colspan="12" class="spread-metric">当前还没有历史订单记录。</td>
       </tr>
     `;
   }
@@ -171,55 +254,168 @@ function renderFillRows(rows) {
     .map(
       (row) => `
         <tr>
+          <td class="spread-metric">${escapeHtml(row.row_code || row.pair_key || "--")}</td>
           <td class="spread-metric">${escapeHtml(row.time)}</td>
           <td>
             <div class="spread-symbol">
               <strong>${escapeHtml(row.symbol)}</strong>
-              <span class="spread-symbol__hint">${escapeHtml(row.symbol).replace("USDT", "/USDT")}</span>
+              <span class="spread-symbol__hint">${escapeHtml(row.strategy)}</span>
             </div>
           </td>
           <td>${escapeHtml(row.exchange)}</td>
-          <td class="spread-value">${escapeHtml(row.side)}</td>
-          <td class="spread-metric">${escapeHtml(row.price)}</td>
-          <td class="spread-metric">${escapeHtml(row.size)}</td>
+          <td>${escapeHtml(row.leg_role)}</td>
+          <td>
+            <div class="pair-cell pair-cell--hedge">
+              <span class="pair-cell__line pair-cell__line--hedge">${escapeHtml(row.execution_action)}</span>
+              <span class="pair-cell__line pair-cell__line--hedge">${escapeHtml(row.action)}</span>
+            </div>
+          </td>
+          <td><span class="pill pill--${escapeHtml(row.status_tone || "brand")}">${escapeHtml(row.status)}</span></td>
+          <td class="spread-metric">${escapeHtml(row.avg_fill_price)}</td>
+          <td class="spread-metric">${escapeHtml(row.filled_quantity)}</td>
+          <td class="spread-metric">${escapeHtml(row.filled_value)}</td>
+          <td class="spread-metric">${escapeHtml(row.fill_count)}</td>
+          <td>${escapeHtml(row.result || "--")}</td>
         </tr>
       `,
     )
     .join("");
 }
 
-async function refreshRuntimeRows({ silent = false } = {}) {
-  const result = await getJson("/api/strategy-runtime");
-  if (!result.success) {
-    if (!silent) {
-      throw new Error(result.message || "读取策略运行态失败。");
-    }
-    return;
-  }
+function bindRuntimeTabs() {
+  const triggers = Array.from(document.querySelectorAll("[data-runtime-tab-trigger]"));
+  const panels = Array.from(document.querySelectorAll("[data-runtime-tab-panel]"));
+  if (!triggers.length || !panels.length) return;
 
-  updateSummaryCards(result.summary_cards || []);
-  updateRuntimeStatus(result.runtime_status);
+  const activateTab = (tabKey) => {
+    triggers.forEach((trigger) => {
+      const isActive = trigger.getAttribute("data-runtime-tab-trigger") === tabKey;
+      trigger.classList.toggle("is-active", isActive);
+      trigger.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
 
-  const positionsBody = document.querySelector("[data-positions-table-body]");
-  const ordersBody = document.querySelector("[data-orders-table-body]");
-  const fillsBody = document.querySelector("[data-fills-table-body]");
+    panels.forEach((panel) => {
+      const isActive = panel.getAttribute("data-runtime-tab-panel") === tabKey;
+      panel.classList.toggle("is-active", isActive);
+      panel.hidden = !isActive;
+    });
+
+    refreshListPagination(document);
+  };
+
+  triggers.forEach((trigger) => {
+    trigger.addEventListener("click", () => {
+      activateTab(trigger.getAttribute("data-runtime-tab-trigger"));
+    });
+  });
+}
+
+function bindCloseActions() {
+  document.querySelectorAll("[data-runtime-close]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const executionId = Number(button.dataset.executionId || 0);
+      if (!executionId || isClosingExecution || button.disabled) return;
+
+      const confirmed = window.confirm("确认对当前套利组合发起一键平仓吗？");
+      if (!confirmed) return;
+
+      isClosingExecution = true;
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = "提交中...";
+
+      try {
+        const result = await postJson(`/api/strategy-runtime/${executionId}/close`);
+        if (!result.success) {
+          throw new Error(result.message || "发起一键平仓失败。");
+        }
+        showToast(result.message || "已发起一键平仓。");
+        await refreshRuntimeRows();
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = originalText;
+        showToast(error?.message || "发起一键平仓失败，请稍后再试。");
+      } finally {
+        isClosingExecution = false;
+      }
+    });
+  });
+}
+
+function applyPayload(result) {
+  latestPayload = result || {};
+
+  updateSummaryCards(latestPayload.summary_cards || []);
+  updateRuntimeStatus(latestPayload.runtime_status);
+
+  const activePositionsBody = document.querySelector("[data-runtime-active-positions-body]");
+  const activeOrdersBody = document.querySelector("[data-runtime-active-orders-body]");
+  const historyOrdersBody = document.querySelector("[data-runtime-history-orders-body]");
   const generatedAt = document.querySelector("[data-runtime-generated-at]");
-  const candidateCount = document.querySelector("[data-runtime-candidate-count]");
+  const activePositionCount = document.querySelector("[data-runtime-active-position-count]");
+  const activeOrderCount = document.querySelector("[data-runtime-active-order-count]");
+  const historyOrderCount = document.querySelector("[data-runtime-history-order-count]");
 
-  if (positionsBody) positionsBody.innerHTML = renderPositionsRows(result.positions_rows || []);
-  if (ordersBody) ordersBody.innerHTML = renderOrderRows(result.order_rows || []);
-  if (fillsBody) fillsBody.innerHTML = renderFillRows(result.fill_rows || []);
-  if (generatedAt) generatedAt.textContent = `最近生成：${String(result.generated_at || "--")}`;
-  if (candidateCount) candidateCount.textContent = `候选 ${Number((result.candidate_rows || []).length)} 条`;
+  if (activePositionsBody) {
+    activePositionsBody.innerHTML = renderActivePositionRows(latestPayload.active_positions_rows || []);
+  }
+  if (activeOrdersBody) {
+    activeOrdersBody.innerHTML = renderActiveOrderRows(latestPayload.active_order_rows || []);
+  }
+  if (historyOrdersBody) {
+    historyOrdersBody.innerHTML = renderHistoryOrderRows(latestPayload.history_order_rows || []);
+  }
+  if (generatedAt) {
+    generatedAt.textContent = `最近生成：${String(latestPayload.generated_at || "--")}`;
+  }
+  if (activePositionCount) {
+    activePositionCount.textContent = `共 ${Number((latestPayload.active_positions_rows || []).length)} 个组合`;
+  }
+  if (activeOrderCount) {
+    activeOrderCount.textContent = `共 ${Number((latestPayload.active_order_rows || []).length)} 条当前订单`;
+  }
+  if (historyOrderCount) {
+    historyOrderCount.textContent = `共 ${Number((latestPayload.history_order_rows || []).length)} 条历史订单`;
+  }
 
   refreshListPagination(document);
+  bindCloseActions();
+}
+
+async function refreshRuntimeRows() {
+  const result = await getJson("/api/strategy-runtime");
+  if (!result.success) {
+    throw new Error(result.message || "读取策略运行态失败。");
+  }
+  applyPayload(result);
+}
+
+function startLiveUpdates() {
+  liveSocket?.close();
+  liveSocket = createLiveSocket({
+    channel: "strategy-runtime",
+    suppressErrorToast: true,
+    onMessage(payload) {
+      if (!payload?.success) {
+        return;
+      }
+      applyPayload(payload);
+    },
+  });
 }
 
 bindListPagination();
 bindLogoutAction();
-refreshRuntimeRows().catch((error) => {
-  showToast(error?.message || "读取策略运行态失败，请稍后再试。");
+bindRuntimeTabs();
+refreshRuntimeRows()
+  .then(() => {
+    startLiveUpdates();
+  })
+  .catch((error) => {
+    showToast(error?.message || "读取策略运行态失败，请稍后再试。");
+    startLiveUpdates();
+  });
+
+window.addEventListener("beforeunload", () => {
+  liveSocket?.close();
 });
-window.setInterval(() => {
-  refreshRuntimeRows({ silent: true }).catch(() => {});
-}, POLL_INTERVAL_MS);

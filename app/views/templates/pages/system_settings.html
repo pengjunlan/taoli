@@ -35,6 +35,7 @@
                         <th>启用状态</th>
                         <th>接口模式</th>
                         <th>配置状态</th>
+                        <th>行情获取</th>
                         <th>API Key</th>
                         <th>API Secret</th>
                         <th>Passphrase</th>
@@ -45,7 +46,7 @@
                 </thead>
                 <tbody data-system-config-table-body>
                     <tr class="table-empty-row">
-                        <td colspan="10" class="spread-metric">加载中..</td>
+                        <td colspan="11" class="spread-metric">加载中..</td>
                     </tr>
                 </tbody>
             </table>
@@ -116,6 +117,31 @@
                 <button class="button button--primary" type="submit">保存配置</button>
             </div>
         </form>
+    </div>
+</div>
+
+<div class="account-modal system-settings-modal" data-system-symbols-modal hidden>
+    <div class="account-modal__mask" data-system-symbols-close></div>
+    <div class="account-modal__dialog card system-symbols-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="system-symbols-modal-title">
+        <div class="account-modal__header">
+            <div>
+                <div class="eyebrow">Swap Symbols</div>
+                <h2 id="system-symbols-modal-title">永续交易对列表</h2>
+                <p data-system-symbols-summary>正在读取数据库中的永续交易对...</p>
+            </div>
+            <button class="account-modal__close" type="button" aria-label="关闭永续交易对列表弹窗" data-system-symbols-close>脳</button>
+        </div>
+
+        <div class="system-symbols-modal__body">
+            <div class="system-symbols-modal__list" data-system-symbols-list>
+                <div class="system-symbols-modal__empty">加载中...</div>
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <button class="button button--primary" type="button" data-system-symbols-refresh>更新</button>
+            <button class="button button--ghost" type="button" data-system-symbols-close>关闭</button>
+        </div>
     </div>
 </div>
 {% endblock %}

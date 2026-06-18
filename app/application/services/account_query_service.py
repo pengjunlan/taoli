@@ -22,6 +22,10 @@ class AccountQueryService(AccountServiceSupport):
     def __init__(self) -> None:
         self._transfer_capability_service = AccountTransferCapabilityService()
 
+    def build_active_account_rows_for_user(self, user_id: int) -> List[Dict[str, str]]:
+        rows = account_repository.list_active_accounts_with_address_by_user_id(user_id)
+        return self._build_account_rows(rows)
+
     def get_account_detail(self, account_id: int, user_id: int) -> AccountDetailResult:
         row = account_repository.get_account_with_address_by_id(account_id, user_id)
         if row is None:
@@ -52,6 +56,9 @@ class AccountQueryService(AccountServiceSupport):
 
     def build_account_rows_for_user(self, user_id: int) -> List[Dict[str, str]]:
         rows = account_repository.list_accounts_with_address_by_user_id(user_id)
+        return self._build_account_rows(rows)
+
+    def _build_account_rows(self, rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
         result: List[Dict[str, str]] = []
 
         for row in rows:
@@ -67,18 +74,32 @@ class AccountQueryService(AccountServiceSupport):
             connection_test_status = str(row.get("connection_test_status") or "untested")
             updated_at = row.get("updated_at")
             funding_ratio_percent = float(row.get("funding_ratio_percent") or 0)
-            current_available_amount = float(row.get("current_available_amount") or 0)
-            current_available_synced_at = row.get("current_available_synced_at")
+            cached_balance = account_monitor_service.get_cached_balance(
+                int(row["id"]),
+                user_id=int(row.get("user_id") or 0),
+            )
+            current_available_amount = (
+                float(cached_balance.amount)
+                if cached_balance is not None
+                else float(row.get("current_available_amount") or 0)
+            )
+            current_available_synced_at = (
+                cached_balance.synced_at
+                if cached_balance is not None and cached_balance.synced_at is not None
+                else row.get("current_available_synced_at")
+            )
 
             result.append(
                 {
                     "id": str(row["id"]),
                     "user_id": str(row["user_id"]),
+                    "is_active": bool(row.get("is_active")),
                     "name": account_name,
                     "exchange": exchange_label,
                     "exchange_code": str(row["exchange_code"]),
                     "market_type": market_label,
                     "market_type_code": str(row["market_type"]),
+                    "connection_test_status_code": connection_test_status,
                     "api_key": self._mask_secret(api_key, left=4, right=4),
                     "api_secret": self._mask_secret(api_secret, left=3, right=3),
                     "api_passphrase": "已配置" if api_passphrase else "未配置",
@@ -213,6 +234,9 @@ class AccountQueryService(AccountServiceSupport):
         result: List[Dict[str, str]] = []
 
         for row in rows:
+            execute_status = str(row.get("execute_status") or row.get("status") or "pending_execute")
+            result_status = str(row.get("result_status") or "")
+            display_status = result_status if result_status in {"success", "failed", "ignored"} else execute_status
             result.append(
                 {
                     "time": self._format_datetime(row.get("created_at")),
@@ -220,8 +244,8 @@ class AccountQueryService(AccountServiceSupport):
                     "route_to": self._sanitize_account_name(str(row.get("to_account_name") or "--")),
                     "amount": self._format_currency(float(row.get("amount") or 0)),
                     "reason": str(row.get("reason") or "手动调拨"),
-                    "status": self._transfer_status_label(str(row.get("status") or "created")),
-                    "status_tone": self._transfer_status_tone(str(row.get("status") or "created")),
+                    "status": self._transfer_status_label(display_status),
+                    "status_tone": self._transfer_status_tone(display_status),
                     "result": str(row.get("result") or "--"),
                 }
             )
@@ -278,11 +302,20 @@ class AccountQueryService(AccountServiceSupport):
         except (TypeError, ValueError):
             return self._fallback_balance_snapshot(exchange_code)
 
-        cached_amount = account_monitor_service.get_cached_amount(
+        cached_balance = account_monitor_service.get_cached_balance(
             account_id_int,
-            fallback_amount=float(account_row.get("current_available_amount") or 0),
+            user_id=int(account_row.get("user_id") or 0),
         )
-        synced_at = account_monitor_service.get_cached_synced_at(account_id_int) or account_row.get("current_available_synced_at")
+        cached_amount = (
+            float(cached_balance.amount)
+            if cached_balance is not None
+            else float(account_row.get("current_available_amount") or 0)
+        )
+        synced_at = (
+            cached_balance.synced_at
+            if cached_balance is not None and cached_balance.synced_at is not None
+            else account_row.get("current_available_synced_at")
+        )
         if cached_amount > 0 or synced_at is not None:
             return AccountBalanceSnapshot(
                 available_value=float(cached_amount),

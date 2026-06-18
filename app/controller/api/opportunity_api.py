@@ -1,5 +1,6 @@
 """Opportunity list API routes."""
 
+import logging
 from typing import Dict
 
 from fastapi import APIRouter, Depends, Query
@@ -7,9 +8,11 @@ from fastapi import APIRouter, Depends, Query
 from app.application.services import opportunity_status_service, strategy_runtime_service
 from app.controller.dependencies import require_api_user
 from app.domain.entities import AuthUser
+from app.shared.exceptions import AccountError, AccountNotFoundError, AccountValidationError
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/api/funding-opportunities")
@@ -71,4 +74,33 @@ async def strategy_runtime_api(current_user: AuthUser = Depends(require_api_user
         "success": True,
         "message": "策略运行态读取成功。",
         **payload,
+    }
+
+
+@router.post("/api/strategy-runtime/{execution_id}/close")
+async def strategy_runtime_close_api(
+    execution_id: int,
+    current_user: AuthUser = Depends(require_api_user),
+) -> Dict[str, object]:
+    try:
+        result = strategy_runtime_service.request_close_execution(
+            user_id=current_user.id,
+            execution_id=execution_id,
+        )
+    except (AccountNotFoundError, AccountValidationError) as exc:
+        return {"success": False, "message": str(exc)}
+    except AccountError as exc:
+        return {"success": False, "message": str(exc)}
+    except Exception:
+        logger.exception(
+            "Create manual close execution failed unexpectedly for user_id=%s execution_id=%s",
+            current_user.id,
+            execution_id,
+        )
+        return {"success": False, "message": "发起一键平仓失败：服务内部异常，请查看后端日志。"}
+
+    return {
+        "success": True,
+        "message": "该组合已经在平仓中。" if bool(result.get("already_pending")) else "已发起一键平仓，后台开始执行。",
+        **result,
     }

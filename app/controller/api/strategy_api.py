@@ -50,6 +50,7 @@ async def strategy_rule_detail_api(
         "success": True,
         "message": "规则读取成功。",
         "rule": rule,
+        "has_active_positions": bool(float(rule.get("active_position_amount_usdt") or 0) > 0),
     }
 
 

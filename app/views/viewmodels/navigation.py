@@ -17,7 +17,8 @@ NAV_ITEMS: Tuple[NavItem, ...] = (
     NavItem(key="strategy_list", label="规则管理", href="/strategies"),
     NavItem(key="positions_orders", label="运行监控", href="/positions-orders"),
     NavItem(key="accounts", label="账户调度", href="/accounts"),
-    NavItem(key="risk_alerts", label="风控告警", href="/risk-alerts"),
+    NavItem(key="risk_alerts", label="线程监控", href="/risk-alerts"),
+    NavItem(key="redis_inspector", label="Redis", href="/redis-inspector"),
     NavItem(key="system_settings", label="系统配置", href="/system-settings"),
 )
 
@@ -27,7 +28,7 @@ def build_nav_items(current_user: Optional[AuthUser] = None) -> List[Dict[str, s
     is_admin = bool(current_user and current_user.is_admin)
 
     for item in NAV_ITEMS:
-        if item.key == "system_settings" and not is_admin:
+        if item.key in {"system_settings", "redis_inspector"} and not is_admin:
             continue
         items.append(item.to_dict())
 

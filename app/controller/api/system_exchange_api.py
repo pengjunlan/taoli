@@ -51,6 +51,45 @@ async def system_exchange_detail_api(
     }
 
 
+@router.get("/api/system-exchanges/{exchange_code}/swap-symbols")
+async def system_exchange_swap_symbols_api(
+    exchange_code: str,
+    current_user: AuthUser = Depends(require_admin_user),
+) -> Dict[str, object]:
+    _ = current_user
+    payload = system_exchange_config_service.list_swap_symbols(exchange_code)
+    if payload is None:
+        return {"success": False, "message": "未找到该系统交易所配置"}
+
+    return {
+        "success": True,
+        "message": "系统交易所永续交易对读取成功",
+        **payload,
+    }
+
+
+@router.post("/api/system-exchanges/{exchange_code}/swap-symbols/refresh")
+async def system_exchange_refresh_swap_symbols_api(
+    exchange_code: str,
+    current_user: AuthUser = Depends(require_admin_user),
+) -> Dict[str, object]:
+    _ = current_user
+    try:
+        payload = system_exchange_config_service.refresh_swap_symbols(exchange_code)
+    except Exception as exc:
+        logger.exception("Refresh system exchange swap symbols failed: exchange_code=%s", exchange_code)
+        return {"success": False, "message": str(exc)}
+
+    if payload is None:
+        return {"success": False, "message": "未找到该系统交易所配置"}
+
+    return {
+        "success": True,
+        "message": "永续交易对更新成功",
+        **payload,
+    }
+
+
 @router.post("/api/system-exchanges")
 async def system_exchange_update_api(
     payload: SystemExchangeConfigUpdateRequest,

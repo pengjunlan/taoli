@@ -93,6 +93,9 @@ class AccountService:
     def build_account_rows_for_user(self, user_id: int) -> List[Dict[str, str]]:
         return self._query_service.build_account_rows_for_user(user_id)
 
+    def build_active_account_rows_for_user(self, user_id: int) -> List[Dict[str, str]]:
+        return self._query_service.build_active_account_rows_for_user(user_id)
+
     def build_address_rows_for_user(self, user_id: int) -> List[Dict[str, str]]:
         return self._query_service.build_address_rows_for_user(user_id)
 

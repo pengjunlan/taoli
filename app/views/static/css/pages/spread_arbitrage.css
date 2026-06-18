@@ -50,11 +50,6 @@
     width: 8%;
 }
 
-.page-spread_arbitrage .data-table thead th:nth-child(11),
-.page-spread_arbitrage .data-table tbody td:nth-child(11) {
-    width: 7%;
-}
-
 .page-spread_arbitrage .data-table tbody td {
     padding-top: 20px;
     padding-bottom: 20px;

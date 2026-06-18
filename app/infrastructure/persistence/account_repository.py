@@ -47,6 +47,47 @@ class MySQLAccountRepository:
             )
             return cursor.fetchone()
 
+    def get_active_account_with_address_by_id(self, account_id: int, user_id: int) -> Dict[str, Any] | None:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT
+                    a.id,
+                    a.user_id,
+                    a.market_type,
+                    a.exchange_code,
+                    a.account_name,
+                    a.api_key,
+                    a.api_secret,
+                    a.api_passphrase,
+                    a.connection_test_status,
+                    a.funding_ratio_percent,
+                    a.current_available_amount,
+                    a.current_available_synced_at,
+                    a.is_active,
+                    a.created_at,
+                    a.updated_at,
+                    fa.network,
+                    fa.address_value,
+                    fa.memo_tag,
+                    fa.created_at AS address_created_at,
+                    fa.updated_at AS address_updated_at
+                FROM exchange_accounts AS a
+                INNER JOIN users AS u
+                    ON u.id = a.user_id
+                LEFT JOIN account_funding_addresses AS fa
+                    ON fa.account_id = a.id
+                WHERE a.id = %s
+                  AND a.user_id = %s
+                  AND a.is_active = 1
+                  AND u.is_active = 1
+                LIMIT 1
+                """,
+                (account_id, user_id),
+            )
+            return cursor.fetchone()
+
     def create_account(
         self,
         *,
@@ -406,6 +447,11 @@ class MySQLAccountRepository:
         reason: str,
         status: str,
         result: str,
+        execute_status: str = "pending_execute",
+        result_status: str = "none",
+        failure_type: str = "",
+        failure_reason: str = "",
+        config_fingerprint: str = "",
         is_worker_enabled: bool = False,
     ) -> TransferRecord:
         with mysql_manager.connection() as connection:
@@ -419,12 +465,31 @@ class MySQLAccountRepository:
                     amount,
                     reason,
                     status,
+                    execute_status,
+                    result_status,
+                    failure_type,
+                    failure_reason,
+                    config_fingerprint,
                     is_worker_enabled,
                     result
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (user_id, from_account_id, to_account_id, amount, reason, status, 1 if is_worker_enabled else 0, result),
+                (
+                    user_id,
+                    from_account_id,
+                    to_account_id,
+                    amount,
+                    reason,
+                    status,
+                    execute_status,
+                    result_status,
+                    failure_type,
+                    failure_reason,
+                    config_fingerprint,
+                    1 if is_worker_enabled else 0,
+                    result,
+                ),
             )
             connection.commit()
 
@@ -438,7 +503,13 @@ class MySQLAccountRepository:
                     amount,
                     reason,
                     status,
+                    execute_status,
+                    result_status,
+                    failure_type,
+                    failure_reason,
+                    config_fingerprint,
                     result,
+                    processed_at,
                     created_at,
                     updated_at
                 FROM account_transfer_records
@@ -464,13 +535,19 @@ class MySQLAccountRepository:
                     amount,
                     reason,
                     status,
+                    execute_status,
+                    result_status,
+                    failure_type,
+                    failure_reason,
+                    config_fingerprint,
                     is_worker_enabled,
                     result,
+                    processed_at,
                     created_at,
                     updated_at
                 FROM account_transfer_records
                 WHERE is_worker_enabled = 1
-                  AND status = 'created'
+                  AND execute_status = 'pending_execute'
                 ORDER BY id ASC
                 LIMIT %s
                 """,
@@ -491,14 +568,20 @@ class MySQLAccountRepository:
                     amount,
                     reason,
                     status,
+                    execute_status,
+                    result_status,
+                    failure_type,
+                    failure_reason,
+                    config_fingerprint,
                     is_worker_enabled,
                     result,
+                    processed_at,
                     created_at,
                     updated_at
                 FROM account_transfer_records
                 WHERE user_id = %s
                   AND is_worker_enabled = 1
-                  AND status IN ('created', 'processing')
+                  AND execute_status IN ('pending_execute', 'executing')
                 ORDER BY id ASC
                 LIMIT 1
                 """,
@@ -514,18 +597,30 @@ class MySQLAccountRepository:
                 UPDATE account_transfer_records
                 SET
                     status = 'processing',
+                    execute_status = 'executing',
+                    result_status = 'none',
                     result = '后台线程已接单，开始执行调拨。',
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
                   AND is_worker_enabled = 1
-                  AND status = 'created'
+                  AND execute_status = 'pending_execute'
                 """,
                 (record_id,),
             )
             connection.commit()
             return cursor.rowcount > 0
 
-    def update_transfer_record_status(self, record_id: int, *, status: str, result: str) -> bool:
+    def update_transfer_record_status(
+        self,
+        record_id: int,
+        *,
+        status: str,
+        result: str,
+        execute_status: str = "processed",
+        result_status: str = "none",
+        failure_type: str = "",
+        failure_reason: str = "",
+    ) -> bool:
         with mysql_manager.connection() as connection:
             cursor = connection.cursor()
             cursor.execute(
@@ -533,11 +628,28 @@ class MySQLAccountRepository:
                 UPDATE account_transfer_records
                 SET
                     status = %s,
+                    execute_status = %s,
+                    result_status = %s,
+                    failure_type = %s,
+                    failure_reason = %s,
                     result = %s,
+                    processed_at = CASE
+                        WHEN %s = 'processed' THEN CURRENT_TIMESTAMP
+                        ELSE processed_at
+                    END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
                 """,
-                (status, result, record_id),
+                (
+                    status,
+                    execute_status,
+                    result_status,
+                    failure_type,
+                    failure_reason,
+                    result,
+                    execute_status,
+                    record_id,
+                ),
             )
             connection.commit()
             return cursor.rowcount > 0
@@ -550,13 +662,20 @@ class MySQLAccountRepository:
                 SELECT
                     tr.id,
                     tr.user_id,
+                    u.is_active AS user_is_active,
                     tr.from_account_id,
                     tr.to_account_id,
                     tr.amount,
                     tr.reason,
                     tr.status,
+                    tr.execute_status,
+                    tr.result_status,
+                    tr.failure_type,
+                    tr.failure_reason,
+                    tr.config_fingerprint,
                     tr.is_worker_enabled,
                     tr.result,
+                    tr.processed_at,
                     tr.created_at,
                     tr.updated_at,
                     fa.id AS from_id,
@@ -596,6 +715,8 @@ class MySQLAccountRepository:
                     taddr.address_value AS to_address_value,
                     taddr.memo_tag AS to_memo_tag
                 FROM account_transfer_records AS tr
+                INNER JOIN users AS u
+                    ON u.id = tr.user_id
                 INNER JOIN exchange_accounts AS fa
                     ON fa.id = tr.from_account_id
                 INNER JOIN exchange_accounts AS ta
@@ -624,7 +745,13 @@ class MySQLAccountRepository:
                     tr.amount,
                     tr.reason,
                     tr.status,
+                    tr.execute_status,
+                    tr.result_status,
+                    tr.failure_type,
+                    tr.failure_reason,
+                    tr.config_fingerprint,
                     tr.result,
+                    tr.processed_at,
                     tr.created_at,
                     tr.updated_at,
                     fa.account_name AS from_account_name,
@@ -719,7 +846,9 @@ class MySQLAccountRepository:
                     name,
                     strategy_type,
                     annualized_rate_threshold,
+                    min_net_funding_rate_threshold,
                     spread_rate_threshold,
+                    min_close_spread_rate_threshold,
                     max_spread_rate_threshold,
                     max_pairs,
                     order_amount_usdt,
@@ -747,7 +876,9 @@ class MySQLAccountRepository:
                     name,
                     strategy_type,
                     annualized_rate_threshold,
+                    min_net_funding_rate_threshold,
                     spread_rate_threshold,
+                    min_close_spread_rate_threshold,
                     max_spread_rate_threshold,
                     max_pairs,
                     order_amount_usdt,
@@ -771,7 +902,9 @@ class MySQLAccountRepository:
         name: str,
         strategy_type: str,
         annualized_rate_threshold: float,
+        min_net_funding_rate_threshold: float,
         spread_rate_threshold: float,
+        min_close_spread_rate_threshold: float,
         max_spread_rate_threshold: float,
         max_pairs: int,
         order_amount_usdt: float,
@@ -788,7 +921,9 @@ class MySQLAccountRepository:
                     name,
                     strategy_type,
                     annualized_rate_threshold,
+                    min_net_funding_rate_threshold,
                     spread_rate_threshold,
+                    min_close_spread_rate_threshold,
                     max_spread_rate_threshold,
                     max_pairs,
                     order_amount_usdt,
@@ -796,14 +931,16 @@ class MySQLAccountRepository:
                     order_interval_seconds,
                     is_enabled
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     user_id,
                     name,
                     strategy_type,
                     annualized_rate_threshold,
+                    min_net_funding_rate_threshold,
                     spread_rate_threshold,
+                    min_close_spread_rate_threshold,
                     max_spread_rate_threshold,
                     max_pairs,
                     order_amount_usdt,
@@ -822,7 +959,9 @@ class MySQLAccountRepository:
                     name,
                     strategy_type,
                     annualized_rate_threshold,
+                    min_net_funding_rate_threshold,
                     spread_rate_threshold,
+                    min_close_spread_rate_threshold,
                     max_spread_rate_threshold,
                     max_pairs,
                     order_amount_usdt,
@@ -849,7 +988,9 @@ class MySQLAccountRepository:
         name: str,
         strategy_type: str,
         annualized_rate_threshold: float,
+        min_net_funding_rate_threshold: float,
         spread_rate_threshold: float,
+        min_close_spread_rate_threshold: float,
         max_spread_rate_threshold: float,
         max_pairs: int,
         order_amount_usdt: float,
@@ -866,7 +1007,9 @@ class MySQLAccountRepository:
                     name = %s,
                     strategy_type = %s,
                     annualized_rate_threshold = %s,
+                    min_net_funding_rate_threshold = %s,
                     spread_rate_threshold = %s,
+                    min_close_spread_rate_threshold = %s,
                     max_spread_rate_threshold = %s,
                     max_pairs = %s,
                     order_amount_usdt = %s,
@@ -879,7 +1022,9 @@ class MySQLAccountRepository:
                     name,
                     strategy_type,
                     annualized_rate_threshold,
+                    min_net_funding_rate_threshold,
                     spread_rate_threshold,
+                    min_close_spread_rate_threshold,
                     max_spread_rate_threshold,
                     max_pairs,
                     order_amount_usdt,
@@ -900,7 +1045,9 @@ class MySQLAccountRepository:
                     name,
                     strategy_type,
                     annualized_rate_threshold,
+                    min_net_funding_rate_threshold,
                     spread_rate_threshold,
+                    min_close_spread_rate_threshold,
                     max_spread_rate_threshold,
                     max_pairs,
                     order_amount_usdt,
@@ -969,6 +1116,46 @@ class MySQLAccountRepository:
             )
             return list(cursor.fetchall())
 
+    def list_active_accounts_with_address_by_user_id(self, user_id: int) -> List[Dict[str, Any]]:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT
+                    a.id,
+                    a.user_id,
+                    a.market_type,
+                    a.exchange_code,
+                    a.account_name,
+                    a.api_key,
+                    a.api_secret,
+                    a.api_passphrase,
+                    a.connection_test_status,
+                    a.funding_ratio_percent,
+                    a.current_available_amount,
+                    a.current_available_synced_at,
+                    a.is_active,
+                    a.created_at,
+                    a.updated_at,
+                    fa.network,
+                    fa.address_value,
+                    fa.memo_tag,
+                    fa.created_at AS address_created_at,
+                    fa.updated_at AS address_updated_at
+                FROM exchange_accounts AS a
+                INNER JOIN users AS u
+                    ON u.id = a.user_id
+                LEFT JOIN account_funding_addresses AS fa
+                    ON fa.account_id = a.id
+                WHERE a.user_id = %s
+                  AND a.is_active = 1
+                  AND u.is_active = 1
+                ORDER BY a.id DESC
+                """,
+                (user_id,),
+            )
+            return list(cursor.fetchall())
+
     def list_all_accounts_with_address(self) -> List[Dict[str, Any]]:
         with mysql_manager.connection() as connection:
             cursor = connection.cursor(dictionary=True)
@@ -996,9 +1183,12 @@ class MySQLAccountRepository:
                     fa.created_at AS address_created_at,
                     fa.updated_at AS address_updated_at
                 FROM exchange_accounts AS a
+                INNER JOIN users AS u
+                    ON u.id = a.user_id
                 LEFT JOIN account_funding_addresses AS fa
                     ON fa.account_id = a.id
                 WHERE a.is_active = 1
+                  AND u.is_active = 1
                 ORDER BY a.id DESC
                 """
             )
@@ -1044,6 +1234,12 @@ class MySQLAccountRepository:
             reason=str(row["reason"]),
             status=str(row["status"]),
             result=str(row["result"]),
+            execute_status=str(row.get("execute_status") or "pending_execute"),
+            result_status=str(row.get("result_status") or "none"),
+            failure_type=str(row.get("failure_type") or ""),
+            failure_reason=str(row.get("failure_reason") or ""),
+            config_fingerprint=str(row.get("config_fingerprint") or ""),
+            processed_at=row.get("processed_at"),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -1065,7 +1261,9 @@ class MySQLAccountRepository:
             name=str(row["name"]),
             strategy_type=str(row["strategy_type"]),
             annualized_rate_threshold=float(row.get("annualized_rate_threshold") or 0),
+            min_net_funding_rate_threshold=float(row.get("min_net_funding_rate_threshold") or 0),
             spread_rate_threshold=float(row.get("spread_rate_threshold") or 0),
+            min_close_spread_rate_threshold=float(row.get("min_close_spread_rate_threshold") or 0),
             max_spread_rate_threshold=float(row.get("max_spread_rate_threshold") or 0),
             max_pairs=int(row.get("max_pairs") or 0),
             order_amount_usdt=float(row.get("order_amount_usdt") or 0),

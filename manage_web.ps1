@@ -1,13 +1,16 @@
 param(
-    [ValidateSet("cleanup", "status")]
+    [ValidateSet("start", "cleanup", "status")]
     [string]$Mode = "status",
-    [int]$Port = 8000
+    [int]$Port = 8000,
+    [string]$BindHost = "127.0.0.1"
 )
 
 $ErrorActionPreference = "Stop"
 
 $projectRoot = [System.IO.Path]::GetFullPath($PSScriptRoot)
 $venvPython = [System.IO.Path]::GetFullPath((Join-Path $projectRoot ".venv\Scripts\python.exe"))
+$loginUrl = "http://${BindHost}:${Port}/login"
+$envFilePath = Join-Path $projectRoot ".env"
 
 function Get-ProcessMap {
     $map = @{}
@@ -33,6 +36,174 @@ function Test-SamePath {
     )
 }
 
+function Test-AnySamePath {
+    param(
+        [string]$Candidate,
+        [string[]]$Paths
+    )
+
+    if (-not $Candidate -or -not $Paths) {
+        return $false
+    }
+
+    foreach ($path in $Paths) {
+        if (Test-SamePath -Left $Candidate -Right $path) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function ConvertTo-BoolSetting {
+    param(
+        [AllowNull()]
+        [string]$Value,
+        [bool]$Default = $false
+    )
+
+    if ($null -eq $Value) {
+        return $Default
+    }
+
+    $normalized = $Value.Trim().ToLowerInvariant()
+    if (-not $normalized) {
+        return $Default
+    }
+
+    return $normalized -notin @("0", "false", "no", "off")
+}
+
+function Read-EnvSettings {
+    $settings = @{}
+
+    if (-not (Test-Path -LiteralPath $envFilePath)) {
+        return $settings
+    }
+
+    foreach ($rawLine in Get-Content -LiteralPath $envFilePath) {
+        $line = $rawLine.Trim()
+        if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) {
+            continue
+        }
+
+        $parts = $line.Split("=", 2)
+        $key = $parts[0].Trim()
+        $value = $parts[1].Trim().Trim('"').Trim("'")
+        if ($key) {
+            $settings[$key] = $value
+        }
+    }
+
+    return $settings
+}
+
+function Get-RedisStartupConfig {
+    $settings = Read-EnvSettings
+    $redisEnabledRaw = if ($settings.ContainsKey("ARBI_REDIS_ENABLED")) { [string]$settings["ARBI_REDIS_ENABLED"] } else { $null }
+    $runtimeEnabledRaw = if ($settings.ContainsKey("ARBI_REDIS_RUNTIME_ENABLED")) { [string]$settings["ARBI_REDIS_RUNTIME_ENABLED"] } else { $redisEnabledRaw }
+    $sessionEnabledRaw = if ($settings.ContainsKey("ARBI_REDIS_SESSION_ENABLED")) { [string]$settings["ARBI_REDIS_SESSION_ENABLED"] } else { $redisEnabledRaw }
+
+    $runtimeEnabled = ConvertTo-BoolSetting -Value $runtimeEnabledRaw -Default $true
+    $sessionEnabled = ConvertTo-BoolSetting -Value $sessionEnabledRaw -Default $true
+    $redisNeeded = $runtimeEnabled -or $sessionEnabled
+
+    $redisHost = "127.0.0.1"
+    if ($settings.ContainsKey("ARBI_REDIS_HOST") -and [string]::IsNullOrWhiteSpace([string]$settings["ARBI_REDIS_HOST"]) -eq $false) {
+        $redisHost = [string]$settings["ARBI_REDIS_HOST"]
+    }
+
+    $port = 6379
+    if ($settings.ContainsKey("ARBI_REDIS_PORT")) {
+        $rawPort = [string]$settings["ARBI_REDIS_PORT"]
+        if ($rawPort -match '^\d+$') {
+            $port = [int]$rawPort
+        }
+    }
+
+    $serverPath = $null
+    if ($settings.ContainsKey("ARBI_REDIS_SERVER_PATH")) {
+        $rawPath = [string]$settings["ARBI_REDIS_SERVER_PATH"]
+        if (-not [string]::IsNullOrWhiteSpace($rawPath)) {
+            $serverPath = [System.IO.Path]::GetFullPath($rawPath)
+        }
+    }
+
+    return @{
+        Needed = $redisNeeded
+        RuntimeEnabled = $runtimeEnabled
+        SessionEnabled = $sessionEnabled
+        Host = $redisHost
+        Port = $port
+        ServerPath = $serverPath
+    }
+}
+
+function Test-TcpEndpoint {
+    param(
+        [string]$EndpointHost,
+        [int]$EndpointPort,
+        [int]$TimeoutMilliseconds = 500
+    )
+
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $asyncResult = $client.BeginConnect($EndpointHost, $EndpointPort, $null, $null)
+        if (-not $asyncResult.AsyncWaitHandle.WaitOne($TimeoutMilliseconds, $false)) {
+            return $false
+        }
+
+        $client.EndConnect($asyncResult)
+        return $true
+    } catch {
+        return $false
+    } finally {
+        $client.Close()
+        if ($asyncResult -and $asyncResult.AsyncWaitHandle) {
+            $asyncResult.AsyncWaitHandle.Close()
+        }
+    }
+}
+
+function Start-RedisIfNeeded {
+    $redisConfig = Get-RedisStartupConfig
+    if (-not $redisConfig.Needed) {
+        Write-Host "[INFO] Redis auto-start skipped: runtime/session cache is disabled by current .env settings."
+        return
+    }
+
+    if (Test-TcpEndpoint -EndpointHost $redisConfig.Host -EndpointPort $redisConfig.Port) {
+        Write-Host ("[INFO] Redis already available at {0}:{1}. Skip auto-start." -f $redisConfig.Host, $redisConfig.Port)
+        return
+    }
+
+    if ([string]::IsNullOrWhiteSpace([string]$redisConfig.ServerPath)) {
+        throw "Redis is required, but ARBI_REDIS_SERVER_PATH is not configured."
+    }
+
+    if (-not (Test-Path -LiteralPath $redisConfig.ServerPath)) {
+        throw ("Redis is required, but redis-server.exe was not found: " + $redisConfig.ServerPath)
+    }
+
+    Write-Host ("[INFO] Redis is not listening on {0}:{1}. Starting local redis-server.exe..." -f $redisConfig.Host, $redisConfig.Port)
+    Start-Process -FilePath $redisConfig.ServerPath -WorkingDirectory (Split-Path -Parent $redisConfig.ServerPath) -WindowStyle Hidden -ArgumentList @(
+        "--bind", $redisConfig.Host,
+        "--port", [string]$redisConfig.Port,
+        "--save", "",
+        "--appendonly", "no"
+    ) | Out-Null
+
+    for ($i = 0; $i -lt 10; $i++) {
+        Start-Sleep -Milliseconds 500
+        if (Test-TcpEndpoint -EndpointHost $redisConfig.Host -EndpointPort $redisConfig.Port) {
+            Write-Host ("[INFO] Redis started successfully: " + $redisConfig.ServerPath)
+            return
+        }
+    }
+
+    throw ("Redis start command was executed, but {0}:{1} is still unavailable." -f $redisConfig.Host, $redisConfig.Port)
+}
+
 function Get-ListenerPids {
     $listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
     if (-not $listeners) {
@@ -45,6 +216,10 @@ function Get-ListenerPids {
 function Get-TargetPids {
     $processMap = Get-ProcessMap
     $targets = New-Object "System.Collections.Generic.HashSet[int]"
+    $mainAllPattern = "*-m app.main all*--port $Port*"
+    $workerPattern = "*-m app.main worker*"
+    $webPattern = "*-m app.main web*--port $Port*"
+    $legacyUvicornPattern = "*uvicorn*app.main:app*--port $Port*"
 
     foreach ($processId in Get-ListenerPids) {
         [void]$targets.Add([int]$processId)
@@ -52,10 +227,14 @@ function Get-TargetPids {
         $current = $processMap[[int]$processId]
         while ($current -and $current.ParentProcessId -and $processMap.ContainsKey([int]$current.ParentProcessId)) {
             $parent = $processMap[[int]$current.ParentProcessId]
-            $isProjectLauncher = Test-SamePath -Left $parent.ExecutablePath -Right $venvPython
-            $isUvicornPython = $parent.Name -eq "python.exe" -and $parent.CommandLine -like "*uvicorn*app.main:app*--port $Port*"
+            $isProjectPython = Test-SamePath -Left $parent.ExecutablePath -Right $venvPython
+            $isMainPython = $parent.Name -eq "python.exe" -and (
+                $parent.CommandLine -like $mainAllPattern -or
+                $parent.CommandLine -like $webPattern
+            )
+            $isUvicornPython = $parent.Name -eq "python.exe" -and $parent.CommandLine -like $legacyUvicornPattern
 
-            if (-not ($isProjectLauncher -or $isUvicornPython)) {
+            if (-not ($isProjectPython -or $isMainPython -or $isUvicornPython)) {
                 break
             }
 
@@ -64,12 +243,22 @@ function Get-TargetPids {
         }
     }
 
-    $projectLaunchers = Get-CimInstance Win32_Process | Where-Object {
-        (Test-SamePath -Left $_.ExecutablePath -Right $venvPython) -and
-        $_.CommandLine -like "*uvicorn*app.main:app*--port $Port*"
+    $projectProcesses = Get-CimInstance Win32_Process | Where-Object {
+        $commandLine = [string]$_.CommandLine
+        $matchesManagedCommand = (
+            $commandLine -like $mainAllPattern -or
+            $commandLine -like $webPattern -or
+            $commandLine -like $workerPattern -or
+            $commandLine -like $legacyUvicornPattern
+        )
+        if (-not $matchesManagedCommand) {
+            return $false
+        }
+
+        return $_.Name -eq "python.exe"
     }
 
-    foreach ($process in $projectLaunchers) {
+    foreach ($process in $projectProcesses) {
         [void]$targets.Add([int]$process.ProcessId)
     }
 
@@ -79,38 +268,44 @@ function Get-TargetPids {
 function Show-Status {
     $processMap = Get-ProcessMap
     $listenerPids = Get-ListenerPids
+    $managedProcesses = Get-CimInstance Win32_Process | Where-Object {
+        (Test-SamePath -Left $_.ExecutablePath -Right $venvPython) -and
+        $_.CommandLine -like "*-m app.main*"
+    }
 
     Write-Host ("Project root : " + $projectRoot)
     Write-Host ("Venv python  : " + $venvPython)
+    Write-Host ("Host         : " + $BindHost)
     Write-Host ("Port         : " + $Port)
 
     if (-not $listenerPids.Count) {
         Write-Host "Listener     : none"
-        return
+    } else {
+        foreach ($processId in $listenerPids) {
+            $process = $processMap[[int]$processId]
+            if (-not $process) {
+                continue
+            }
+
+            Write-Host ""
+            Write-Host ("Listener PID : " + $process.ProcessId)
+            Write-Host ("Executable   : " + $process.ExecutablePath)
+            Write-Host ("CommandLine  : " + $process.CommandLine)
+
+            if ($process.ParentProcessId -and $processMap.ContainsKey([int]$process.ParentProcessId)) {
+                $parent = $processMap[[int]$process.ParentProcessId]
+                Write-Host ("Parent PID   : " + $parent.ProcessId)
+                Write-Host ("Parent EXE   : " + $parent.ExecutablePath)
+                Write-Host ("Parent CMD   : " + $parent.CommandLine)
+            }
+        }
     }
 
-    foreach ($processId in $listenerPids) {
-        $process = $processMap[[int]$processId]
-        if (-not $process) {
-            continue
-        }
-
+    if ($managedProcesses) {
         Write-Host ""
-        Write-Host ("Listener PID : " + $process.ProcessId)
-        Write-Host ("Executable   : " + $process.ExecutablePath)
-        Write-Host ("CommandLine  : " + $process.CommandLine)
-
-        if ($process.ParentProcessId -and $processMap.ContainsKey([int]$process.ParentProcessId)) {
-            $parent = $processMap[[int]$process.ParentProcessId]
-            Write-Host ("Parent PID   : " + $parent.ProcessId)
-            Write-Host ("Parent EXE   : " + $parent.ExecutablePath)
-            Write-Host ("Parent CMD   : " + $parent.CommandLine)
-
-            if (Test-SamePath -Left $parent.ExecutablePath -Right $venvPython) {
-                Write-Host "Note         : listener is owned by the current project's venv launcher."
-                Write-Host "               Seeing both the venv python.exe and the base python.exe"
-                Write-Host "               at the same time is normal for this service chain."
-            }
+        Write-Host "Managed processes:"
+        foreach ($process in $managedProcesses) {
+            Write-Host ("  PID " + $process.ProcessId + " : " + $process.CommandLine)
         }
     }
 }
@@ -118,8 +313,8 @@ function Show-Status {
 function Cleanup-Port {
     $targets = Get-TargetPids
     if (-not $targets.Count) {
-        Write-Host ("No matching web service found on port " + $Port + ".")
-        return
+        Write-Host ("No matching service found on port " + $Port + ".")
+        return $true
     }
 
     foreach ($processId in ($targets | Sort-Object -Descending)) {
@@ -135,12 +330,67 @@ function Cleanup-Port {
 
     if (Get-ListenerPids) {
         Write-Host ("Warning      : port " + $Port + " is still occupied.")
-    } else {
-        Write-Host ("Port " + $Port + " is now free.")
+        return $false
     }
+
+    Write-Host ("Port " + $Port + " is now free.")
+    return $true
+}
+
+function Start-LoginProbe {
+    $probeCommand = @"
+$ProgressPreference='SilentlyContinue'
+for (`$i = 0; `$i -lt 30; `$i++) {
+    try {
+        `$resp = Invoke-WebRequest -Uri '$loginUrl' -UseBasicParsing -TimeoutSec 2
+        if (`$resp.StatusCode -eq 200) {
+            Start-Process '$loginUrl'
+            break
+        }
+    } catch {}
+    Start-Sleep -Seconds 1
+}
+"@
+
+    Start-Process powershell -WindowStyle Hidden -ArgumentList @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-Command", $probeCommand
+    ) | Out-Null
+}
+
+function Start-ServiceChain {
+    if (-not (Test-Path -LiteralPath $venvPython)) {
+        throw ("Missing virtual environment python: " + $venvPython)
+    }
+
+    Write-Host ""
+    Write-Host "=========================================="
+    Write-Host "  Arbitrage system starting..."
+    Write-Host ("  URL: " + $loginUrl)
+    Write-Host "=========================================="
+    Write-Host ""
+
+    $targets = Get-TargetPids
+    if ($targets.Count) {
+        Write-Host ("[INFO] Detected " + $targets.Count + " residual process(es). Cleaning up before restart...")
+        if (-not (Cleanup-Port)) {
+            throw ("Port " + $Port + " is still occupied after cleanup.")
+        }
+    } else {
+        Write-Host "[INFO] No residual process detected. Starting directly..."
+    }
+
+    Start-RedisIfNeeded
+
+    Write-Host "[INFO] Starting unified entrypoint (Web + Worker)..."
+    Write-Host "[INFO] Initialization, Web, and Worker are all started via app.main."
+    Start-LoginProbe
+    & $venvPython -m app.main all --host $BindHost --port $Port
 }
 
 switch ($Mode) {
+    "start" { Start-ServiceChain }
     "cleanup" { Cleanup-Port }
     "status" { Show-Status }
 }

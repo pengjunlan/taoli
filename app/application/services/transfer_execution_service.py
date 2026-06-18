@@ -73,6 +73,8 @@ class TransferExecutionService:
     def _validate_context(self, context: Dict[str, Any]) -> None:
         if context is None:
             raise ExchangeValidationError("调拨记录不存在。")
+        if not bool(context.get("user_is_active", True)):
+            raise ExchangeValidationError("调拨用户已停用，无法执行。")
         if int(context.get("from_user_id") or 0) <= 0 or int(context.get("to_user_id") or 0) <= 0:
             raise ExchangeValidationError("调拨账户不存在。")
         if int(context.get("from_user_id") or 0) != int(context.get("to_user_id") or 0):

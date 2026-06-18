@@ -31,50 +31,100 @@
     </section>
 
     <section class="card card--section">
-        <div class="card__header card__header--row">
+        <div class="card__header runtime-tabs-shell">
             <div>
-                <h2>规则命中候选</h2>
-                <p>这里展示规则命中后的候选持仓视图，用来确认主腿、对冲腿、计划资金和触发原因是否连贯。</p>
+                <h2>套利中</h2>
+                <p>这里展示已经进入真实持仓的套利组合，并支持直接发起一键平仓。</p>
             </div>
             <div class="section-tools">
-                <div class="inline-note" data-runtime-candidate-count>候选 {{ positions_rows|length }} 条</div>
+                <div class="inline-note" data-runtime-active-position-count>共 {{ active_positions_rows|length }} 个组合</div>
             </div>
         </div>
         <div class="table-wrap">
-            <table class="data-table positions-table" data-pagination-items="tbody tr" data-page-size="5">
+            <table class="data-table monitor-positions-table" data-pagination-items="tbody tr" data-page-size="5">
                 <thead>
                     <tr>
-                        <th>交易对</th>
-                        <th>执行规则</th>
-                        <th>对冲组合</th>
-                        <th>计划规模</th>
-                        <th>状态</th>
-                        <th>浮盈亏</th>
-                        <th>触发原因</th>
+                        <th>排名</th>
+                        <th>类型</th>
+                        <th>币种</th>
+                        <th>套利组合</th>
+                        <th>净价差</th>
+                        <th>净资金费率</th>
+                        <th>当前价格</th>
+                        <th>资金费率</th>
+                        <th>交易手续费</th>
+                        <th>持仓数量</th>
+                        <th>持仓市值</th>
+                        <th>关键字段</th>
+                        <th>操作</th>
                     </tr>
                 </thead>
-                <tbody data-positions-table-body>
-                    {% for row in positions_rows %}
+                <tbody data-runtime-active-positions-body>
+                    {% for row in active_positions_rows %}
                     <tr>
+                        <td class="spread-metric">{{ row.rank }}</td>
+                        <td><span class="pill pill--{{ row.type_tone or 'brand' }}">{{ row.type_label }}</span></td>
                         <td>
                             <div class="spread-symbol">
                                 <strong>{{ row.symbol }}</strong>
-                                <span class="spread-symbol__hint">{{ row.status or row.symbol.replace('USDT', '/USDT') }}</span>
+                                <span class="spread-symbol__hint">{{ row.status or '--' }}</span>
                             </div>
                         </td>
-                        <td>{{ row.strategy }}</td>
                         <td>
                             <div class="pair-cell pair-cell--spread">
-                                <span class="pair-cell__line is-positive">主腿 / {{ row.long_exchange }}</span>
-                                <span class="pair-cell__line is-negative">对冲 / {{ row.short_exchange }}</span>
+                                <span class="pair-cell__line is-positive">{{ row.pair_primary_text }}</span>
+                                <span class="pair-cell__line is-negative">{{ row.pair_secondary_text }}</span>
                             </div>
                         </td>
-                        <td class="spread-metric spread-metric--strong">{{ row.size }}</td>
+                        <td class="spread-metric">{{ row.net_spread }}</td>
+                        <td class="spread-metric">{{ row.net_rate }}</td>
                         <td>
-                            <span class="pill pill--warning">{{ row.hedge }}</span>
+                            <div class="pair-cell pair-cell--hedge">
+                                <span class="pair-cell__line pair-cell__line--hedge is-positive">{{ row.current_price_primary }}</span>
+                                <span class="pair-cell__line pair-cell__line--hedge is-negative">{{ row.current_price_secondary }}</span>
+                            </div>
                         </td>
-                        <td class="spread-value">{{ row.pnl }}</td>
-                        <td>{{ row.reason or '--' }}</td>
+                        <td>
+                            <div class="pair-cell pair-cell--hedge">
+                                <span class="pair-cell__line pair-cell__line--hedge is-positive">{{ row.funding_rate_primary }}</span>
+                                <span class="pair-cell__line pair-cell__line--hedge is-negative">{{ row.funding_rate_secondary }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="pair-cell pair-cell--hedge">
+                                <span class="pair-cell__line pair-cell__line--hedge is-positive">{{ row.fee_rate_primary }}</span>
+                                <span class="pair-cell__line pair-cell__line--hedge is-negative">{{ row.fee_rate_secondary }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="pair-cell pair-cell--hedge">
+                                <span class="pair-cell__line pair-cell__line--hedge is-positive">{{ row.position_qty_primary }}</span>
+                                <span class="pair-cell__line pair-cell__line--hedge is-negative">{{ row.position_qty_secondary }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="pair-cell pair-cell--hedge">
+                                <span class="pair-cell__line pair-cell__line--hedge is-positive spread-metric--strong">{{ row.position_value_primary }}</span>
+                                <span class="pair-cell__line pair-cell__line--hedge is-negative spread-metric--strong">{{ row.position_value_secondary }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="spread-symbol">
+                                <strong class="spread-metric spread-metric--strong">{{ row.key_field_value }}</strong>
+                                <span class="spread-symbol__hint">{{ row.key_field_label }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <button
+                                class="table-action table-action--danger"
+                                type="button"
+                                data-runtime-close
+                                data-execution-id="{{ row.execution_id }}"
+                                {% if not row.can_close %}disabled{% endif %}
+                            >
+                                {{ row.close_button_text }}
+                            </button>
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -83,92 +133,147 @@
     </section>
 
     <section class="card card--section">
-        <div class="card__header card__header--row">
+        <div class="card__header runtime-tabs-shell">
             <div>
-                <h2>候选执行记录</h2>
-                <p>这里是规则命中后生成的候选执行记录。当前先用于监控，不会在页面上伪装成已经真实下单。</p>
+                <h2>运行监控</h2>
+                <p>统一查看正在套利中的组合、当前挂单与实际订单，以及历史订单回放。</p>
             </div>
-            <div class="section-tools">
-                <div class="inline-note">共 {{ order_rows|length }} 条待评估记录</div>
+            <div class="runtime-tabs" role="tablist" aria-label="运行监控切换">
+                <button
+                    class="tab-chip is-active"
+                    type="button"
+                    role="tab"
+                    aria-selected="true"
+                    data-runtime-tab-trigger="orders"
+                >
+                    当前挂单/实际订单
+                </button>
+                <button
+                    class="tab-chip"
+                    type="button"
+                    role="tab"
+                    aria-selected="false"
+                    data-runtime-tab-trigger="history"
+                >
+                    历史订单
+                </button>
             </div>
         </div>
-        <div class="table-wrap">
-            <table class="data-table orders-table" data-pagination-items="tbody tr" data-page-size="5">
-                <thead>
-                    <tr>
-                        <th>时间</th>
-                        <th>交易对</th>
-                        <th>交易所</th>
-                        <th>动作</th>
-                        <th>状态</th>
-                        <th>规模</th>
-                        <th>触发原因</th>
-                        <th>执行状态</th>
-                    </tr>
-                </thead>
-                <tbody data-orders-table-body>
-                    {% for row in order_rows %}
-                    <tr>
-                        <td class="spread-metric">{{ row.time }}</td>
-                        <td>
-                            <div class="spread-symbol">
-                                <strong>{{ row.symbol }}</strong>
-                                <span class="spread-symbol__hint">{{ row.strategy or row.symbol.replace('USDT', '/USDT') }}</span>
-                            </div>
-                        </td>
-                        <td>{{ row.exchange }}</td>
-                        <td class="spread-value">{{ row.side }}</td>
-                        <td><span class="pill pill--{{ row.status_tone or 'brand' }}">{{ row.status }}</span></td>
-                        <td class="spread-metric">{{ row.size }}</td>
-                        <td>{{ row.reason or '--' }}</td>
-                        <td class="spread-metric">未下单</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </section>
 
-    <section class="card card--section">
-        <div class="card__header card__header--row">
-            <div>
-                <h2>真实成交回报</h2>
-                <p>真实成交回报还没有接到交易所执行引擎前，这里会保持为空，用来明确区分“候选执行”和“已真实成交”。</p>
+        <div class="runtime-tab-panel is-active" data-runtime-tab-panel="orders">
+            <div class="card__header card__header--row runtime-panel-header">
+                <div class="section-tools">
+                    <div class="inline-note" data-runtime-active-order-count>共 {{ active_order_rows|length }} 条当前订单</div>
+                </div>
             </div>
-            <div class="section-tools">
-                <div class="inline-note">共 {{ fill_rows|length }} 条真实回报</div>
+            <div class="table-wrap">
+                <table class="data-table monitor-orders-table" data-pagination-items="tbody tr" data-page-size="5">
+                    <thead>
+                        <tr>
+                            <th>订单编码</th>
+                            <th>时间</th>
+                            <th>交易对 / 策略</th>
+                            <th>交易所</th>
+                            <th>腿</th>
+                            <th>开平动作</th>
+                            <th>订单状态</th>
+                            <th>挂单价</th>
+                            <th>挂单数量</th>
+                            <th>已成交数量</th>
+                            <th>挂单金额</th>
+                            <th>已成交金额</th>
+                            <th>重挂次数</th>
+                            <th>原因</th>
+                        </tr>
+                    </thead>
+                    <tbody data-runtime-active-orders-body>
+                        {% for row in active_order_rows %}
+                        <tr>
+                            <td class="spread-metric">{{ row.row_code or row.pair_key or '--' }}</td>
+                            <td class="spread-metric">{{ row.time }}</td>
+                            <td>
+                                <div class="spread-symbol">
+                                    <strong>{{ row.symbol }}</strong>
+                                    <span class="spread-symbol__hint">{{ row.strategy }}</span>
+                                </div>
+                            </td>
+                            <td>{{ row.exchange }}</td>
+                            <td>{{ row.leg_role }}</td>
+                            <td>
+                                <div class="pair-cell pair-cell--hedge">
+                                    <span class="pair-cell__line pair-cell__line--hedge">{{ row.execution_action }}</span>
+                                    <span class="pair-cell__line pair-cell__line--hedge">{{ row.action }}</span>
+                                </div>
+                            </td>
+                            <td><span class="pill pill--{{ row.status_tone or 'brand' }}">{{ row.status }}</span></td>
+                            <td class="spread-metric">{{ row.requested_price }}</td>
+                            <td class="spread-metric">{{ row.requested_quantity }}</td>
+                            <td class="spread-metric">{{ row.filled_quantity }}</td>
+                            <td class="spread-metric">{{ row.requested_value }}</td>
+                            <td class="spread-metric">{{ row.filled_value }}</td>
+                            <td class="spread-metric">{{ row.retry_count }}</td>
+                            <td>{{ row.reason }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
-        <div class="table-wrap">
-            <table class="data-table fills-table" data-pagination-items="tbody tr" data-page-size="5">
-                <thead>
-                    <tr>
-                        <th>时间</th>
-                        <th>交易对</th>
-                        <th>交易所</th>
-                        <th>方向</th>
-                        <th>成交价</th>
-                        <th>规模</th>
-                    </tr>
-                </thead>
-                <tbody data-fills-table-body>
-                    {% for row in fill_rows %}
-                    <tr>
-                        <td class="spread-metric">{{ row.time }}</td>
-                        <td>
-                            <div class="spread-symbol">
-                                <strong>{{ row.symbol }}</strong>
-                                <span class="spread-symbol__hint">{{ row.symbol.replace('USDT', '/USDT') }}</span>
-                            </div>
-                        </td>
-                        <td>{{ row.exchange }}</td>
-                        <td class="spread-value">{{ row.side }}</td>
-                        <td class="spread-metric">{{ row.price }}</td>
-                        <td class="spread-metric">{{ row.size }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+
+        <div class="runtime-tab-panel" data-runtime-tab-panel="history" hidden>
+            <div class="card__header card__header--row runtime-panel-header">
+                <div class="section-tools">
+                    <div class="inline-note" data-runtime-history-order-count>共 {{ history_order_rows|length }} 条历史订单</div>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table monitor-history-table" data-pagination-items="tbody tr" data-page-size="5">
+                    <thead>
+                        <tr>
+                            <th>订单编码</th>
+                            <th>时间</th>
+                            <th>交易对 / 策略</th>
+                            <th>交易所</th>
+                            <th>腿</th>
+                            <th>开平动作</th>
+                            <th>订单结果</th>
+                            <th>成交均价</th>
+                            <th>成交数量</th>
+                            <th>成交金额</th>
+                            <th>成交笔数</th>
+                            <th>结果说明</th>
+                        </tr>
+                    </thead>
+                    <tbody data-runtime-history-orders-body>
+                        {% for row in history_order_rows %}
+                        <tr>
+                            <td class="spread-metric">{{ row.row_code or row.pair_key or '--' }}</td>
+                            <td class="spread-metric">{{ row.time }}</td>
+                            <td>
+                                <div class="spread-symbol">
+                                    <strong>{{ row.symbol }}</strong>
+                                    <span class="spread-symbol__hint">{{ row.strategy }}</span>
+                                </div>
+                            </td>
+                            <td>{{ row.exchange }}</td>
+                            <td>{{ row.leg_role }}</td>
+                            <td>
+                                <div class="pair-cell pair-cell--hedge">
+                                    <span class="pair-cell__line pair-cell__line--hedge">{{ row.execution_action }}</span>
+                                    <span class="pair-cell__line pair-cell__line--hedge">{{ row.action }}</span>
+                                </div>
+                            </td>
+                            <td><span class="pill pill--{{ row.status_tone or 'brand' }}">{{ row.status }}</span></td>
+                            <td class="spread-metric">{{ row.avg_fill_price }}</td>
+                            <td class="spread-metric">{{ row.filled_quantity }}</td>
+                            <td class="spread-metric">{{ row.filled_value }}</td>
+                            <td class="spread-metric">{{ row.fill_count }}</td>
+                            <td>{{ row.result }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </section>
 </div>

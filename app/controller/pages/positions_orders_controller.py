@@ -13,7 +13,7 @@ PAGE = PageConfig(
     key="positions_orders",
     template_name="pages/positions_orders.html",
     title="策略运行监控",
-    subtitle="统一查看规则命中后的候选持仓、候选执行记录，以及后续真实成交回报接入情况。",
+    subtitle="统一查看正在套利中的组合、当前挂单与实际订单，以及历史订单和真实持仓运行情况。",
     css_name="positions_orders.css",
     js_name="positions_orders.js",
 )

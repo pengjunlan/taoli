@@ -73,7 +73,7 @@ export function bindListPagination(root = document) {
     if (!items.length) return;
 
     const pageSize = Math.max(1, Number(container.dataset.pageSize || 5));
-    let currentPage = 1;
+    let currentPage = Math.max(1, Number(container.dataset.paginationCurrentPage || 1));
 
     const footerHost = container.closest(".table-wrap, .alert-list") || container;
     const footer = document.createElement("div");
@@ -101,6 +101,8 @@ export function bindListPagination(root = document) {
       const totalItems = filteredItems.length;
 
       if (!totalItems || totalItems <= pageSize) {
+        currentPage = 1;
+        container.dataset.paginationCurrentPage = "1";
         items.forEach((item) => {
           item.dataset.paginationHidden = "false";
           syncItemVisibility(item);
@@ -111,6 +113,7 @@ export function bindListPagination(root = document) {
 
       const totalPages = Math.ceil(totalItems / pageSize);
       currentPage = Math.min(currentPage, totalPages);
+      container.dataset.paginationCurrentPage = String(currentPage);
 
       items.forEach((item) => {
         item.dataset.paginationHidden = "true";
@@ -167,6 +170,7 @@ export function bindListPagination(root = document) {
     container.addEventListener("prototype:filter-change", handleFilterChange);
 
     container.__paginationCleanup = () => {
+      container.dataset.paginationCurrentPage = String(currentPage);
       container.removeEventListener("prototype:filter-change", handleFilterChange);
       footer.remove();
       delete container.__paginationCleanup;

@@ -238,18 +238,28 @@ class AccountServiceSupport:
 
     def _transfer_status_label(self, value: str) -> str:
         return {
+            "pending": "待执行",
             "created": "已创建",
             "processing": "处理中",
+            "pending_execute": "待执行",
+            "executing": "处理中",
+            "processed": "已处理",
             "success": "已完成",
             "failed": "失败",
-        }.get(value, "已创建")
+            "ignored": "已忽略",
+        }.get(value, "待执行")
 
     def _transfer_status_tone(self, value: str) -> str:
         return {
+            "pending": "brand",
             "created": "brand",
             "processing": "warning",
+            "pending_execute": "brand",
+            "executing": "warning",
+            "processed": "neutral",
             "success": "positive",
             "failed": "negative",
+            "ignored": "neutral",
         }.get(value, "brand")
 
     def _resolve_next_connection_test_status(self, existing: Dict[str, str], normalized: Dict[str, str]) -> str:

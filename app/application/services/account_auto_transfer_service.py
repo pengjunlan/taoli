@@ -7,6 +7,7 @@ from typing import Dict, Optional
 
 from app.application.services.account_support import AutoTransferConfigResult, AutoTransferExecutionResult
 from app.application.services.account_transfer_capability_service import AccountTransferCapabilityService
+from app.application.services.auto_transfer_runtime_guard_service import auto_transfer_runtime_guard_service
 from app.domain.entities import AuthUser
 from app.infrastructure.persistence.account_repository import account_repository
 from app.shared.exceptions import AccountPersistenceError, AccountValidationError
@@ -37,6 +38,7 @@ class AccountAutoTransferService:
                 is_enabled=is_enabled,
                 trigger_ratio=round(trigger_ratio, 4),
             )
+            auto_transfer_runtime_guard_service.clear(current_user.id)
         except Exception as exc:
             raise AccountPersistenceError("保存自动调拨配置失败：数据库操作异常。") from exc
 
@@ -49,17 +51,20 @@ class AccountAutoTransferService:
         config = self.get_auto_transfer_config(current_user.id)
         if not config.is_enabled:
             raise AccountValidationError("请先开启自动调拨。")
+        if auto_transfer_runtime_guard_service.is_blocked(current_user.id):
+            raise AccountValidationError("自动调拨已被暂时阻断，请修改账户配置后等待下一次扫描。")
 
         pending_transfer = account_repository.get_open_worker_transfer_record_by_user_id(current_user.id)
         if pending_transfer is not None:
             record_id = int(pending_transfer["id"])
-            status = str(pending_transfer.get("status") or "created")
+            status = str(pending_transfer.get("execute_status") or pending_transfer.get("status") or "pending_execute")
             raise AccountValidationError(
                 f"当前已有未完成的调拨记录 #{record_id}（状态：{status}），等待执行完成后再生成新的自动调拨。"
             )
 
         account_rows = self._query_service.build_account_rows_for_user(current_user.id)
-        balance_rows = self._query_service.build_balance_rows_from_accounts(account_rows, config.trigger_ratio)
+        active_account_rows = [row for row in account_rows if bool(row.get("is_active", True))]
+        balance_rows = self._query_service.build_balance_rows_from_accounts(active_account_rows, config.trigger_ratio)
         candidate = self._pick_supported_auto_transfer_candidate(current_user.id, balance_rows, config.trigger_ratio)
         if candidate is None:
             raise AccountValidationError("当前没有同时满足自动调拨条件且支持真实执行的账户组合。")
@@ -71,11 +76,14 @@ class AccountAutoTransferService:
                 to_account_id=int(candidate["to_account_id"]),
                 amount=round(float(candidate["amount"]), 2),
                 reason="自动真实调拨",
-                status="created",
+                status="pending",
+                execute_status="pending_execute",
+                result_status="none",
+                config_fingerprint=auto_transfer_runtime_guard_service.build_config_version(current_user.id),
                 is_worker_enabled=True,
                 result=(
                     f"自动调拨任务已创建，后台将按真实执行链路处理；"
-                    f"触发比例 {int(config.trigger_ratio * 100)}%，"
+                    f"触发比例 {int(config.trigger_ratio * 100)}%；"
                     f"本次计划调拨 {self._query_service._format_currency(float(candidate['amount']))}。"
                 ),
             )
@@ -87,6 +95,8 @@ class AccountAutoTransferService:
     def maybe_execute_auto_transfer(self, user_id: int) -> Optional[AutoTransferExecutionResult]:
         config = self.get_auto_transfer_config(user_id)
         if not config.is_enabled:
+            return None
+        if auto_transfer_runtime_guard_service.is_blocked(user_id):
             return None
 
         now = datetime.now()
@@ -114,13 +124,19 @@ class AccountAutoTransferService:
         if not candidates:
             return None
 
-        account_rows = account_repository.list_accounts_with_address_by_user_id(user_id)
+        account_rows = account_repository.list_active_accounts_with_address_by_user_id(user_id)
         account_map = {int(row["id"]): row for row in account_rows}
 
         for candidate in candidates:
             from_account = account_map.get(int(candidate["from_account_id"]))
             to_account = account_map.get(int(candidate["to_account_id"]))
             if from_account is None or to_account is None:
+                continue
+            if not bool(from_account.get("is_active")) or not bool(to_account.get("is_active")):
+                continue
+            if str(from_account.get("connection_test_status") or "").strip().lower() != "success":
+                continue
+            if str(to_account.get("connection_test_status") or "").strip().lower() != "success":
                 continue
 
             capability = self._transfer_capability_service.build_transfer_capability(from_account, to_account)

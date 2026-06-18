@@ -38,7 +38,7 @@ class AccountHoldingService:
         if not rows:
             return []
 
-        account_rows = account_repository.list_accounts_with_address_by_user_id(user_id)
+        account_rows = account_repository.list_active_accounts_with_address_by_user_id(user_id)
         account_map = {int(row["id"]): row for row in account_rows}
         enriched_rows: List[Dict[str, Any]] = []
 

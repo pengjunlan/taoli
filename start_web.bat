@@ -7,35 +7,12 @@ set "NO_PROXY=*"
 set "HTTP_PROXY="
 set "HTTPS_PROXY="
 
-if not exist ".venv\Scripts\python.exe" (
-    echo [ERROR] 未找到虚拟环境：.venv\Scripts\python.exe
-    echo 请先确认项目环境已经创建完成。
-    pause
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0manage_web.ps1" start
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Startup failed. Press any key to close this window.
+    pause >nul
     exit /b 1
 )
-
-echo.
-echo ==========================================
-echo   多交易所套利系统页面原型启动中...
-echo   访问地址: http://127.0.0.1:8000/login
-echo ==========================================
-echo.
-
-echo [INFO] 清理已占用 8000 端口的旧服务...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0manage_web.ps1" cleanup
-echo [INFO] 如任务管理器里同时看到 .venv\Scripts\python.exe 和基础 Python.exe，
-echo [INFO] 这通常是同一条虚拟环境服务链，不代表启动了两套独立网站。
-
-start "" powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ProgressPreference='SilentlyContinue';" ^
-  "for ($i = 0; $i -lt 30; $i++) {" ^
-  "  try {" ^
-  "    $resp = Invoke-WebRequest -Uri 'http://127.0.0.1:8000/login' -UseBasicParsing -TimeoutSec 2;" ^
-  "    if ($resp.StatusCode -eq 200) { Start-Process 'http://127.0.0.1:8000/login'; break }" ^
-  "  } catch {}" ^
-  "  Start-Sleep -Seconds 1" ^
-  "}"
-
-".venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 endlocal

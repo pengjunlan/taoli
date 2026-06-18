@@ -1,11 +1,15 @@
+import { createLiveSocket } from "../core/live-socket.js";
 import { bindListPagination, bindPrototypeActions } from "../core/prototype.js";
 import { bindLogoutAction } from "../core/utils.js";
 import { bindAccountModal } from "./accounts/account-modal.js";
-import { bindAutoTransferControls, refreshAutoTransferConfig } from "./accounts/auto-transfer.js";
+import { bindAutoTransferControls, refreshAutoTransferConfig, syncAutoTransferToggleUi } from "./accounts/auto-transfer.js";
 import { bindBalanceConfigControls } from "./accounts/balance-config.js";
-import { refreshAccountTables } from "./accounts/render.js";
+import { applyAccountsPayload, refreshAccountTables } from "./accounts/render.js";
+import { setLatestAutoTransferConfig } from "./accounts/state.js";
 import { bindAccountTabs } from "./accounts/tabs.js";
 import { bindTransferModal } from "./accounts/transfer-modal.js";
+
+let liveSocket = null;
 
 function getAccountPageElements() {
   return {
@@ -55,6 +59,26 @@ function syncBodyScrollLock() {
   document.body.style.overflow = hasVisibleLayer ? "hidden" : "";
 }
 
+function applyLivePayload(payload) {
+  applyAccountsPayload(payload);
+  setLatestAutoTransferConfig(payload.auto_transfer_config || {});
+  syncAutoTransferToggleUi(elements);
+}
+
+function startLiveUpdates() {
+  liveSocket?.close();
+  liveSocket = createLiveSocket({
+    channel: "accounts",
+    suppressErrorToast: true,
+    onMessage(payload) {
+      if (!payload?.success) {
+        return;
+      }
+      applyLivePayload(payload);
+    },
+  });
+}
+
 bindPrototypeActions();
 bindListPagination();
 bindLogoutAction();
@@ -98,5 +122,13 @@ document.addEventListener("keydown", (event) => {
   handlers.some((handleEscape) => typeof handleEscape === "function" && handleEscape());
 });
 
-refreshAccountTables().catch(() => {});
-refreshAutoTransferConfig(elements).catch(() => {});
+Promise.allSettled([
+  refreshAccountTables(),
+  refreshAutoTransferConfig(elements),
+]).finally(() => {
+  startLiveUpdates();
+});
+
+window.addEventListener("beforeunload", () => {
+  liveSocket?.close();
+});

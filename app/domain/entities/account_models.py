@@ -46,6 +46,12 @@ class TransferRecord:
     reason: str
     status: str
     result: str
+    execute_status: str
+    result_status: str
+    failure_type: str
+    failure_reason: str
+    config_fingerprint: str
+    processed_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -67,7 +73,9 @@ class StrategyRule:
     name: str
     strategy_type: str
     annualized_rate_threshold: float
+    min_net_funding_rate_threshold: float
     spread_rate_threshold: float
+    min_close_spread_rate_threshold: float
     max_spread_rate_threshold: float
     max_pairs: int
     order_amount_usdt: float

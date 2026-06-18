@@ -17,14 +17,20 @@ class MySQLAuthRepository:
     def create_user(self, username: str, password_hash: str) -> AuthUser:
         with mysql_manager.connection() as connection:
             cursor = connection.cursor(dictionary=True)
+            is_first_user = False
             try:
-                cursor.execute(
-                    """
-                    INSERT INTO users (username, password_hash)
-                    VALUES (%s, %s)
-                    """,
-                    (username, password_hash),
-                )
+                with mysql_manager.advisory_lock(connection, "users.first_admin_bootstrap", timeout_seconds=30):
+                    cursor.execute("SELECT COUNT(*) AS user_count FROM users")
+                    row = cursor.fetchone() or {}
+                    is_first_user = int(row.get("user_count", 0)) == 0
+
+                    cursor.execute(
+                        """
+                        INSERT INTO users (username, password_hash, is_admin)
+                        VALUES (%s, %s, %s)
+                        """,
+                        (username, password_hash, int(is_first_user)),
+                    )
                 connection.commit()
             except mysql.connector.IntegrityError:
                 connection.rollback()

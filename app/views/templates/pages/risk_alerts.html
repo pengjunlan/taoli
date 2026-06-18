@@ -14,7 +14,7 @@
         <div class="card__header card__header--row risk-section__header">
             <div class="risk-section__title">
                 <h2>线程列表</h2>
-                <p>这里只监控我们自己常驻运行的后台线程服务，比如余额同步、自动调拨监控，后续新增线程也会统一接入这里。</p>
+                <p>每个后台线程单独展示自己的状态摘要和最近日志，不再混合输出到同一个总控制台。</p>
             </div>
             <div class="risk-toolbar">
                 <div class="risk-refresh-note" data-risk-refresh-note>加载中...</div>
@@ -36,40 +36,17 @@
     </section>
 
     <section class="card card--section risk-section">
-        <div class="card__header card__header--row risk-section__header">
-            <div class="risk-section__title">
-                <h2>最近线程日志</h2>
-                <p>这里按控制台方式展示线程运行日志，最多保留 1000 条，超过后自动清空重新累计。</p>
-            </div>
-            <div class="risk-console-meta">
-                <span class="risk-console-count" data-risk-log-count>0 / 1000</span>
-            </div>
-        </div>
-        <div class="risk-console" data-risk-log-console>
-            <div class="risk-console__toolbar">
-                <span class="risk-console__dot risk-console__dot--danger"></span>
-                <span class="risk-console__dot risk-console__dot--warning"></span>
-                <span class="risk-console__dot risk-console__dot--success"></span>
-                <span class="risk-console__title">worker-log-console</span>
-            </div>
-            <div class="risk-console__body" data-risk-log-list>
-                <div class="risk-console__empty">加载中...</div>
-            </div>
-        </div>
-    </section>
-
-    <section class="card card--section risk-section">
         <div class="card__header risk-section__header">
             <div class="risk-section__title">
                 <h2>监控说明</h2>
-                <p>这个页面只看后台线程，不统计普通页面请求。</p>
+                <p>这里只展示后台常驻线程，不统计普通页面请求。每个线程的日志窗口最多保留 1000 条。</p>
             </div>
         </div>
         <div class="monitor-grid risk-monitor-grid">
             <article class="monitor-item">
                 <div class="monitor-item__label">监控范围</div>
                 <div class="monitor-item__value">后台常驻线程服务</div>
-                <div class="monitor-item__meta">例如余额同步线程、自动调拨监控线程，以及后续新增线程。</div>
+                <div class="monitor-item__meta">例如余额同步、自动调拨、机会监控、执行监控等。</div>
             </article>
             <article class="monitor-item">
                 <div class="monitor-item__label">数据来源</div>
@@ -79,12 +56,12 @@
             <article class="monitor-item">
                 <div class="monitor-item__label">刷新方式</div>
                 <div class="monitor-item__value">AJAX 轮询</div>
-                <div class="monitor-item__meta">当前页面定时拉取最新监控数据，不影响现有页面结构。</div>
+                <div class="monitor-item__meta">页面定时拉取最新监控数据，不影响现有线程执行。</div>
             </article>
             <article class="monitor-item">
                 <div class="monitor-item__label">后续扩展</div>
-                <div class="monitor-item__value">新增线程可直接接入</div>
-                <div class="monitor-item__meta">只要在后台线程里注册并上报状态，这里就会自动展示。</div>
+                <div class="monitor-item__value">新增线程自动接入</div>
+                <div class="monitor-item__meta">只要线程接入监控中心，这里就会自动显示对应卡片和日志窗口。</div>
             </article>
         </div>
     </section>

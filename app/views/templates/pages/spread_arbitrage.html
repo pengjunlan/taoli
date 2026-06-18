@@ -14,7 +14,7 @@
         <div class="card__header card__header--row">
             <div>
                 <h2>跨所价差机会列表</h2>
-                <p>这里展示的是监控引擎筛出的跨交易所候选机会。页面会优先展示快照，实时行情恢复后自动更新为最新结果。</p>
+                <p>这里展示的是监控引擎筛出的跨交易所价差套利机会，页面会先显示快照，再由实时行情持续刷新当前页数据。</p>
             </div>
             <div class="section-tools">
                 <div class="inline-note" data-spread-count>加载中...</div>
@@ -24,7 +24,7 @@
             <span class="pill pill--neutral" data-runtime-banner-pill>预热中</span>
             <div class="runtime-banner__text">
                 <strong data-runtime-banner-label>正在初始化价差机会链路</strong>
-                <span data-runtime-banner-message>页面会优先展示最近一次成功快照，实时行情恢复后自动切换。</span>
+                <span data-runtime-banner-message>页面会优先显示最近一次成功快照，实时行情恢复后自动切换为最新结果。</span>
             </div>
             <div class="runtime-banner__meta" data-runtime-banner-meta>--</div>
         </div>
@@ -37,18 +37,19 @@
                         <th>类型</th>
                         <th>币种</th>
                         <th>套利组合</th>
-                        <th>收益指标</th>
-                        <th>核心指标</th>
+                        <th>价差率</th>
+                        <th>净资金费率</th>
+                        <th>当前价格</th>
+                        <th>资金费率</th>
                         <th>交易手续费</th>
                         <th>持仓数量</th>
-                        <th>当前价格</th>
                         <th>持仓市值</th>
                         <th>关键字段</th>
                     </tr>
                 </thead>
                 <tbody data-spread-table-body>
                     <tr class="table-empty-row">
-                        <td colspan="11">
+                        <td colspan="12">
                             <div class="table-empty-state">
                                 <div class="table-empty-state__icon" aria-hidden="true"></div>
                                 <div class="table-empty-state__title">加载中...</div>

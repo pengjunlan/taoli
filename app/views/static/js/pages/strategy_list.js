@@ -77,7 +77,7 @@ function renderStrategyRows(rows) {
   if (!Array.isArray(rows) || !rows.length) {
     return `
       <tr class="table-empty-row">
-        <td colspan="11" class="spread-metric">暂无规则，请先新增策略规则</td>
+        <td colspan="12" class="spread-metric">暂无规则，请先新增策略规则</td>
       </tr>
     `;
   }
@@ -98,6 +98,7 @@ function renderStrategyRows(rows) {
               ${renderTriggerConditions(row.trigger_text)}
             </div>
           </td>
+          <td class="spread-metric">${escapeHtml(row.min_close_threshold_text || row.min_close_spread_rate_threshold_text || "--")}</td>
           <td class="spread-metric">${escapeHtml(row.max_spread_rate_threshold_text || "--")}</td>
           <td class="spread-metric">${escapeHtml(row.max_pairs)}</td>
           <td class="spread-metric spread-metric--strong">${escapeHtml(row.order_amount_text)}</td>
@@ -148,7 +149,9 @@ function bindStrategyModal() {
   const closeButtons = document.querySelectorAll("[data-strategy-modal-close]");
   const typeField = document.querySelector("[data-strategy-type]");
   const annualizedField = document.querySelector("[data-field-annualized]");
+  const minNetFundingField = document.querySelector("[data-field-min-net-funding]");
   const spreadField = document.querySelector("[data-field-spread]");
+  const minCloseSpreadField = document.querySelector("[data-field-min-close-spread]");
   const confirmModal = document.querySelector("[data-strategy-confirm]");
   const confirmMessage = document.querySelector("[data-strategy-confirm-message]");
   const confirmAccept = document.querySelector("[data-strategy-confirm-accept]");
@@ -157,7 +160,7 @@ function bindStrategyModal() {
   const hiddenRuleId = form?.querySelector('input[name="rule_id"]');
   const submitButton = form?.querySelector('button[type="submit"]');
 
-  if (!modal || !form || !openButton || !typeField || !annualizedField || !spreadField || !title || !hiddenRuleId || !submitButton) {
+  if (!modal || !form || !openButton || !typeField || !annualizedField || !minNetFundingField || !spreadField || !minCloseSpreadField || !title || !hiddenRuleId || !submitButton) {
     return;
   }
 
@@ -171,15 +174,23 @@ function bindStrategyModal() {
   const syncTypeFields = () => {
     const strategyType = String(typeField.value || "funding").trim();
     const isFunding = strategyType === "funding";
+
     annualizedField.classList.toggle("is-hidden", !isFunding);
+    minNetFundingField.classList.toggle("is-hidden", !isFunding);
     spreadField.classList.toggle("is-hidden", isFunding);
+    minCloseSpreadField.classList.toggle("is-hidden", isFunding);
+
     form.elements.annualized_rate_threshold.disabled = !isFunding;
+    form.elements.min_net_funding_rate_threshold.disabled = !isFunding;
     form.elements.spread_rate_threshold.disabled = isFunding;
+    form.elements.min_close_spread_rate_threshold.disabled = isFunding;
 
     if (isFunding) {
       form.elements.spread_rate_threshold.value = 0;
+      form.elements.min_close_spread_rate_threshold.value = 0;
     } else {
       form.elements.annualized_rate_threshold.value = 0;
+      form.elements.min_net_funding_rate_threshold.value = 0;
     }
   };
 
@@ -189,7 +200,9 @@ function bindStrategyModal() {
     hiddenRuleId.value = "";
     typeField.value = "funding";
     form.elements.annualized_rate_threshold.value = 0;
+    form.elements.min_net_funding_rate_threshold.value = 0;
     form.elements.spread_rate_threshold.value = 0;
+    form.elements.min_close_spread_rate_threshold.value = 0;
     form.elements.max_spread_rate_threshold.value = 0;
     form.elements.max_pairs.value = 1;
     form.elements.order_amount_usdt.value = 0;
@@ -224,7 +237,9 @@ function bindStrategyModal() {
     form.elements.name.value = String(rule.name || "");
     form.elements.strategy_type.value = strategyType;
     form.elements.annualized_rate_threshold.value = Number(rule.annualized_rate_threshold || 0);
+    form.elements.min_net_funding_rate_threshold.value = Number(rule.min_net_funding_rate_threshold || 0);
     form.elements.spread_rate_threshold.value = Number(rule.spread_rate_threshold || 0);
+    form.elements.min_close_spread_rate_threshold.value = Number(rule.min_close_spread_rate_threshold || 0);
     form.elements.max_spread_rate_threshold.value = Number(rule.max_spread_rate_threshold || 0);
     form.elements.max_pairs.value = Number(rule.max_pairs || 1);
     form.elements.order_amount_usdt.value = Number(rule.order_amount_usdt || 0);
@@ -234,8 +249,10 @@ function bindStrategyModal() {
 
     if (strategyType === "funding") {
       form.elements.spread_rate_threshold.value = 0;
+      form.elements.min_close_spread_rate_threshold.value = 0;
     } else {
       form.elements.annualized_rate_threshold.value = 0;
+      form.elements.min_net_funding_rate_threshold.value = 0;
     }
 
     title.textContent = "编辑规则";
@@ -379,7 +396,9 @@ function bindStrategyModal() {
       name: String(formData.get("name") || "").trim(),
       strategy_type: String(formData.get("strategy_type") || "").trim(),
       annualized_rate_threshold: Number(formData.get("annualized_rate_threshold") || 0),
+      min_net_funding_rate_threshold: Number(formData.get("min_net_funding_rate_threshold") || 0),
       spread_rate_threshold: Number(formData.get("spread_rate_threshold") || 0),
+      min_close_spread_rate_threshold: Number(formData.get("min_close_spread_rate_threshold") || 0),
       max_spread_rate_threshold: Number(formData.get("max_spread_rate_threshold") || 0),
       max_pairs: Number(formData.get("max_pairs") || 0),
       order_amount_usdt: Number(formData.get("order_amount_usdt") || 0),
@@ -390,14 +409,36 @@ function bindStrategyModal() {
 
     if (payload.strategy_type === "funding") {
       payload.spread_rate_threshold = 0;
+      payload.min_close_spread_rate_threshold = 0;
     }
     if (payload.strategy_type === "spread") {
       payload.annualized_rate_threshold = 0;
+      payload.min_net_funding_rate_threshold = 0;
     }
 
     const isEditMode = form.dataset.mode === "edit";
     const ruleId = String(formData.get("rule_id") || "").trim();
     const url = isEditMode && ruleId ? `/api/strategies/${ruleId}` : "/api/strategies";
+    let closePositionsOnDisable = false;
+
+    if (isEditMode && ruleId) {
+      try {
+        const currentDetail = await getJson(`/api/strategies/${ruleId}`);
+        if (currentDetail?.success && currentDetail.rule) {
+          const wasEnabled = Boolean(currentDetail.rule.is_enabled);
+          const hasActivePositions = Boolean(currentDetail.has_active_positions);
+          const willDisable = !Boolean(payload.is_enabled);
+          if (wasEnabled && willDisable && hasActivePositions) {
+            closePositionsOnDisable = window.confirm("这个规则当前还有套利持仓。是否在停用规则的同时，对该规则当前持仓全部发起平仓？");
+          }
+        }
+      } catch (error) {
+        // Keep default behavior if detail lookup fails.
+      }
+    }
+    if (isEditMode) {
+      payload.close_positions_on_disable = closePositionsOnDisable;
+    }
 
     try {
       const result = await postJson(url, payload);

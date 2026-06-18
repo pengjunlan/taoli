@@ -1,25 +1,21 @@
-"""Background runtime service for public market snapshots and user opportunity rows."""
+"""Background runtime service for shared opportunity rows and per-user strategy payloads."""
 
 from __future__ import annotations
 
 import logging
 import threading
 import time
-from datetime import datetime
-from typing import Any, Dict, List, Tuple
+from datetime import datetime, timedelta
+from typing import Any, Dict, List
 
-import ccxt
-
-from app.application.services.account_service import account_service
+from app.application.services.market_sync_service import market_sync_service
 from app.application.services.monitor_center_service import monitor_center_service
 from app.application.services.opportunity_snapshot_service import opportunity_snapshot_service
-from app.application.services.system_exchange_config_service import system_exchange_config_service
 from app.application.services.trade_decision_service import trade_decision_service
-from app.infrastructure.cache import FundingRateCacheItem, TickerCacheItem, market_runtime_cache
-from app.infrastructure.cache import strategy_runtime_cache
+from app.infrastructure.cache import market_runtime_cache, strategy_runtime_cache
 from app.infrastructure.persistence.account_repository import account_repository
 from app.infrastructure.persistence.market_repository import market_repository
-from app.shared.utils.formatters import format_countdown, format_percent, format_signed_percent, format_usd_compact
+from app.shared.utils.formatters import format_countdown, format_percent, format_signed_percent
 
 
 logger = logging.getLogger(__name__)
@@ -30,12 +26,11 @@ class OpportunityRuntimeService:
         self._started = False
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
-        self._interval_seconds = 60
+        self._interval_seconds = 1
+        self._market_data_execution_stale_seconds = 150
+        self._market_data_display_stale_seconds = 15 * 60
+        self._max_cross_exchange_price_gap_percent = 15.0
         self._monitor_key = "opportunity_runtime_sync"
-        self._last_market_sync_date = ""
-        self._last_market_sync_success = False
-        self._ticker_batch_size = 80
-        self._funding_batch_size = 40
 
     def start(self) -> None:
         with self._lock:
@@ -49,7 +44,7 @@ class OpportunityRuntimeService:
                 thread_name="opportunity-runtime-monitor",
                 interval_seconds=self._interval_seconds,
                 status="starting",
-                detail="准备同步市场、配对与套利机会数据",
+                detail="正在准备公共套利机会运行时缓存。",
             )
             self._warm_caches_from_snapshot()
             self._thread = threading.Thread(
@@ -65,202 +60,134 @@ class OpportunityRuntimeService:
                 monitor_center_service.heartbeat(
                     self._monitor_key,
                     status="running",
-                    detail="线程心跳正常，准备刷新市场与机会缓存",
+                    detail="正在根据实时行情刷新公共套利机会列表。",
                 )
-                self._ensure_daily_market_sync()
-                self._refresh_user_opportunity_rows()
-                try:
-                    self._refresh_public_market_runtime()
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Public market runtime refresh degraded: %s", exc)
-                    monitor_center_service.add_log(
-                        self._monitor_key,
-                        "warning",
-                        f"公共行情刷新未完成，先继续生成配对列表：{exc}",
-                    )
-                self._refresh_user_opportunity_rows()
+                self._refresh_runtime_rows()
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Opportunity runtime refresh failed: %s", exc)
                 monitor_center_service.mark_error(self._monitor_key, f"套利机会同步异常: {exc}")
             time.sleep(self._interval_seconds)
 
     def _warm_caches_from_snapshot(self) -> None:
-        all_accounts = account_repository.list_all_accounts_with_address()
-        user_ids = sorted({int(row["user_id"]) for row in all_accounts})
-        warmed_count = 0
-        for user_id in user_ids:
-            result = opportunity_snapshot_service.warm_runtime_cache_from_snapshot(user_id)
-            if any(result.values()):
-                warmed_count += 1
-        if warmed_count > 0:
+        warmed_channels = opportunity_snapshot_service.warm_public_runtime_cache_from_snapshot()
+        if any(warmed_channels.values()):
             monitor_center_service.add_log(
                 self._monitor_key,
                 "info",
-                f"冷启动已恢复 {warmed_count} 个用户的历史机会快照",
+                "已从快照预热公共套利机会缓存。",
             )
 
-    def _ensure_daily_market_sync(self) -> None:
-        today_key = datetime.now().strftime("%Y-%m-%d")
-        if self._last_market_sync_date == today_key and self._last_market_sync_success:
-            return
-
-        from app.application.services.market_sync_service import market_sync_service
-
-        result = market_sync_service.sync_all_public_markets()
-        self._last_market_sync_date = today_key
-        self._last_market_sync_success = bool(
-            result["market_count"] > 0
-            or result["funding_pair_count"] > 0
-            or result["spread_pair_count"] > 0
-        )
-        monitor_center_service.mark_success(
-            self._monitor_key,
-            (
-                f"市场与配对已同步：市场 {result['market_count']} 条，"
-                f"资金费配对 {result['funding_pair_count']} 条，"
-                f"价差配对 {result['spread_pair_count']} 条"
-            ),
-        )
-
-    def _refresh_public_market_runtime(self) -> None:
-        active_markets = market_repository.list_active_markets()
-        watch_targets: Dict[Tuple[str, str, str], Dict[str, str]] = {}
-
-        for market in active_markets:
-            market_key = (
-                str(market["exchange_code"]),
-                str(market["market_type"]),
-                str(market["symbol"]),
-            )
-            watch_targets[market_key] = {
-                "exchange_code": market_key[0],
-                "market_type": market_key[1],
-                "symbol": market_key[2],
-                "symbol_normalized": str(market["symbol_normalized"]),
-            }
-
-        refreshed_count = self._refresh_public_tickers_in_batch(list(watch_targets.values()))
-        funding_count = self._refresh_public_funding_rates_in_batch(list(watch_targets.values()))
-
-        if watch_targets:
-            monitor_center_service.add_log(
-                self._monitor_key,
-                "info",
-                f"公共行情已刷新 {refreshed_count} 个 ticker，{funding_count} 个 funding rate，覆盖 {len(watch_targets)} 个市场",
-            )
-
-    def _refresh_user_opportunity_rows(self) -> None:
+    def _refresh_runtime_rows(self) -> None:
         all_accounts = account_repository.list_all_accounts_with_address()
         user_ids = sorted({int(row["user_id"]) for row in all_accounts})
+        enabled_exchange_codes = set(market_sync_service.list_supported_exchange_codes())
+        funding_pairs = [
+            row
+            for row in market_repository.list_active_pairs(pair_type="funding")
+            if str(row.get("left_exchange_code") or "") in enabled_exchange_codes
+            and str(row.get("right_exchange_code") or "") in enabled_exchange_codes
+        ]
+        spread_pairs = [
+            row
+            for row in market_repository.list_active_pairs(pair_type="spread")
+            if str(row.get("left_exchange_code") or "") in enabled_exchange_codes
+            and str(row.get("right_exchange_code") or "") in enabled_exchange_codes
+        ]
 
-        for stale_user_id in market_runtime_cache.list_user_ids("funding"):
-            if stale_user_id not in user_ids:
-                market_runtime_cache.clear_user_rows("funding", stale_user_id)
-        for stale_user_id in market_runtime_cache.list_user_ids("spread"):
-            if stale_user_id not in user_ids:
-                market_runtime_cache.clear_user_rows("spread", stale_user_id)
         for stale_user_id in strategy_runtime_cache.list_user_ids():
             if stale_user_id not in user_ids:
                 strategy_runtime_cache.clear_user_payload(stale_user_id)
 
+        generated_at = datetime.now()
+        funding_rows = self._build_public_funding_rows(funding_pairs)
+        spread_rows = self._build_public_spread_rows(spread_pairs)
+        funding_live_rows = self._filter_live_rows(funding_rows)
+        spread_live_rows = self._filter_live_rows(spread_rows)
+        funding_display_rows = self._prepare_display_rows(funding_rows)
+        spread_display_rows = self._prepare_display_rows(spread_rows)
+        funding_ready = bool(funding_live_rows)
+        spread_ready = bool(spread_live_rows)
+
+        market_runtime_cache.set_public_rows(
+            "funding",
+            funding_display_rows,
+            is_ready=funding_ready,
+            source="runtime",
+            generated_at=generated_at,
+            updated_at=generated_at,
+            message=(
+                "资金费套利机会运行时已就绪。"
+                if funding_ready
+                else "资金费套利机会正在等待完整的实时价格与资金费数据。"
+            ),
+        )
+        market_runtime_cache.set_public_rows(
+            "spread",
+            spread_display_rows,
+            is_ready=spread_ready,
+            source="runtime",
+            generated_at=generated_at,
+            updated_at=generated_at,
+            message=(
+                "价差套利机会运行时已就绪。"
+                if spread_ready
+                else "价差套利机会正在等待完整的实时买一卖一数据。"
+            ),
+        )
+        opportunity_snapshot_service.persist_public_opportunity_rows(
+            channel="funding",
+            rows=funding_live_rows,
+            generated_at=generated_at,
+        )
+        opportunity_snapshot_service.persist_public_opportunity_rows(
+            channel="spread",
+            rows=spread_live_rows,
+            generated_at=generated_at,
+        )
+
         for user_id in user_ids:
-            account_rows = account_service.build_account_rows_for_user(user_id)
             strategy_rows = account_repository.list_strategy_rules_by_user_id(user_id)
-            funding_rows = self._build_funding_rows_for_user(account_rows, strategy_rows)
-            spread_rows = self._build_spread_rows_for_user(account_rows, strategy_rows)
-            generated_at = datetime.now()
-            funding_ready = bool(funding_rows) and all(bool(row.get("has_market_data")) for row in funding_rows)
-            spread_ready = bool(spread_rows) and all(bool(row.get("has_market_data")) for row in spread_rows)
-            market_runtime_cache.set_user_rows(
-                "funding",
-                user_id,
-                funding_rows,
-                is_ready=funding_ready,
-                source="runtime",
-                generated_at=generated_at,
-                updated_at=generated_at,
-                message=(
-                    "资金费机会已按最新实时行情刷新。"
-                    if funding_ready
-                    else "资金费配对列表已生成，正在补充实时行情与资金费数据。"
-                ),
-            )
-            market_runtime_cache.set_user_rows(
-                "spread",
-                user_id,
-                spread_rows,
-                is_ready=spread_ready,
-                source="runtime",
-                generated_at=generated_at,
-                updated_at=generated_at,
-                message=(
-                    "价差机会已按最新实时行情刷新。"
-                    if spread_ready
-                    else "价差配对列表已生成，正在补充实时行情数据。"
-                ),
-            )
-            opportunity_snapshot_service.persist_opportunity_rows(
-                user_id=user_id,
-                channel="funding",
-                rows=funding_rows,
-                generated_at=generated_at,
-            )
-            opportunity_snapshot_service.persist_opportunity_rows(
-                user_id=user_id,
-                channel="spread",
-                rows=spread_rows,
-                generated_at=generated_at,
-            )
             strategy_payload = trade_decision_service.build_runtime_payload(
                 user_id=user_id,
-                account_rows=account_rows,
                 strategy_rows=strategy_rows,
-                funding_rows=funding_rows,
-                spread_rows=spread_rows,
+                funding_rows=funding_live_rows,
+                spread_rows=spread_live_rows,
             )
-            strategy_payload["is_ready"] = True
+            strategy_payload["is_ready"] = funding_ready or spread_ready
             strategy_payload["source"] = "runtime"
-            strategy_payload["status_message"] = "策略运行态已按最新候选机会刷新。"
+            strategy_payload["status_message"] = "策略运行态已按最新公共套利机会刷新。"
             strategy_payload["updated_at"] = generated_at
             strategy_runtime_cache.set_user_payload(user_id, strategy_payload)
             opportunity_snapshot_service.persist_strategy_payload(user_id=user_id, payload=strategy_payload)
 
         monitor_center_service.mark_success(
             self._monitor_key,
-            f"已刷新 {len(user_ids)} 个用户的套利机会缓存",
+            f"套利机会已刷新：资金费 {len(funding_display_rows)} 条 / 价差 {len(spread_display_rows)} 条",
         )
 
-    def _build_funding_rows_for_user(
-        self,
-        account_rows: List[Dict[str, Any]],
-        strategy_rows: List[Dict[str, Any]],
-    ) -> List[dict]:
-        _ = strategy_rows
-
-        account_map = self._build_account_lookup(account_rows)
-        pair_rows = market_repository.list_active_pairs(pair_type="funding")
+    def _build_public_funding_rows(self, pair_rows: List[Dict[str, Any]]) -> List[dict]:
         result: List[dict] = []
 
         for pair in pair_rows:
-            left_account = account_map.get((str(pair["left_exchange_code"]), "swap"))
-            right_account = account_map.get((str(pair["right_exchange_code"]), "swap"))
+            left_exchange_code = str(pair["left_exchange_code"])
+            right_exchange_code = str(pair["right_exchange_code"])
 
             left_ticker = market_runtime_cache.get_ticker(
-                str(pair["left_exchange_code"]),
+                left_exchange_code,
                 "swap",
                 str(pair["left_symbol"]),
             )
             right_ticker = market_runtime_cache.get_ticker(
-                str(pair["right_exchange_code"]),
+                right_exchange_code,
                 "swap",
                 str(pair["right_symbol"]),
             )
             left_funding = market_runtime_cache.get_funding_rate(
-                str(pair["left_exchange_code"]),
+                left_exchange_code,
                 str(pair["left_symbol"]),
             )
             right_funding = market_runtime_cache.get_funding_rate(
-                str(pair["right_exchange_code"]),
+                right_exchange_code,
                 str(pair["right_symbol"]),
             )
             has_market_data = (
@@ -268,30 +195,69 @@ class OpportunityRuntimeService:
                 and right_ticker is not None
                 and left_funding is not None
                 and right_funding is not None
+                and float(left_ticker.last_price) > 0
+                and float(right_ticker.last_price) > 0
+            )
+            is_market_data_fresh = self._is_market_data_fresh(
+                left_ticker=left_ticker,
+                right_ticker=right_ticker,
+                left_funding=left_funding,
+                right_funding=right_funding,
+            )
+            is_market_data_display_ready = self._is_market_data_fresh(
+                left_ticker=left_ticker,
+                right_ticker=right_ticker,
+                left_funding=left_funding,
+                right_funding=right_funding,
+                stale_seconds=self._market_data_display_stale_seconds,
             )
 
-            annualized = (
-                (left_funding.funding_rate_percent - right_funding.funding_rate_percent) * 3 * 365
+            funding_diff_percent = (
+                left_funding.funding_rate_percent - right_funding.funding_rate_percent
+                if has_market_data and left_funding is not None and right_funding is not None
+                else 0.0
+            )
+            left_is_short_leg = funding_diff_percent >= 0
+            raw_left_price_value = float(left_ticker.last_price) if left_ticker is not None else 0.0
+            raw_right_price_value = float(right_ticker.last_price) if right_ticker is not None else 0.0
+            left_short_right_long_net_rate = (
+                left_funding.funding_rate_percent - right_funding.funding_rate_percent
+                if has_market_data and left_funding is not None and right_funding is not None
+                else 0.0
+            )
+            right_short_left_long_net_rate = (
+                right_funding.funding_rate_percent - left_funding.funding_rate_percent
+                if has_market_data and left_funding is not None and right_funding is not None
+                else 0.0
+            )
+            actual_net_rate = abs(funding_diff_percent) if has_market_data else 0.0
+            annualized = actual_net_rate * 3 * 365 if has_market_data else 0.0
+            short_exchange_code = left_exchange_code if left_is_short_leg else right_exchange_code
+            long_exchange_code = right_exchange_code if left_is_short_leg else left_exchange_code
+            short_symbol_raw = str(pair["left_symbol"]) if left_is_short_leg else str(pair["right_symbol"])
+            long_symbol_raw = str(pair["right_symbol"]) if left_is_short_leg else str(pair["left_symbol"])
+            long_price_value = (
+                float(right_ticker.last_price)
+                if left_is_short_leg and right_ticker is not None
+                else float(left_ticker.last_price) if left_ticker is not None else 0.0
+            )
+            short_price_value = (
+                float(left_ticker.last_price)
+                if left_is_short_leg and left_ticker is not None
+                else float(right_ticker.last_price) if right_ticker is not None else 0.0
+            )
+            spread_percent = (
+                self._calc_price_gap_percent(short_price_value, long_price_value, absolute=True)
                 if has_market_data
                 else 0.0
             )
-            spread_percent = (
-                self._calc_spread_percent(left_ticker.last_price, right_ticker.last_price)
-                if has_market_data and left_ticker is not None and right_ticker is not None
+            price_diff_value = abs(raw_left_price_value - raw_right_price_value) if has_market_data else 0.0
+            cross_exchange_price_gap_percent = (
+                self._calc_absolute_diff_percent(raw_left_price_value, raw_right_price_value)
+                if has_market_data
                 else 0.0
             )
-
-            left_available = float(left_account.get("current_available_amount") or 0) if left_account is not None else 0.0
-            right_available = float(right_account.get("current_available_amount") or 0) if right_account is not None else 0.0
-            executable_qty_left = self._estimate_quantity(left_available, left_ticker.last_price if left_ticker is not None else 0)
-            executable_qty_right = self._estimate_quantity(right_available, right_ticker.last_price if right_ticker is not None else 0)
-            has_required_accounts = left_account is not None and right_account is not None
-            execution_ready = (
-                has_required_accounts
-                and has_market_data
-                and executable_qty_left > 0
-                and executable_qty_right > 0
-            )
+            is_price_aligned = has_market_data and cross_exchange_price_gap_percent <= self._max_cross_exchange_price_gap_percent
 
             next_funding_at = None
             if left_funding is not None:
@@ -303,72 +269,82 @@ class OpportunityRuntimeService:
             result.append(
                 {
                     "rank_sort": annualized,
+                    "market_pair_key": str(pair.get("pair_key") or ""),
+                    "market_left_exchange_code": left_exchange_code,
+                    "market_right_exchange_code": right_exchange_code,
+                    "market_left_symbol_raw": str(pair["left_symbol"]),
+                    "market_right_symbol_raw": str(pair["right_symbol"]),
                     "symbol": str(pair["base_asset"]),
-                    "long_exchange": self._exchange_label(str(pair["left_exchange_code"])),
-                    "short_exchange": self._exchange_label(str(pair["right_exchange_code"])),
-                    "left_account_id": int(left_account.get("id") or 0) if left_account is not None else 0,
-                    "right_account_id": int(right_account.get("id") or 0) if right_account is not None else 0,
+                    "long_exchange": self._exchange_label(long_exchange_code),
+                    "short_exchange": self._exchange_label(short_exchange_code),
+                    "left_exchange_code": long_exchange_code,
+                    "right_exchange_code": short_exchange_code,
                     "left_market_type": "swap",
                     "right_market_type": "swap",
-                    "left_symbol_raw": str(pair["left_symbol"]),
-                    "right_symbol_raw": str(pair["right_symbol"]),
-                    "left_price_value": float(left_ticker.last_price) if left_ticker is not None else 0.0,
-                    "right_price_value": float(right_ticker.last_price) if right_ticker is not None else 0.0,
+                    "left_symbol_raw": long_symbol_raw,
+                    "right_symbol_raw": short_symbol_raw,
+                    "left_price_value": long_price_value,
+                    "right_price_value": short_price_value,
                     "annual": format_percent(annualized, 2) if has_market_data else "--",
-                    "net_rate": (
-                        format_percent(
-                            left_funding.funding_rate_percent - right_funding.funding_rate_percent,
+                    "net_rate": format_percent(actual_net_rate, 4) if has_market_data else "--",
+                    "net_rate_value": actual_net_rate,
+                    "annual_value": annualized,
+                    "spread": format_signed_percent(spread_percent, 2) if has_market_data else "--",
+                    "spread_value": spread_percent,
+                    "raw_funding_diff_value": funding_diff_percent,
+                    "left_long_right_short_net_rate_value": right_short_left_long_net_rate,
+                    "right_long_left_short_net_rate_value": left_short_right_long_net_rate,
+                    "price_diff": self._format_price(price_diff_value) if has_market_data else "--",
+                    "price_diff_value": price_diff_value,
+                    "long_funding_rate": (
+                        format_signed_percent(
+                            right_funding.funding_rate_percent if left_is_short_leg and right_funding is not None else left_funding.funding_rate_percent,
                             4,
                         )
-                        if has_market_data and left_funding is not None and right_funding is not None
+                        if has_market_data and ((left_is_short_leg and right_funding is not None) or left_funding is not None)
                         else "--"
                     ),
-                    "spread": format_signed_percent(spread_percent, 2) if has_market_data else "--",
-                    "long_fee_rate": self._resolve_fee_rate_display(left_account, market_type="swap"),
-                    "short_fee_rate": self._resolve_fee_rate_display(right_account, market_type="swap"),
-                    "qty_long": self._format_quantity(0, str(pair["base_asset"])),
-                    "qty_short": self._format_quantity(0, str(pair["base_asset"])),
-                    "avg_long": self._format_price(left_ticker.last_price) if left_ticker is not None else "--",
-                    "avg_short": self._format_price(right_ticker.last_price) if right_ticker is not None else "--",
-                    "value_long": "$0",
-                    "value_short": "$0",
+                    "short_funding_rate": (
+                        format_signed_percent(
+                            left_funding.funding_rate_percent if left_is_short_leg and left_funding is not None else right_funding.funding_rate_percent,
+                            4,
+                        )
+                        if has_market_data and ((left_is_short_leg and left_funding is not None) or right_funding is not None)
+                        else "--"
+                    ),
+                    "long_fee_rate": self._resolve_fee_rate_display(market_type="swap"),
+                    "short_fee_rate": self._resolve_fee_rate_display(market_type="swap"),
+                    "avg_long": self._format_price(long_price_value),
+                    "avg_short": self._format_price(short_price_value),
                     "settlement": settlement if has_market_data else "--",
-                    "has_required_accounts": has_required_accounts,
-                    "execution_ready": execution_ready,
                     "has_market_data": has_market_data,
+                    "is_market_data_fresh": is_market_data_fresh,
+                    "is_market_data_display_ready": is_market_data_display_ready,
+                    "is_price_aligned": is_price_aligned,
+                    "cross_exchange_price_gap_percent_value": cross_exchange_price_gap_percent,
                 }
             )
 
-        ordered = sorted(result, key=lambda item: item["rank_sort"], reverse=True)
-        for index, row in enumerate(ordered, start=1):
-            row["rank"] = index
-            row.pop("rank_sort", None)
-        return ordered
+        return self._finalize_rows(result)
 
-    def _build_spread_rows_for_user(
-        self,
-        account_rows: List[Dict[str, Any]],
-        strategy_rows: List[Dict[str, Any]],
-    ) -> List[dict]:
-        _ = strategy_rows
-
-        account_map = self._build_account_lookup(account_rows)
-        pair_rows = market_repository.list_active_pairs(pair_type="spread")
+    def _build_public_spread_rows(self, pair_rows: List[Dict[str, Any]]) -> List[dict]:
         result: List[dict] = []
 
         for pair in pair_rows:
+            left_exchange_code = str(pair["left_exchange_code"])
+            right_exchange_code = str(pair["right_exchange_code"])
             left_market_type = str(pair["left_market_type"])
             right_market_type = str(pair["right_market_type"])
-            left_account = account_map.get((str(pair["left_exchange_code"]), left_market_type))
-            right_account = account_map.get((str(pair["right_exchange_code"]), right_market_type))
+            if left_market_type != "swap" or right_market_type != "swap":
+                continue
 
             left_ticker = market_runtime_cache.get_ticker(
-                str(pair["left_exchange_code"]),
+                left_exchange_code,
                 left_market_type,
                 str(pair["left_symbol"]),
             )
             right_ticker = market_runtime_cache.get_ticker(
-                str(pair["right_exchange_code"]),
+                right_exchange_code,
                 right_market_type,
                 str(pair["right_symbol"]),
             )
@@ -376,347 +352,243 @@ class OpportunityRuntimeService:
                 left_ticker is not None
                 and right_ticker is not None
                 and left_ticker.ask_price > 0
+                and left_ticker.bid_price > 0
+                and right_ticker.ask_price > 0
                 and right_ticker.bid_price > 0
             )
+            is_market_data_fresh = self._is_market_data_fresh(
+                left_ticker=left_ticker,
+                right_ticker=right_ticker,
+                left_funding=None,
+                right_funding=None,
+            )
+            is_market_data_display_ready = self._is_market_data_fresh(
+                left_ticker=left_ticker,
+                right_ticker=right_ticker,
+                left_funding=None,
+                right_funding=None,
+                stale_seconds=self._market_data_display_stale_seconds,
+            )
 
-            latest_spread = (
-                ((right_ticker.bid_price - left_ticker.ask_price) / left_ticker.ask_price) * 100
-                if has_market_data and left_ticker is not None and right_ticker is not None
+            left_buy_right_sell_spread = (
+                self._calc_price_gap_percent(right_ticker.bid_price, left_ticker.ask_price, absolute=True)
+                if has_market_data and left_ticker is not None and right_ticker is not None and left_ticker.ask_price > 0
                 else 0.0
             )
-            left_fee = self._resolve_fee_rate_value(left_account, market_type=left_market_type)
-            right_fee = self._resolve_fee_rate_value(right_account, market_type=right_market_type)
+            right_buy_left_sell_spread = (
+                self._calc_price_gap_percent(left_ticker.bid_price, right_ticker.ask_price, absolute=True)
+                if has_market_data and left_ticker is not None and right_ticker is not None and right_ticker.ask_price > 0
+                else 0.0
+            )
+            buy_price_value = float(left_ticker.ask_price) if left_ticker is not None else 0.0
+            sell_price_value = float(right_ticker.bid_price) if right_ticker is not None else 0.0
+            reverse_buy_price_value = float(right_ticker.ask_price) if right_ticker is not None else 0.0
+            reverse_sell_price_value = float(left_ticker.bid_price) if left_ticker is not None else 0.0
+            left_buy_right_sell_price_diff = sell_price_value - buy_price_value if has_market_data else 0.0
+            right_buy_left_sell_price_diff = reverse_sell_price_value - reverse_buy_price_value if has_market_data else 0.0
+            left_is_buy_leg = left_buy_right_sell_spread >= right_buy_left_sell_spread
+            latest_spread = max(left_buy_right_sell_spread, right_buy_left_sell_spread)
+            absolute_price_diff = (
+                abs(left_buy_right_sell_price_diff)
+                if left_is_buy_leg
+                else abs(right_buy_left_sell_price_diff)
+            ) if has_market_data else 0.0
+            buy_exchange_code = left_exchange_code if left_is_buy_leg else right_exchange_code
+            sell_exchange_code = right_exchange_code if left_is_buy_leg else left_exchange_code
+            buy_market_type = left_market_type if left_is_buy_leg else right_market_type
+            sell_market_type = right_market_type if left_is_buy_leg else left_market_type
+            buy_symbol_raw = str(pair["left_symbol"]) if left_is_buy_leg else str(pair["right_symbol"])
+            sell_symbol_raw = str(pair["right_symbol"]) if left_is_buy_leg else str(pair["left_symbol"])
+            buy_price_value = buy_price_value if left_is_buy_leg else reverse_buy_price_value
+            sell_price_value = sell_price_value if left_is_buy_leg else reverse_sell_price_value
+            left_mid_price_value = (
+                ((float(left_ticker.bid_price) + float(left_ticker.ask_price)) / 2)
+                if left_ticker is not None
+                else 0.0
+            )
+            right_mid_price_value = (
+                ((float(right_ticker.bid_price) + float(right_ticker.ask_price)) / 2)
+                if right_ticker is not None
+                else 0.0
+            )
+            cross_exchange_price_gap_percent = (
+                self._calc_absolute_diff_percent(left_mid_price_value, right_mid_price_value)
+                if has_market_data
+                else 0.0
+            )
+            is_price_aligned = has_market_data and cross_exchange_price_gap_percent <= self._max_cross_exchange_price_gap_percent
+            left_fee = self._resolve_fee_rate_value(market_type=left_market_type)
+            right_fee = self._resolve_fee_rate_value(market_type=right_market_type)
             net_spread = latest_spread - left_fee - right_fee if has_market_data else 0.0
-
-            left_available = float(left_account.get("current_available_amount") or 0) if left_account is not None else 0.0
-            right_available = float(right_account.get("current_available_amount") or 0) if right_account is not None else 0.0
-            executable_qty_left = self._estimate_quantity(left_available, left_ticker.ask_price if left_ticker is not None else 0)
-            executable_qty_right = self._estimate_quantity(right_available, right_ticker.bid_price if right_ticker is not None else 0)
-            has_required_accounts = left_account is not None and right_account is not None
-            execution_ready = (
-                has_required_accounts
-                and has_market_data
-                and executable_qty_left > 0
-                and executable_qty_right > 0
+            left_funding = market_runtime_cache.get_funding_rate(left_exchange_code, str(pair["left_symbol"]))
+            right_funding = market_runtime_cache.get_funding_rate(right_exchange_code, str(pair["right_symbol"]))
+            has_funding_data = left_funding is not None and right_funding is not None
+            funding_diff_percent = (
+                abs(left_funding.funding_rate_percent - right_funding.funding_rate_percent)
+                if has_funding_data
+                else 0.0
             )
 
             result.append(
                 {
                     "rank_sort": net_spread,
+                    "market_pair_key": str(pair.get("pair_key") or ""),
+                    "market_left_exchange_code": left_exchange_code,
+                    "market_right_exchange_code": right_exchange_code,
+                    "market_left_symbol_raw": str(pair["left_symbol"]),
+                    "market_right_symbol_raw": str(pair["right_symbol"]),
                     "symbol": str(pair["base_asset"]),
-                    "buy_exchange": self._exchange_label(str(pair["left_exchange_code"])),
-                    "sell_exchange": self._exchange_label(str(pair["right_exchange_code"])),
-                    "left_account_id": int(left_account.get("id") or 0) if left_account is not None else 0,
-                    "right_account_id": int(right_account.get("id") or 0) if right_account is not None else 0,
-                    "left_market_type": left_market_type,
-                    "right_market_type": right_market_type,
-                    "left_symbol_raw": str(pair["left_symbol"]),
-                    "right_symbol_raw": str(pair["right_symbol"]),
-                    "left_price_value": float(left_ticker.ask_price) if left_ticker is not None else 0.0,
-                    "right_price_value": float(right_ticker.bid_price) if right_ticker is not None else 0.0,
+                    "buy_exchange": self._exchange_label(buy_exchange_code),
+                    "sell_exchange": self._exchange_label(sell_exchange_code),
+                    "left_exchange_code": buy_exchange_code,
+                    "right_exchange_code": sell_exchange_code,
+                    "left_market_type": buy_market_type,
+                    "right_market_type": sell_market_type,
+                    "left_symbol_raw": buy_symbol_raw,
+                    "right_symbol_raw": sell_symbol_raw,
+                    "left_price_value": buy_price_value,
+                    "right_price_value": sell_price_value,
                     "latest_spread": format_signed_percent(latest_spread, 2) if has_market_data else "--",
+                    "latest_spread_value": latest_spread,
+                    "left_buy_right_sell_spread_value": left_buy_right_sell_spread,
+                    "right_buy_left_sell_spread_value": right_buy_left_sell_spread,
                     "net_spread": format_signed_percent(net_spread, 2) if has_market_data else "--",
-                    "buy_fee_rate": self._resolve_fee_rate_display(left_account, market_type=left_market_type),
-                    "sell_fee_rate": self._resolve_fee_rate_display(right_account, market_type=right_market_type),
-                    "qty_long": self._format_quantity(0, str(pair["base_asset"])),
-                    "qty_short": self._format_quantity(0, str(pair["base_asset"])),
-                    "avg_long": self._format_price(left_ticker.ask_price) if left_ticker is not None else "--",
-                    "avg_short": self._format_price(right_ticker.bid_price) if right_ticker is not None else "--",
-                    "value_long": "$0",
-                    "value_short": "$0",
+                    "net_spread_value": net_spread,
+                    "price_diff": self._format_price(absolute_price_diff) if has_market_data else "--",
+                    "price_diff_value": absolute_price_diff,
+                    "left_buy_right_sell_price_diff_value": left_buy_right_sell_price_diff,
+                    "right_buy_left_sell_price_diff_value": right_buy_left_sell_price_diff,
+                    "net_rate": format_signed_percent(funding_diff_percent, 4) if has_funding_data else "--",
+                    "net_rate_value": funding_diff_percent,
+                    "buy_funding_rate": (
+                        format_signed_percent(
+                            left_funding.funding_rate_percent if left_is_buy_leg and left_funding is not None else right_funding.funding_rate_percent,
+                            4,
+                        )
+                        if has_funding_data and ((left_is_buy_leg and left_funding is not None) or right_funding is not None)
+                        else "--"
+                    ),
+                    "sell_funding_rate": (
+                        format_signed_percent(
+                            right_funding.funding_rate_percent if left_is_buy_leg and right_funding is not None else left_funding.funding_rate_percent,
+                            4,
+                        )
+                        if has_funding_data and ((left_is_buy_leg and right_funding is not None) or left_funding is not None)
+                        else "--"
+                    ),
+                    "buy_fee_rate": self._resolve_fee_rate_display(market_type=buy_market_type),
+                    "sell_fee_rate": self._resolve_fee_rate_display(market_type=sell_market_type),
+                    "avg_long": self._format_price(buy_price_value),
+                    "avg_short": self._format_price(sell_price_value),
                     "opportunity_time": self._format_datetime(left_ticker.synced_at or right_ticker.synced_at) if has_market_data and left_ticker is not None and right_ticker is not None else "--",
-                    "has_required_accounts": has_required_accounts,
-                    "execution_ready": execution_ready,
                     "has_market_data": has_market_data,
+                    "is_market_data_fresh": is_market_data_fresh,
+                    "is_market_data_display_ready": is_market_data_display_ready,
+                    "is_price_aligned": is_price_aligned,
+                    "cross_exchange_price_gap_percent_value": cross_exchange_price_gap_percent,
                 }
             )
 
-        ordered = sorted(result, key=lambda item: item["rank_sort"], reverse=True)
+        return self._finalize_rows(result)
+
+    def _finalize_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        ordered = sorted(rows, key=lambda item: item["rank_sort"], reverse=True)
         for index, row in enumerate(ordered, start=1):
             row["rank"] = index
             row.pop("rank_sort", None)
         return ordered
 
-    def _fetch_public_ticker(self, *, exchange_code: str, market_type: str, symbol: str) -> TickerCacheItem:
-        exchange = self._build_public_exchange(exchange_code=exchange_code, market_type=market_type)
-        try:
-            ticker = exchange.fetch_ticker(symbol)
-            synced_at = datetime.now()
-            return TickerCacheItem(
-                exchange_code=exchange_code,
-                market_type=market_type,
-                symbol=symbol,
-                last_price=float(ticker.get("last") or ticker.get("close") or 0),
-                bid_price=float(ticker.get("bid") or ticker.get("last") or 0),
-                ask_price=float(ticker.get("ask") or ticker.get("last") or 0),
-                quote_volume=float(ticker.get("quoteVolume") or 0),
-                synced_at=synced_at,
-            )
-        finally:
-            try:
-                exchange.close()
-            except Exception:
-                pass
+    def _resolve_fee_rate_display(self, *, market_type: str) -> str:
+        return f"{self._resolve_fee_rate_value(market_type=market_type):.2f}%"
 
-    def _fetch_public_funding_rate(self, *, exchange_code: str, symbol: str) -> FundingRateCacheItem | None:
-        exchange = self._build_public_exchange(exchange_code=exchange_code, market_type="swap")
-        try:
-            if not exchange.has.get("fetchFundingRate"):
-                return None
-            payload = exchange.fetch_funding_rate(symbol)
-            next_funding_timestamp = payload.get("nextFundingTimestamp")
-            next_funding_at = (
-                datetime.fromtimestamp(next_funding_timestamp / 1000)
-                if next_funding_timestamp
-                else None
-            )
-            funding_rate = float(payload.get("fundingRate") or 0) * 100
-            return FundingRateCacheItem(
-                exchange_code=exchange_code,
-                symbol=symbol,
-                funding_rate_percent=funding_rate,
-                next_funding_at=next_funding_at,
-                synced_at=datetime.now(),
-            )
-        finally:
-            try:
-                exchange.close()
-            except Exception:
-                pass
-
-    def _build_public_exchange(self, *, exchange_code: str, market_type: str):
-        exchange_class_name = self._resolve_exchange_class_name(exchange_code=exchange_code, market_type=market_type)
-        exchange_class = getattr(ccxt, exchange_class_name)
-        params = {
-            "enableRateLimit": True,
-            "timeout": 20000,
-            "options": {
-                "defaultType": self._resolve_default_type(exchange_code=exchange_code, market_type=market_type),
-            },
-        }
-        if exchange_code == "okx":
-            params["options"]["fetchMarkets"] = {"types": [self._resolve_okx_market_fetch_type(market_type)]}
-        exchange = exchange_class(params)
-        try:
-            exchange.session.trust_env = False
-        except Exception:
-            pass
-        return exchange
-
-    def _resolve_exchange_class_name(self, *, exchange_code: str, market_type: str) -> str:
-        if exchange_code == "binance" and market_type == "swap":
-            return "binanceusdm"
-        return exchange_code
-
-    def _resolve_default_type(self, *, exchange_code: str, market_type: str) -> str:
-        if exchange_code == "binance" and market_type == "swap":
-            return "swap"
-        return market_type
-
-    def _resolve_okx_market_fetch_type(self, market_type: str) -> str:
-        if market_type == "swap":
-            return "swap"
-        return "spot"
-
-    def _build_account_lookup(self, rows: List[Dict[str, Any]]) -> Dict[Tuple[str, str], Dict[str, Any]]:
-        lookup: Dict[Tuple[str, str], Dict[str, Any]] = {}
-        for row in rows:
-            market_code = self._market_code_from_label(
-                str(row.get("market_type_code") or row.get("market_type") or "")
-            )
-            exchange_code = self._exchange_code_from_label(
-                str(row.get("exchange_code") or row.get("exchange") or "")
-            )
-            if not market_code or not exchange_code:
-                continue
-            lookup[(exchange_code, market_code)] = row
-        return lookup
-
-    def _refresh_public_tickers_in_batch(self, watch_targets: List[Dict[str, str]]) -> int:
-        grouped: Dict[Tuple[str, str], List[Dict[str, str]]] = {}
-        for item in watch_targets:
-            grouped.setdefault((item["exchange_code"], item["market_type"]), []).append(item)
-
-        refreshed_count = 0
-        for (exchange_code, market_type), items in grouped.items():
-            symbols = sorted({str(item["symbol"]) for item in items})
-            batch: Dict[str, TickerCacheItem] = {}
-            for symbol_chunk in self._chunk_symbols(symbols, self._ticker_batch_size):
-                try:
-                    batch.update(
-                        self._fetch_public_tickers(
-                            exchange_code=exchange_code,
-                            market_type=market_type,
-                            symbols=symbol_chunk,
-                        )
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    monitor_center_service.add_log(
-                        self._monitor_key,
-                        "warning",
-                        f"{exchange_code} {market_type} 批量行情刷新失败: {exc}",
-                    )
-
-            for item in items:
-                ticker_data = batch.get(str(item["symbol"]))
-                if ticker_data is None:
-                    try:
-                        ticker_data = self._fetch_public_ticker(
-                            exchange_code=item["exchange_code"],
-                            market_type=item["market_type"],
-                            symbol=item["symbol"],
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        monitor_center_service.add_log(
-                            self._monitor_key,
-                            "warning",
-                            f"{item['exchange_code']} {item['symbol']} 行情刷新失败: {exc}",
-                        )
-                        continue
-                market_runtime_cache.set_ticker(ticker_data)
-                refreshed_count += 1
-        return refreshed_count
-
-    def _refresh_public_funding_rates_in_batch(self, watch_targets: List[Dict[str, str]]) -> int:
-        grouped: Dict[str, List[str]] = {}
-        for item in watch_targets:
-            if item["market_type"] != "swap":
-                continue
-            grouped.setdefault(item["exchange_code"], []).append(str(item["symbol"]))
-
-        refreshed_count = 0
-        for exchange_code, symbols in grouped.items():
-            unique_symbols = sorted(set(symbols))
-            batch: Dict[str, FundingRateCacheItem] = {}
-            for symbol_chunk in self._chunk_symbols(unique_symbols, self._funding_batch_size):
-                try:
-                    batch.update(
-                        self._fetch_public_funding_rates(
-                            exchange_code=exchange_code,
-                            symbols=symbol_chunk,
-                        )
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    monitor_center_service.add_log(
-                        self._monitor_key,
-                        "warning",
-                        f"{exchange_code} 批量资金费刷新失败: {exc}",
-                    )
-
-            for symbol in unique_symbols:
-                funding_data = batch.get(symbol)
-                if funding_data is None:
-                    try:
-                        funding_data = self._fetch_public_funding_rate(
-                            exchange_code=exchange_code,
-                            symbol=symbol,
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        monitor_center_service.add_log(
-                            self._monitor_key,
-                            "warning",
-                            f"{exchange_code} {symbol} 资金费刷新失败: {exc}",
-                        )
-                        continue
-                if funding_data is None:
-                    continue
-                market_runtime_cache.set_funding_rate(funding_data)
-                refreshed_count += 1
-        return refreshed_count
-
-    def _chunk_symbols(self, symbols: List[str], chunk_size: int) -> List[List[str]]:
-        if chunk_size <= 0:
-            return [list(symbols)]
-        return [symbols[index:index + chunk_size] for index in range(0, len(symbols), chunk_size)]
-
-    def _fetch_public_tickers(self, *, exchange_code: str, market_type: str, symbols: List[str]) -> Dict[str, TickerCacheItem]:
-        exchange = self._build_public_exchange(exchange_code=exchange_code, market_type=market_type)
-        try:
-            payload = exchange.fetch_tickers(symbols)
-            synced_at = datetime.now()
-            result: Dict[str, TickerCacheItem] = {}
-            for symbol, ticker in payload.items():
-                normalized_symbol = str((ticker or {}).get("symbol") or symbol or "")
-                result[normalized_symbol] = TickerCacheItem(
-                    exchange_code=exchange_code,
-                    market_type=market_type,
-                    symbol=normalized_symbol,
-                    last_price=float((ticker or {}).get("last") or (ticker or {}).get("close") or 0),
-                    bid_price=float((ticker or {}).get("bid") or (ticker or {}).get("last") or 0),
-                    ask_price=float((ticker or {}).get("ask") or (ticker or {}).get("last") or 0),
-                    quote_volume=float((ticker or {}).get("quoteVolume") or 0),
-                    synced_at=synced_at,
-                )
-            return result
-        finally:
-            try:
-                exchange.close()
-            except Exception:
-                pass
-
-    def _fetch_public_funding_rates(self, *, exchange_code: str, symbols: List[str]) -> Dict[str, FundingRateCacheItem]:
-        exchange = self._build_public_exchange(exchange_code=exchange_code, market_type="swap")
-        try:
-            if not exchange.has.get("fetchFundingRates"):
-                return {}
-            payload = exchange.fetch_funding_rates(symbols)
-            result: Dict[str, FundingRateCacheItem] = {}
-            for symbol, item in payload.items():
-                row = item or {}
-                normalized_symbol = str(row.get("symbol") or symbol or "")
-                next_funding_timestamp = row.get("nextFundingTimestamp")
-                next_funding_at = (
-                    datetime.fromtimestamp(next_funding_timestamp / 1000)
-                    if next_funding_timestamp
-                    else None
-                )
-                result[normalized_symbol] = FundingRateCacheItem(
-                    exchange_code=exchange_code,
-                    symbol=normalized_symbol,
-                    funding_rate_percent=float(row.get("fundingRate") or 0) * 100,
-                    next_funding_at=next_funding_at,
-                    synced_at=datetime.now(),
-                )
-            return result
-        finally:
-            try:
-                exchange.close()
-            except Exception:
-                pass
-
-    def _resolve_fee_rate_display(self, account_row: Dict[str, Any] | None, *, market_type: str) -> str:
-        return f"{self._resolve_fee_rate_value(account_row, market_type=market_type):.2f}%"
-
-    def _resolve_fee_rate_value(self, account_row: Dict[str, Any] | None, *, market_type: str) -> float:
-        if account_row is not None:
-            market_type = self._market_code_from_label(str(account_row.get("market_type") or market_type))
-        if market_type == "spot":
+    def _resolve_fee_rate_value(self, *, market_type: str) -> float:
+        normalized_market_type = self._market_code_from_label(str(market_type or ""))
+        if normalized_market_type == "spot":
             return 0.10
         return 0.05
 
-    def _estimate_quantity(self, available_amount: float, price: float) -> float:
-        if available_amount <= 0 or price <= 0:
+    def _calc_price_gap_percent(self, sell_price: float, buy_price: float, *, absolute: bool = False) -> float:
+        if sell_price <= 0 or buy_price <= 0:
             return 0.0
-        usable = min(available_amount, 1000.0)
-        return usable / price
+        percent = ((sell_price - buy_price) / buy_price) * 100
+        return abs(percent) if absolute else percent
 
-    def _calc_spread_percent(self, left_price: float, right_price: float) -> float:
-        if left_price <= 0 or right_price <= 0:
+    def _calc_absolute_diff_percent(self, left_price: float, right_price: float) -> float:
+        high_price = max(float(left_price or 0), float(right_price or 0))
+        low_price = min(float(left_price or 0), float(right_price or 0))
+        if high_price <= 0 or low_price <= 0:
             return 0.0
-        return ((left_price - right_price) / right_price) * 100
+        return abs((high_price - low_price) / low_price) * 100
+
+    def _filter_live_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return [
+            dict(row)
+            for row in rows
+            if bool(row.get("has_market_data"))
+            and bool(row.get("is_market_data_display_ready", row.get("is_market_data_fresh")))
+            and bool(row.get("is_price_aligned", True))
+        ]
+
+    def _prepare_display_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        prepared: List[Dict[str, Any]] = []
+        for index, row in enumerate(rows, start=1):
+            next_row = dict(row)
+            has_market_data = bool(next_row.get("has_market_data"))
+            is_display_ready = bool(next_row.get("is_market_data_display_ready", next_row.get("is_market_data_fresh")))
+            is_fresh = bool(next_row.get("is_market_data_fresh"))
+            is_price_aligned = bool(next_row.get("is_price_aligned", True))
+            is_tradable = has_market_data and is_display_ready and is_fresh and is_price_aligned
+
+            if is_tradable:
+                row_status = "live"
+                row_status_message = "实时数据正常"
+            elif has_market_data and not is_display_ready:
+                row_status = "stale"
+                row_status_message = "数据延迟，当前仅展示最近缓存"
+            elif not has_market_data:
+                row_status = "missing"
+                row_status_message = "行情或资金费缺失，当前仅保留机会结构"
+            else:
+                row_status = "blocked"
+                row_status_message = "跨交易所价格偏差过大，当前不可交易"
+
+            next_row["row_status"] = row_status
+            next_row["row_status_message"] = row_status_message
+            next_row["tradable"] = is_tradable
+            next_row["rank"] = int(next_row.get("rank") or index)
+            prepared.append(next_row)
+
+        return prepared
+
+    def _is_market_data_fresh(
+        self,
+        *,
+        left_ticker,
+        right_ticker,
+        left_funding,
+        right_funding,
+        stale_seconds: int | None = None,
+    ) -> bool:
+        timestamps: List[datetime] = []
+        for candidate in (
+            left_ticker.synced_at if left_ticker is not None else None,
+            right_ticker.synced_at if right_ticker is not None else None,
+            left_funding.synced_at if left_funding is not None else None,
+            right_funding.synced_at if right_funding is not None else None,
+        ):
+            if isinstance(candidate, datetime):
+                timestamps.append(candidate)
+        if not timestamps:
+            return False
+        threshold_seconds = max(1, int(stale_seconds or self._market_data_execution_stale_seconds))
+        threshold = datetime.now() - timedelta(seconds=threshold_seconds)
+        return all(item >= threshold for item in timestamps)
 
     def _format_remaining(self, next_funding_at: datetime | None) -> str:
         if next_funding_at is None:
             return "--"
         seconds = int((next_funding_at - datetime.now()).total_seconds())
         return format_countdown(max(seconds, 0))
-
-    def _format_quantity(self, quantity: float, base_asset: str) -> str:
-        if quantity >= 1000:
-            return f"{quantity:,.0f} {base_asset}"
-        if quantity >= 1:
-            return f"{quantity:,.2f} {base_asset}"
-        return f"{quantity:,.4f} {base_asset}"
 
     def _format_price(self, price: float) -> str:
         if price >= 1000:
@@ -731,23 +603,10 @@ class OpportunityRuntimeService:
         return value.strftime("%H:%M:%S")
 
     def _market_code_from_label(self, label: str) -> str:
-        mapping = {
-            "现货": "spot",
-            "永续合约": "swap",
-            "spot": "spot",
-            "swap": "swap",
-        }
-        return mapping.get(label, label.lower())
-
-    def _exchange_code_from_label(self, label: str) -> str:
-        mapping = {
-            "Binance": "binance",
-            "Bitget": "bitget",
-            "OKX": "okx",
-            "Gate": "gate",
-            "HTX": "htx",
-        }
-        return mapping.get(label, label.lower())
+        normalized = str(label or "").strip().lower()
+        if normalized in {"spot", "swap"}:
+            return normalized
+        return normalized
 
     def _exchange_label(self, exchange_code: str) -> str:
         mapping = {

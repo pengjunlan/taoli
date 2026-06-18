@@ -10,6 +10,7 @@ from app.infrastructure.cache import market_runtime_cache
 from .account_service import account_service
 from .local_position_service import local_position_service
 from .monitor_center_service import monitor_center_service
+from .opportunity_exchange_filter_service import opportunity_exchange_filter_service
 
 
 class DashboardService:
@@ -21,10 +22,14 @@ class DashboardService:
             auto_transfer_config.trigger_ratio,
         )
         funding_rows = local_position_service.enrich_opportunity_rows(
-            rows=market_runtime_cache.get_user_rows("funding", current_user.id)
+            rows=opportunity_exchange_filter_service.filter_rows(
+                market_runtime_cache.get_user_rows("funding", current_user.id)
+            )
         )
         spread_rows = local_position_service.enrich_opportunity_rows(
-            rows=market_runtime_cache.get_user_rows("spread", current_user.id)
+            rows=opportunity_exchange_filter_service.filter_rows(
+                market_runtime_cache.get_user_rows("spread", current_user.id)
+            )
         )
         workers = monitor_center_service.snapshot()
 

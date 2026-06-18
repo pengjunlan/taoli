@@ -61,6 +61,10 @@ async def account_list_api(
         "summary_cards": summary_cards,
         "account_count": len(account_rows),
         "address_count": len(address_rows),
+        "auto_transfer_config": {
+            "is_enabled": auto_transfer_config.is_enabled,
+            "trigger_ratio": auto_transfer_config.trigger_ratio,
+        },
     }
 
 
@@ -148,7 +152,6 @@ async def update_auto_transfer_config_api(
             is_enabled=payload.is_enabled,
             trigger_ratio=payload.trigger_ratio,
         )
-        auto_transfer_result = account_service.maybe_execute_auto_transfer(current_user.id)
     except AccountValidationError as exc:
         return AccountResponse(success=False, message=str(exc)).to_dict()
     except AccountError as exc:
@@ -164,8 +167,8 @@ async def update_auto_transfer_config_api(
             "is_enabled": config.is_enabled,
             "trigger_ratio": config.trigger_ratio,
         },
-        "auto_transfer_executed": auto_transfer_result is not None,
-        "transfer_id": auto_transfer_result.transfer_record.id if auto_transfer_result is not None else None,
+        "auto_transfer_executed": False,
+        "transfer_id": None,
     }
 
 

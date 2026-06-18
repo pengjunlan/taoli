@@ -2,6 +2,8 @@ import { bindLogoutAction, showToast } from "../core/utils.js";
 
 const POLL_INTERVAL_MS = 5000;
 const MAX_LOG_LINES = 1000;
+let hasLoadedRiskWorkers = false;
+let lastRiskWorkers = [];
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -28,6 +30,25 @@ function getStatusLabel(status) {
   if (normalized === "idle") return "空闲";
   if (normalized === "primed") return "已初始化";
   return status || "--";
+}
+
+function getLevelClass(level) {
+  const normalized = String(level || "").trim().toUpperCase();
+  if (normalized === "ERROR") return "is-error";
+  if (normalized === "WARNING") return "is-warning";
+  return "is-info";
+}
+
+function normalizeLogs(logs) {
+  if (!Array.isArray(logs)) return [];
+  return logs
+    .map((log) => ({
+      time: log?.time || "--",
+      level: String(log?.level || "INFO").toUpperCase(),
+      message: log?.message || "",
+    }))
+    .sort((left, right) => String(left.time).localeCompare(String(right.time)))
+    .slice(-MAX_LOG_LINES);
 }
 
 async function getJson(url) {
@@ -57,6 +78,27 @@ async function getJson(url) {
   return data;
 }
 
+function buildWorkerLogs(worker) {
+  const logs = normalizeLogs(worker.logs);
+
+  if (!logs.length) {
+    return `<div class="risk-console__empty">暂无线程日志</div>`;
+  }
+
+  return logs
+    .map((log) => {
+      const levelClass = getLevelClass(log.level);
+      return `
+        <div class="risk-console__line">
+          <span class="risk-console__time">[${escapeHtml(log.time)}]</span>
+          <span class="risk-console__level ${levelClass}">${escapeHtml(log.level)}</span>
+          <span class="risk-console__message">${escapeHtml(log.message)}</span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
 function renderWorkerCards(workers) {
   const container = document.querySelector("[data-risk-worker-list]");
   if (!container) return;
@@ -79,50 +121,50 @@ function renderWorkerCards(workers) {
   container.innerHTML = workers
     .map((worker) => {
       const tone = getStatusTone(worker.status);
+      const detailText = worker.detail ? escapeHtml(worker.detail) : "--";
       const errorText = worker.last_error_message ? escapeHtml(worker.last_error_message) : "无";
-      const detailText = worker.detail ? escapeHtml(worker.detail) : "暂无状态明细";
+      const logs = normalizeLogs(worker.logs);
 
       return `
         <article class="worker-card">
-          <div class="worker-card__head">
-            <div>
+          <div class="worker-card__topline">
+            <div class="worker-card__identity">
               <h3>${escapeHtml(worker.name || worker.key || "--")}</h3>
-              <p>${escapeHtml(worker.category || "未分类")} / ${escapeHtml(worker.thread_name || "--")}</p>
+              <p>${escapeHtml(worker.category || "--")} / ${escapeHtml(worker.thread_name || "--")}</p>
+            </div>
+            <div class="worker-card__summary">
+              <span>轮询间隔: <strong>${escapeHtml(worker.interval_seconds || 0)} 秒</strong></span>
+              <span>最近心跳: <strong>${escapeHtml(worker.last_heartbeat_at || "--")}</strong></span>
+              <span>最近成功: <strong>${escapeHtml(worker.last_success_at || "--")}</strong></span>
+              <span>最近异常: <strong>${escapeHtml(worker.last_error_at || "无")}</strong></span>
             </div>
             <span class="worker-status worker-status--${tone}">${escapeHtml(getStatusLabel(worker.status))}</span>
           </div>
 
-          <div class="monitor-grid worker-card__grid">
-            <article class="monitor-item">
-              <div class="monitor-item__label">线程标识</div>
-              <div class="monitor-item__value">${escapeHtml(worker.key || "--")}</div>
-              <div class="monitor-item__meta">统一接入监控中心后的唯一标识。</div>
-            </article>
-            <article class="monitor-item">
-              <div class="monitor-item__label">轮询间隔</div>
-              <div class="monitor-item__value">${escapeHtml(worker.interval_seconds || 0)} 秒</div>
-              <div class="monitor-item__meta">线程当前循环执行间隔。</div>
-            </article>
-            <article class="monitor-item">
-              <div class="monitor-item__label">最近心跳</div>
-              <div class="monitor-item__value">${escapeHtml(worker.last_heartbeat_at || "--")}</div>
-              <div class="monitor-item__meta">${detailText}</div>
-            </article>
-            <article class="monitor-item">
-              <div class="monitor-item__label">最近成功</div>
-              <div class="monitor-item__value">${escapeHtml(worker.last_success_at || "--")}</div>
-              <div class="monitor-item__meta">最近一次成功执行时间。</div>
-            </article>
-            <article class="monitor-item">
-              <div class="monitor-item__label">最近异常</div>
-              <div class="monitor-item__value">${escapeHtml(worker.last_error_at || "--")}</div>
-              <div class="monitor-item__meta">${errorText}</div>
-            </article>
+          <div class="worker-card__meta">
+            <span>线程标识: ${escapeHtml(worker.key || "--")}</span>
+            <span>状态说明: ${detailText}</span>
+            <span>异常说明: ${errorText}</span>
+            <span>日志条数: ${logs.length} / ${MAX_LOG_LINES}</span>
+          </div>
+
+          <div class="risk-console risk-console--embedded">
+            <div class="risk-console__toolbar">
+              <span class="risk-console__dot risk-console__dot--danger"></span>
+              <span class="risk-console__dot risk-console__dot--warning"></span>
+              <span class="risk-console__dot risk-console__dot--success"></span>
+              <span class="risk-console__title">worker-log-console</span>
+            </div>
+            <div class="risk-console__body">${buildWorkerLogs(worker)}</div>
           </div>
         </article>
       `;
     })
     .join("");
+
+  container.querySelectorAll(".risk-console__body").forEach((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
 }
 
 function updateRefreshNote(workers) {
@@ -137,56 +179,8 @@ function updateRefreshNote(workers) {
     : [];
 
   note.textContent = heartbeatList.length
-    ? `最近心跳：${heartbeatList[heartbeatList.length - 1]}`
+    ? `最近心跳: ${heartbeatList[heartbeatList.length - 1]}`
     : "暂未收到线程心跳";
-}
-
-function renderLogs(workers) {
-  const container = document.querySelector("[data-risk-log-list]");
-  const counter = document.querySelector("[data-risk-log-count]");
-  if (!container) return;
-
-  const logs = Array.isArray(workers)
-    ? workers
-        .flatMap((worker) =>
-          (Array.isArray(worker.logs) ? worker.logs : []).map((log) => ({
-            workerName: worker.name || worker.key || "--",
-            threadName: worker.thread_name || "--",
-            time: log.time || "--",
-            level: String(log.level || "INFO").toUpperCase(),
-            message: log.message || "",
-          })),
-        )
-        .sort((left, right) => String(left.time).localeCompare(String(right.time)))
-        .slice(-MAX_LOG_LINES)
-    : [];
-
-  if (counter) {
-    counter.textContent = `${logs.length} / ${MAX_LOG_LINES}`;
-  }
-
-  if (!logs.length) {
-    container.innerHTML = `<div class="risk-console__empty">暂无线程日志</div>`;
-    return;
-  }
-
-  container.innerHTML = logs
-    .map((log) => {
-      const levelClass =
-        log.level === "ERROR" ? "is-error" : log.level === "WARNING" ? "is-warning" : "is-info";
-      return `
-        <div class="risk-console__line">
-          <span class="risk-console__time">[${escapeHtml(log.time)}]</span>
-          <span class="risk-console__level ${levelClass}">${escapeHtml(log.level)}</span>
-          <span class="risk-console__worker">${escapeHtml(log.workerName)}</span>
-          <span class="risk-console__thread">(${escapeHtml(log.threadName)})</span>
-          <span class="risk-console__message">${escapeHtml(log.message)}</span>
-        </div>
-      `;
-    })
-    .join("");
-
-  container.scrollTop = container.scrollHeight;
 }
 
 let refreshLock = false;
@@ -202,9 +196,16 @@ async function refreshRiskWorkers({ silent = false } = {}) {
     }
 
     const workers = Array.isArray(result.workers) ? result.workers : [];
-    renderWorkerCards(workers);
-    renderLogs(workers);
-    updateRefreshNote(workers);
+    const shouldPreserveWorkers = hasLoadedRiskWorkers && workers.length === 0;
+
+    if (!shouldPreserveWorkers) {
+      renderWorkerCards(workers);
+      lastRiskWorkers = workers;
+      hasLoadedRiskWorkers = hasLoadedRiskWorkers || workers.length > 0;
+    } else {
+      renderWorkerCards(lastRiskWorkers);
+    }
+    updateRefreshNote(shouldPreserveWorkers ? lastRiskWorkers : workers);
   } catch (error) {
     if (!silent) {
       showToast(error?.message || "读取线程监控数据失败，请稍后再试。");
