@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import hashlib
+import json
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
@@ -22,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 
 class OpportunityRuntimeService:
+    _PUBLIC_SNAPSHOT_INTERVAL_SECONDS = 30 * 60
+    _STRATEGY_SNAPSHOT_INTERVAL_SECONDS = 30 * 60
+
     def __init__(self) -> None:
         self._started = False
         self._lock = threading.Lock()
@@ -31,6 +36,10 @@ class OpportunityRuntimeService:
         self._market_data_display_stale_seconds = 15 * 60
         self._max_cross_exchange_price_gap_percent = 15.0
         self._monitor_key = "opportunity_runtime_sync"
+        self._last_public_snapshot_hashes: Dict[str, str] = {}
+        self._last_public_snapshot_persisted_at: Dict[str, datetime] = {}
+        self._last_strategy_snapshot_hashes: Dict[int, str] = {}
+        self._last_strategy_snapshot_persisted_at: Dict[int, datetime] = {}
 
     def start(self) -> None:
         with self._lock:
@@ -134,12 +143,12 @@ class OpportunityRuntimeService:
                 else "价差套利机会正在等待完整的实时买一卖一数据。"
             ),
         )
-        opportunity_snapshot_service.persist_public_opportunity_rows(
+        self._persist_public_snapshot_if_due(
             channel="funding",
             rows=funding_live_rows,
             generated_at=generated_at,
         )
-        opportunity_snapshot_service.persist_public_opportunity_rows(
+        self._persist_public_snapshot_if_due(
             channel="spread",
             rows=spread_live_rows,
             generated_at=generated_at,
@@ -158,7 +167,11 @@ class OpportunityRuntimeService:
             strategy_payload["status_message"] = "策略运行态已按最新公共套利机会刷新。"
             strategy_payload["updated_at"] = generated_at
             strategy_runtime_cache.set_user_payload(user_id, strategy_payload)
-            opportunity_snapshot_service.persist_strategy_payload(user_id=user_id, payload=strategy_payload)
+            self._persist_strategy_snapshot_if_needed(
+                user_id=user_id,
+                payload=strategy_payload,
+                generated_at=generated_at,
+            )
 
         monitor_center_service.mark_success(
             self._monitor_key,
@@ -617,6 +630,70 @@ class OpportunityRuntimeService:
             "htx": "HTX",
         }
         return mapping.get(exchange_code, exchange_code.upper())
+
+    def _persist_public_snapshot_if_due(
+        self,
+        *,
+        channel: str,
+        rows: List[Dict[str, Any]],
+        generated_at: datetime,
+    ) -> None:
+        snapshot_hash = self._build_snapshot_hash({"channel": channel, "rows": rows})
+        last_persisted_at = self._last_public_snapshot_persisted_at.get(channel)
+        if last_persisted_at is not None:
+            elapsed = (generated_at - last_persisted_at).total_seconds()
+            if elapsed < self._PUBLIC_SNAPSHOT_INTERVAL_SECONDS:
+                self._last_public_snapshot_hashes[channel] = snapshot_hash
+                return
+
+        opportunity_snapshot_service.persist_public_opportunity_rows(
+            channel=channel,
+            rows=rows,
+            generated_at=generated_at,
+        )
+        self._last_public_snapshot_hashes[channel] = snapshot_hash
+        self._last_public_snapshot_persisted_at[channel] = generated_at
+
+    def _persist_strategy_snapshot_if_needed(
+        self,
+        *,
+        user_id: int,
+        payload: Dict[str, Any],
+        generated_at: datetime,
+    ) -> None:
+        snapshot_hash = self._build_snapshot_hash(
+            {
+                "summary_cards": payload.get("summary_cards") or [],
+                "positions_rows": payload.get("positions_rows") or [],
+                "order_rows": payload.get("order_rows") or [],
+                "fill_rows": payload.get("fill_rows") or [],
+                "candidate_rows": payload.get("candidate_rows") or [],
+                "active_positions_rows": payload.get("active_positions_rows") or [],
+                "active_order_rows": payload.get("active_order_rows") or [],
+                "history_order_rows": payload.get("history_order_rows") or [],
+            }
+        )
+        last_hash = self._last_strategy_snapshot_hashes.get(user_id)
+        last_persisted_at = self._last_strategy_snapshot_persisted_at.get(user_id)
+        is_due = (
+            last_persisted_at is None
+            or (generated_at - last_persisted_at).total_seconds() >= self._STRATEGY_SNAPSHOT_INTERVAL_SECONDS
+        )
+        if snapshot_hash == last_hash and not is_due:
+            return
+
+        opportunity_snapshot_service.persist_strategy_payload(user_id=user_id, payload=payload)
+        self._last_strategy_snapshot_hashes[user_id] = snapshot_hash
+        self._last_strategy_snapshot_persisted_at[user_id] = generated_at
+
+    def _build_snapshot_hash(self, payload: Dict[str, Any]) -> str:
+        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=self._json_default)
+        return hashlib.md5(encoded.encode("utf-8")).hexdigest()
+
+    def _json_default(self, value: Any) -> str:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return str(value)
 
 
 opportunity_runtime_service = OpportunityRuntimeService()
