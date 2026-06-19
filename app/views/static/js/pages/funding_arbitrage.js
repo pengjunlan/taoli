@@ -81,6 +81,16 @@ function getStatusMeta(statusCode) {
   return { label: "--", tone: "neutral" };
 }
 
+function formatStatusTime(statusTimeMs, fallbackText) {
+  const numeric = Number(statusTimeMs);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    const date = new Date(numeric);
+    return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`;
+  }
+  const normalizedFallback = String(fallbackText || "").trim();
+  return normalizedFallback || "--";
+}
+
 function renderSettlementCell(row) {
   const longSettlementAtMs = toSettlementMs(row.long_settlement_at_ms ?? row.settlement_at_ms);
   const shortSettlementAtMs = toSettlementMs(row.short_settlement_at_ms ?? row.settlement_at_ms);
@@ -140,7 +150,12 @@ function renderFundingRows(rows) {
       (row) => `
         <tr data-row-key="${escapeHtml(row.market_pair_key || "")}">
           <td>${escapeHtml(row.rank)}</td>
-          <td><span class="pill pill--${escapeHtml(getStatusMeta(row.status_code).tone)}">${escapeHtml(getStatusMeta(row.status_code).label)}</span></td>
+          <td>
+            <div class="status-cell">
+              <span class="pill pill--${escapeHtml(getStatusMeta(row.status_code).tone)}">${escapeHtml(getStatusMeta(row.status_code).label)}</span>
+              <span class="status-cell__time">${escapeHtml(formatStatusTime(row.status_time_ms, row.status_time))}</span>
+            </div>
+          </td>
           <td>
             <div class="spread-symbol">
               <strong>${escapeHtml(row.symbol)}</strong>

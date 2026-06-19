@@ -291,6 +291,12 @@ class OpportunityRuntimeService:
                 right_price_value=short_price_value,
                 has_required_funding_data=left_funding is not None and right_funding is not None,
             )
+            earliest_market_synced_at = self._resolve_earliest_datetime(
+                left_ticker.synced_at if left_ticker is not None else None,
+                right_ticker.synced_at if right_ticker is not None else None,
+                left_funding.synced_at if left_funding is not None else None,
+                right_funding.synced_at if right_funding is not None else None,
+            )
 
             next_funding_at = self._resolve_next_settlement_at(
                 left_funding.next_funding_at if left_funding is not None else None,
@@ -363,6 +369,8 @@ class OpportunityRuntimeService:
                     "settlement_at_ms": self._to_epoch_milliseconds(next_funding_at) if has_market_data else None,
                     "long_settlement_at_ms": self._to_epoch_milliseconds(long_settlement_at) if has_market_data else None,
                     "short_settlement_at_ms": self._to_epoch_milliseconds(short_settlement_at) if has_market_data else None,
+                    "status_time": self._format_datetime(earliest_market_synced_at),
+                    "status_time_ms": self._to_epoch_milliseconds(earliest_market_synced_at),
                     "status_code": status_code,
                     "has_market_data": has_market_data,
                     "is_market_data_fresh": is_market_data_fresh,
@@ -491,6 +499,12 @@ class OpportunityRuntimeService:
                 right_price_value=sell_price_value,
                 has_required_funding_data=has_funding_data,
             )
+            earliest_market_synced_at = self._resolve_earliest_datetime(
+                left_ticker.synced_at if left_ticker is not None else None,
+                right_ticker.synced_at if right_ticker is not None else None,
+                left_funding.synced_at if left_funding is not None else None,
+                right_funding.synced_at if right_funding is not None else None,
+            )
             next_funding_at = self._resolve_next_settlement_at(
                 left_funding.next_funding_at if left_funding is not None else None,
                 right_funding.next_funding_at if right_funding is not None else None,
@@ -567,6 +581,8 @@ class OpportunityRuntimeService:
                     "settlement_at_ms": self._to_epoch_milliseconds(next_funding_at),
                     "buy_settlement_at_ms": self._to_epoch_milliseconds(buy_settlement_at),
                     "sell_settlement_at_ms": self._to_epoch_milliseconds(sell_settlement_at),
+                    "status_time": self._format_datetime(earliest_market_synced_at),
+                    "status_time_ms": self._to_epoch_milliseconds(earliest_market_synced_at),
                     "status_code": status_code,
                     "has_market_data": has_market_data,
                     "is_market_data_fresh": is_market_data_fresh,
@@ -705,11 +721,14 @@ class OpportunityRuntimeService:
         seconds = int((next_funding_at - datetime.now()).total_seconds())
         return format_countdown(max(seconds, 0))
 
-    def _resolve_next_settlement_at(self, *values: datetime | None) -> datetime | None:
+    def _resolve_earliest_datetime(self, *values: datetime | None) -> datetime | None:
         candidates = [value for value in values if isinstance(value, datetime)]
         if not candidates:
             return None
         return min(candidates, key=lambda item: item.timestamp())
+
+    def _resolve_next_settlement_at(self, *values: datetime | None) -> datetime | None:
+        return self._resolve_earliest_datetime(*values)
 
     def _format_beijing_datetime(self, value: datetime | None) -> str:
         if value is None:

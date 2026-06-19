@@ -26,6 +26,21 @@
     white-space: nowrap;
 }
 
+.page-funding_arbitrage .status-cell {
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: 8px;
+    min-height: 52px;
+}
+
+.page-funding_arbitrage .status-cell__time {
+    color: var(--text-soft);
+    font-size: 0.82rem;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+
 .page-funding_arbitrage .table-wrap {
     padding-top: 18px;
 }

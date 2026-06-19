@@ -7,64 +7,19 @@
 }
 
 .page-spread_arbitrage .data-table {
-    width: 100%;
-    min-width: 0;
-    table-layout: fixed;
-}
-
-.page-spread_arbitrage .data-table thead th:nth-child(1),
-.page-spread_arbitrage .data-table tbody td:nth-child(1) {
-    width: 4.5%;
+    min-width: 1160px;
 }
 
 .page-spread_arbitrage .data-table thead th:nth-child(2),
 .page-spread_arbitrage .data-table tbody td:nth-child(2) {
-    width: 7%;
-    min-width: 84px;
+    width: 96px;
+    min-width: 96px;
     white-space: nowrap;
-}
-
-.page-spread_arbitrage .data-table thead th:nth-child(3),
-.page-spread_arbitrage .data-table tbody td:nth-child(3) {
-    width: 11%;
-}
-
-.page-spread_arbitrage .data-table thead th:nth-child(4),
-.page-spread_arbitrage .data-table tbody td:nth-child(4) {
-    width: 9%;
-}
-
-.page-spread_arbitrage .data-table thead th:nth-child(5),
-.page-spread_arbitrage .data-table tbody td:nth-child(5),
-.page-spread_arbitrage .data-table thead th:nth-child(6),
-.page-spread_arbitrage .data-table tbody td:nth-child(6),
-.page-spread_arbitrage .data-table thead th:nth-child(7),
-.page-spread_arbitrage .data-table tbody td:nth-child(7) {
-    width: 8%;
-}
-
-.page-spread_arbitrage .data-table thead th:nth-child(8),
-.page-spread_arbitrage .data-table tbody td:nth-child(8),
-.page-spread_arbitrage .data-table thead th:nth-child(9),
-.page-spread_arbitrage .data-table tbody td:nth-child(9),
-.page-spread_arbitrage .data-table thead th:nth-child(10),
-.page-spread_arbitrage .data-table tbody td:nth-child(10),
-.page-spread_arbitrage .data-table thead th:nth-child(11),
-.page-spread_arbitrage .data-table tbody td:nth-child(11) {
-    width: 8%;
-}
-
-.page-spread_arbitrage .data-table thead th:nth-child(12),
-.page-spread_arbitrage .data-table tbody td:nth-child(12),
-.page-spread_arbitrage .data-table thead th:nth-child(13),
-.page-spread_arbitrage .data-table tbody td:nth-child(13) {
-    width: 5.5%;
 }
 
 .page-spread_arbitrage .data-table tbody td {
     padding-top: 20px;
     padding-bottom: 20px;
-    vertical-align: middle;
 }
 
 .page-spread_arbitrage .data-table tbody td:nth-child(2) .pill {
@@ -73,54 +28,23 @@
     white-space: nowrap;
 }
 
+.page-spread_arbitrage .status-cell {
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: 8px;
+    min-height: 52px;
+}
+
+.page-spread_arbitrage .status-cell__time {
+    color: var(--text-soft);
+    font-size: 0.82rem;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+
 .page-spread_arbitrage .data-table tbody tr:hover {
     background: rgba(25, 103, 210, 0.018);
-}
-
-.page-spread_arbitrage .pair-cell--spread {
-    display: grid;
-    gap: 6px;
-    min-width: 0;
-}
-
-.page-spread_arbitrage .data-table .spread-symbol,
-.page-spread_arbitrage .data-table .pair-cell {
-    min-width: 0;
-}
-
-.page-spread_arbitrage .pair-cell--spread .pair-cell__line {
-    font-size: 0.95rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.page-spread_arbitrage .data-table .spread-symbol strong,
-.page-spread_arbitrage .data-table .spread-symbol__hint,
-.page-spread_arbitrage .data-table .pair-cell__line,
-.page-spread_arbitrage .data-table .pair-cell__line--hedge {
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.page-spread_arbitrage .data-table tbody td:nth-child(5) .spread-symbol strong,
-.page-spread_arbitrage .data-table tbody td:nth-child(6) .spread-symbol strong {
-    white-space: normal;
-    overflow: visible;
-    text-overflow: clip;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-    line-height: 1.15;
-}
-
-.page-spread_arbitrage .data-table thead th,
-.page-spread_arbitrage .data-table tbody td {
-    box-sizing: border-box;
-}
-
-.page-spread_arbitrage .spread-rank {
-    color: var(--text);
-    font-variant-numeric: tabular-nums;
 }
 
 .page-spread_arbitrage .table-actions {
@@ -129,6 +53,10 @@
 
 .page-spread_arbitrage .table-empty-row:hover {
     background: transparent;
+}
+
+.page-spread_arbitrage .pair-cell__line--hedge {
+    font-size: 0.92rem;
 }
 
 .page-spread_arbitrage .runtime-banner {
@@ -224,9 +152,5 @@
     .page-spread_arbitrage .table-wrap {
         padding-left: 16px;
         padding-right: 16px;
-    }
-
-    .page-spread_arbitrage .data-table {
-        min-width: 980px;
     }
 }
