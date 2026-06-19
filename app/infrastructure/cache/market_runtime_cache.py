@@ -32,6 +32,7 @@ class FundingRateCacheItem:
     funding_rate_percent: float
     next_funding_at: datetime | None
     synced_at: datetime | None
+    settlement_interval_hours: float | None = None
 
 
 @dataclass(frozen=True)
@@ -387,6 +388,7 @@ class MarketRuntimeCache:
                 funding_rate_percent=float(payload.get("funding_rate_percent") or 0),
                 next_funding_at=redis_runtime_support.parse_datetime(payload.get("next_funding_at")),
                 synced_at=redis_runtime_support.parse_datetime(payload.get("synced_at")),
+                settlement_interval_hours=float(payload.get("settlement_interval_hours") or 0) or None,
             )
         except (TypeError, ValueError):
             return None

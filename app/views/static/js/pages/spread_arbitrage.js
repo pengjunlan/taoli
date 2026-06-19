@@ -92,6 +92,14 @@ function formatStatusTime(statusTimeMs, fallbackText) {
   return normalizedFallback || "--";
 }
 
+function formatRawPrice(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "--";
+  }
+  return String(value);
+}
+
 function renderSettlementCell(row) {
   const buySettlementAtMs = toSettlementMs(row.buy_settlement_at_ms ?? row.settlement_at_ms);
   const sellSettlementAtMs = toSettlementMs(row.sell_settlement_at_ms ?? row.settlement_at_ms);
@@ -184,13 +192,13 @@ function renderSpreadRows(rows) {
           <td>
             <div class="spread-symbol">
               <strong class="spread-fee">${escapeHtml(row.net_rate)}</strong>
-              <span class="spread-symbol__hint">净资金费率</span>
+              <span class="spread-symbol__hint">4小时净资率</span>
             </div>
           </td>
           <td>
             <div class="pair-cell pair-cell--hedge">
-              <span class="pair-cell__line pair-cell__line--hedge is-positive">${escapeHtml(row.avg_long)}</span>
-              <span class="pair-cell__line pair-cell__line--hedge is-negative">${escapeHtml(row.avg_short)}</span>
+              <span class="pair-cell__line pair-cell__line--hedge is-positive">${escapeHtml(formatRawPrice(row.left_price_value))}</span>
+              <span class="pair-cell__line pair-cell__line--hedge is-negative">${escapeHtml(formatRawPrice(row.right_price_value))}</span>
             </div>
           </td>
           <td>

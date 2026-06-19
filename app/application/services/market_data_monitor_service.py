@@ -661,6 +661,11 @@ class MarketDataMonitorService:
                         funding_rate_percent=funding_rate,
                         next_funding_at=next_funding_at,
                         synced_at=self._parse_ws_datetime(row.get("ts")),
+                        settlement_interval_hours=self._resolve_funding_interval_hours(
+                            exchange_code=target.exchange_code,
+                            payload=row,
+                            next_funding_at=next_funding_at,
+                        ),
                     )
                 )
 
@@ -769,6 +774,15 @@ class MarketDataMonitorService:
                             funding_rate_percent=funding_rate,
                             next_funding_at=existing.next_funding_at if existing is not None else None,
                             synced_at=self._parse_ws_datetime(row.get("t")),
+                            settlement_interval_hours=(
+                                existing.settlement_interval_hours
+                                if existing is not None
+                                else self._resolve_funding_interval_hours(
+                                    exchange_code=target.exchange_code,
+                                    payload=row,
+                                    next_funding_at=None,
+                                )
+                            ),
                         )
                     )
                 self._maybe_emit_gate_ticker(target, state, ticker_counter)
@@ -1439,6 +1453,11 @@ class MarketDataMonitorService:
                     funding_rate_percent=float(row.get("fundingRate") or 0) * 100,
                     next_funding_at=next_funding_at,
                     synced_at=datetime.now(),
+                    settlement_interval_hours=self._resolve_funding_interval_hours(
+                        exchange_code=exchange_code,
+                        payload=row,
+                        next_funding_at=next_funding_at,
+                    ),
                 )
             return result
         finally:
@@ -1475,6 +1494,11 @@ class MarketDataMonitorService:
                         funding_rate_percent=self._safe_float(row.get("fundingRate")) * 100,
                         next_funding_at=next_funding_at,
                         synced_at=self._parse_backfill_datetime(row.get("ts")),
+                        settlement_interval_hours=self._resolve_funding_interval_hours(
+                            exchange_code="bitget",
+                            payload=row,
+                            next_funding_at=next_funding_at,
+                        ),
                     )
                 return result
             except Exception as exc:  # noqa: BLE001
@@ -1508,6 +1532,11 @@ class MarketDataMonitorService:
                 funding_rate_percent=self._safe_float(row.get("funding_rate")) * 100,
                 next_funding_at=next_funding_at,
                 synced_at=datetime.now(),
+                settlement_interval_hours=self._resolve_funding_interval_hours(
+                    exchange_code="gate",
+                    payload=row,
+                    next_funding_at=next_funding_at,
+                ),
             )
         return result
 
@@ -1542,6 +1571,11 @@ class MarketDataMonitorService:
                 funding_rate_percent=float(row.get("fundingRate") or 0) * 100,
                 next_funding_at=next_funding_at,
                 synced_at=datetime.now(),
+                settlement_interval_hours=self._resolve_funding_interval_hours(
+                    exchange_code="okx",
+                    payload=row,
+                    next_funding_at=next_funding_at,
+                ),
             )
         return result
 
@@ -1565,6 +1599,11 @@ class MarketDataMonitorService:
                 funding_rate_percent=self._safe_float(row.get("lastFundingRate")) * 100,
                 next_funding_at=next_funding_at,
                 synced_at=datetime.now(),
+                settlement_interval_hours=self._resolve_funding_interval_hours(
+                    exchange_code="binance",
+                    payload=row,
+                    next_funding_at=next_funding_at,
+                ),
             )
         return result
 
@@ -1587,6 +1626,11 @@ class MarketDataMonitorService:
                 funding_rate_percent=funding_rate,
                 next_funding_at=next_funding_at,
                 synced_at=datetime.now(),
+                settlement_interval_hours=self._resolve_funding_interval_hours(
+                    exchange_code=exchange_code,
+                    payload=payload,
+                    next_funding_at=next_funding_at,
+                ),
             )
         finally:
             try:
@@ -1620,6 +1664,56 @@ class MarketDataMonitorService:
                 f"{symbol} rate={item.funding_rate_percent:.6f}% next={next_funding_at}"
             )
         return " | 样例: " + " ; ".join(parts)
+
+    def _resolve_funding_interval_hours(
+        self,
+        *,
+        exchange_code: str,
+        payload: Dict[str, object] | None,
+        next_funding_at: datetime | None,
+    ) -> float:
+        row = payload or {}
+
+        for candidate in (
+            row.get("fundingIntervalHours"),
+            row.get("funding_interval_hours"),
+            row.get("fundingInterval"),
+            row.get("funding_interval"),
+        ):
+            interval_hours = self._safe_float(candidate)
+            if interval_hours > 0:
+                return interval_hours
+
+        if exchange_code == "gate":
+            interval_seconds = self._safe_float(
+                row.get("funding_interval"),
+                row.get("funding_interval_seconds"),
+            )
+            if interval_seconds > 0:
+                return interval_seconds / 3600
+
+        if exchange_code == "bitget":
+            interval_hours = self._safe_float(row.get("fundInterval"))
+            if interval_hours > 0:
+                return interval_hours
+            return 8.0
+
+        if exchange_code in {"binance", "okx"}:
+            return 8.0
+
+        if next_funding_at is not None:
+            remaining_seconds = (next_funding_at - datetime.now()).total_seconds()
+            if remaining_seconds > 0:
+                estimated_hours = remaining_seconds / 3600
+                if estimated_hours <= 4.5:
+                    return 4.0
+                if estimated_hours <= 8.5:
+                    return 8.0
+                if estimated_hours <= 12.5:
+                    return 12.0
+                return round(estimated_hours)
+
+        return 8.0
 
     def _build_ticker_from_values(
         self,

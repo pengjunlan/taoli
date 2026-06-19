@@ -250,7 +250,35 @@ class OpportunityRuntimeService:
                 if has_market_data and left_funding is not None and right_funding is not None
                 else 0.0
             )
-            actual_net_rate = abs(funding_diff_percent) if has_market_data else 0.0
+            long_settlement_hours = self._resolve_settlement_interval_hours(
+                right_funding if left_is_short_leg else left_funding,
+            )
+            short_settlement_hours = self._resolve_settlement_interval_hours(
+                left_funding if left_is_short_leg else right_funding,
+            )
+            actual_net_rate = (
+                abs(
+                    (
+                        (
+                            left_funding.funding_rate_percent
+                            if left_is_short_leg and left_funding is not None
+                            else right_funding.funding_rate_percent if right_funding is not None else 0.0
+                        )
+                        / max(short_settlement_hours, 1e-9)
+                    )
+                    - (
+                        (
+                            right_funding.funding_rate_percent
+                            if left_is_short_leg and right_funding is not None
+                            else left_funding.funding_rate_percent if left_funding is not None else 0.0
+                        )
+                        / max(long_settlement_hours, 1e-9)
+                    )
+                )
+                * 4
+                if has_market_data and left_funding is not None and right_funding is not None
+                else 0.0
+            )
             annualized = actual_net_rate * 3 * 365 if has_market_data else 0.0
             short_exchange_code = left_exchange_code if left_is_short_leg else right_exchange_code
             long_exchange_code = right_exchange_code if left_is_short_leg else left_exchange_code
@@ -533,8 +561,32 @@ class OpportunityRuntimeService:
                 if left_is_buy_leg and right_funding is not None
                 else left_funding.next_funding_at if left_funding is not None else None
             )
+            buy_settlement_hours = self._resolve_settlement_interval_hours(
+                left_funding if left_is_buy_leg else right_funding,
+            )
+            sell_settlement_hours = self._resolve_settlement_interval_hours(
+                right_funding if left_is_buy_leg else left_funding,
+            )
             funding_diff_percent = (
-                abs(left_funding.funding_rate_percent - right_funding.funding_rate_percent)
+                abs(
+                    (
+                        (
+                            left_funding.funding_rate_percent
+                            if left_is_buy_leg and left_funding is not None
+                            else right_funding.funding_rate_percent if right_funding is not None else 0.0
+                        )
+                        / max(buy_settlement_hours, 1e-9)
+                    )
+                    - (
+                        (
+                            right_funding.funding_rate_percent
+                            if left_is_buy_leg and right_funding is not None
+                            else left_funding.funding_rate_percent if left_funding is not None else 0.0
+                        )
+                        / max(sell_settlement_hours, 1e-9)
+                    )
+                )
+                * 4
                 if has_funding_data
                 else 0.0
             )
@@ -777,6 +829,15 @@ class OpportunityRuntimeService:
         if value is None:
             return "--"
         return value.strftime("%H:%M:%S")
+
+    def _resolve_settlement_interval_hours(self, funding_item) -> float:
+        if funding_item is None:
+            return 8.0
+        try:
+            value = float(getattr(funding_item, "settlement_interval_hours", 0) or 0)
+        except (TypeError, ValueError):
+            value = 0.0
+        return value if value > 0 else 8.0
 
     def _is_frozen_symbol(self, *values: Any) -> bool:
         for value in values:
