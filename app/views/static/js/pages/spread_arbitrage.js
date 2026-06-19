@@ -78,6 +78,7 @@ function getStatusMeta(statusCode) {
   if (normalized === 2) return { label: "数据过期", tone: "warning" };
   if (normalized === 3) return { label: "价差过大", tone: "negative" };
   if (normalized === 4) return { label: "数据缺失", tone: "neutral" };
+  if (normalized === 5) return { label: "冻结", tone: "neutral" };
   return { label: "--", tone: "neutral" };
 }
 

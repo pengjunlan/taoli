@@ -31,6 +31,7 @@ class OpportunityRuntimeService:
     _STATUS_STALE = 2
     _STATUS_PRICE_GAP_TOO_LARGE = 3
     _STATUS_MISSING = 4
+    _STATUS_FROZEN = 5
 
     def __init__(self) -> None:
         self._started = False
@@ -277,6 +278,11 @@ class OpportunityRuntimeService:
                 else 0.0
             )
             is_price_aligned = has_market_data and cross_exchange_price_gap_percent <= self._max_cross_exchange_price_gap_percent
+            is_frozen = self._is_frozen_symbol(
+                pair.get("base_asset"),
+                pair.get("left_symbol"),
+                pair.get("right_symbol"),
+            )
             status_code = self._resolve_status_code(
                 has_market_data=has_market_data,
                 is_status_data_fresh=self._is_market_data_fresh(
@@ -290,6 +296,7 @@ class OpportunityRuntimeService:
                 left_price_value=long_price_value,
                 right_price_value=short_price_value,
                 has_required_funding_data=left_funding is not None and right_funding is not None,
+                is_frozen=is_frozen,
             )
             earliest_market_synced_at = self._resolve_earliest_datetime(
                 left_ticker.synced_at if left_ticker is not None else None,
@@ -372,6 +379,7 @@ class OpportunityRuntimeService:
                     "status_time": self._format_datetime(earliest_market_synced_at),
                     "status_time_ms": self._to_epoch_milliseconds(earliest_market_synced_at),
                     "status_code": status_code,
+                    "is_frozen": is_frozen,
                     "has_market_data": has_market_data,
                     "is_market_data_fresh": is_market_data_fresh,
                     "is_market_data_display_ready": is_market_data_display_ready,
@@ -472,6 +480,11 @@ class OpportunityRuntimeService:
                 else 0.0
             )
             is_price_aligned = has_market_data and cross_exchange_price_gap_percent <= self._max_cross_exchange_price_gap_percent
+            is_frozen = self._is_frozen_symbol(
+                pair.get("base_asset"),
+                pair.get("left_symbol"),
+                pair.get("right_symbol"),
+            )
             left_fee = self._resolve_fee_rate_value(market_type=left_market_type)
             right_fee = self._resolve_fee_rate_value(market_type=right_market_type)
             net_spread = latest_spread - left_fee - right_fee if has_market_data else 0.0
@@ -498,6 +511,7 @@ class OpportunityRuntimeService:
                 left_price_value=buy_price_value,
                 right_price_value=sell_price_value,
                 has_required_funding_data=has_funding_data,
+                is_frozen=is_frozen,
             )
             earliest_market_synced_at = self._resolve_earliest_datetime(
                 left_ticker.synced_at if left_ticker is not None else None,
@@ -584,6 +598,7 @@ class OpportunityRuntimeService:
                     "status_time": self._format_datetime(earliest_market_synced_at),
                     "status_time_ms": self._to_epoch_milliseconds(earliest_market_synced_at),
                     "status_code": status_code,
+                    "is_frozen": is_frozen,
                     "has_market_data": has_market_data,
                     "is_market_data_fresh": is_market_data_fresh,
                     "is_market_data_display_ready": is_market_data_display_ready,
@@ -638,7 +653,10 @@ class OpportunityRuntimeService:
         left_price_value: float,
         right_price_value: float,
         has_required_funding_data: bool = True,
+        is_frozen: bool = False,
     ) -> int:
+        if is_frozen:
+            return self._STATUS_FROZEN
         if not has_market_data or not has_required_funding_data or left_price_value <= 0 or right_price_value <= 0:
             return self._STATUS_MISSING
         if not is_price_aligned:
@@ -649,6 +667,8 @@ class OpportunityRuntimeService:
 
     def _sort_priority_for_status(self, status_code: Any) -> int:
         normalized = int(status_code or self._STATUS_NORMAL)
+        if normalized == self._STATUS_FROZEN:
+            return 2
         return 1 if normalized in {self._STATUS_PRICE_GAP_TOO_LARGE, self._STATUS_MISSING} else 0
 
     def _filter_live_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -658,6 +678,7 @@ class OpportunityRuntimeService:
             if bool(row.get("has_market_data"))
             and bool(row.get("is_market_data_display_ready", row.get("is_market_data_fresh")))
             and bool(row.get("is_price_aligned", True))
+            and not bool(row.get("is_frozen"))
         ]
 
     def _prepare_display_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -668,9 +689,13 @@ class OpportunityRuntimeService:
             is_display_ready = bool(next_row.get("is_market_data_display_ready", next_row.get("is_market_data_fresh")))
             is_fresh = bool(next_row.get("is_market_data_fresh"))
             is_price_aligned = bool(next_row.get("is_price_aligned", True))
-            is_tradable = has_market_data and is_display_ready and is_fresh and is_price_aligned
+            is_frozen = bool(next_row.get("is_frozen"))
+            is_tradable = has_market_data and is_display_ready and is_fresh and is_price_aligned and not is_frozen
 
-            if is_tradable:
+            if is_frozen:
+                row_status = "frozen"
+                row_status_message = "指数类标的已冻结，不参与实时套利排序与执行"
+            elif is_tradable:
                 row_status = "live"
                 row_status_message = "实时数据正常"
             elif has_market_data and not is_display_ready:
@@ -752,6 +777,15 @@ class OpportunityRuntimeService:
         if value is None:
             return "--"
         return value.strftime("%H:%M:%S")
+
+    def _is_frozen_symbol(self, *values: Any) -> bool:
+        for value in values:
+            normalized = str(value or "").strip().upper()
+            if not normalized:
+                continue
+            if normalized in {"ALL", "ALL/USDT", "ALLUSDT", "ALL/USDT:USDT"}:
+                return True
+        return False
 
     def _market_code_from_label(self, label: str) -> str:
         normalized = str(label or "").strip().lower()
