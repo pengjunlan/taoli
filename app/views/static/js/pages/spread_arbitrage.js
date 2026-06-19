@@ -1,8 +1,9 @@
-import { createLiveSocket } from "../core/live-socket.js";
+﻿import { createLiveSocket } from "../core/live-socket.js";
 import { bindPrototypeActions } from "../core/prototype.js";
 import { bindLogoutAction, showToast } from "../core/utils.js";
 
 const PAGE_SIZE = 5;
+const BEIJING_TIME_ZONE = "Asia/Shanghai";
 
 let currentPage = 1;
 let latestRows = [];
@@ -14,6 +15,7 @@ let lockedRowKeys = [];
 let liveSocket = null;
 let activeSocketPage = 0;
 let requestToken = 0;
+let settlementClockHandle = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -45,11 +47,90 @@ async function getJson(url) {
   return data;
 }
 
+function toSettlementMs(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function formatSettlementCountdown(settlementAtMs) {
+  if (!Number.isFinite(settlementAtMs) || settlementAtMs <= 0) {
+    return "--";
+  }
+  const diffMs = Math.max(0, settlementAtMs - Date.now());
+  const totalSeconds = Math.floor(diffMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatSettlementTime(settlementAtMs) {
+  if (!Number.isFinite(settlementAtMs) || settlementAtMs <= 0) {
+    return "--";
+  }
+  const date = new Date(settlementAtMs);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`;
+}
+
+function getStatusMeta(statusCode) {
+  const normalized = Number(statusCode || 0);
+  if (normalized === 1) return { label: "正常", tone: "positive" };
+  if (normalized === 2) return { label: "数据过期", tone: "warning" };
+  if (normalized === 3) return { label: "价差过大", tone: "negative" };
+  if (normalized === 4) return { label: "数据缺失", tone: "neutral" };
+  return { label: "--", tone: "neutral" };
+}
+
+function renderSettlementCell(row) {
+  const buySettlementAtMs = toSettlementMs(row.buy_settlement_at_ms ?? row.settlement_at_ms);
+  const sellSettlementAtMs = toSettlementMs(row.sell_settlement_at_ms ?? row.settlement_at_ms);
+  const buySettlementAttr = buySettlementAtMs ? ` data-settlement-ms="${buySettlementAtMs}"` : "";
+  const sellSettlementAttr = sellSettlementAtMs ? ` data-settlement-ms="${sellSettlementAtMs}"` : "";
+  return `
+    <div class="pair-cell pair-cell--hedge">
+      <div class="spread-symbol"${buySettlementAttr}>
+        <strong class="pair-cell__line pair-cell__line--hedge is-positive" data-settlement-countdown>${escapeHtml(formatSettlementCountdown(buySettlementAtMs))}</strong>
+      </div>
+      <div class="spread-symbol"${sellSettlementAttr}>
+        <strong class="pair-cell__line pair-cell__line--hedge is-negative" data-settlement-countdown>${escapeHtml(formatSettlementCountdown(sellSettlementAtMs))}</strong>
+      </div>
+    </div>
+  `;
+}
+
+function renderSettlementTimeCell(row) {
+  const buySettlementAtMs = toSettlementMs(row.buy_settlement_at_ms ?? row.settlement_at_ms);
+  const sellSettlementAtMs = toSettlementMs(row.sell_settlement_at_ms ?? row.settlement_at_ms);
+  return `
+    <div class="pair-cell pair-cell--hedge">
+      <div class="spread-symbol">
+        <strong class="pair-cell__line pair-cell__line--hedge is-positive">${escapeHtml(formatSettlementTime(buySettlementAtMs))}</strong>
+      </div>
+      <div class="spread-symbol">
+        <strong class="pair-cell__line pair-cell__line--hedge is-negative">${escapeHtml(formatSettlementTime(sellSettlementAtMs))}</strong>
+      </div>
+    </div>
+  `;
+}
+
+function refreshSettlementCountdowns() {
+  document.querySelectorAll("[data-settlement-countdown][data-settlement-ms]").forEach((node) => {
+    const settlementAtMs = toSettlementMs(node.dataset.settlementMs);
+    if (!settlementAtMs) return;
+    node.textContent = formatSettlementCountdown(settlementAtMs);
+  });
+}
+
+function ensureSettlementClock() {
+  if (settlementClockHandle !== null) return;
+  settlementClockHandle = window.setInterval(refreshSettlementCountdowns, 1000);
+}
+
 function renderSpreadRows(rows) {
   if (!Array.isArray(rows) || !rows.length) {
     return `
       <tr class="table-empty-row">
-        <td colspan="12">
+        <td colspan="13">
           <div class="table-empty-state">
             <div class="table-empty-state__icon" aria-hidden="true"></div>
             <div class="table-empty-state__title">暂无可用价差机会</div>
@@ -65,7 +146,7 @@ function renderSpreadRows(rows) {
       (row) => `
         <tr data-row-key="${escapeHtml(row.market_pair_key || "")}">
           <td class="spread-rank">${escapeHtml(row.rank)}</td>
-          <td><span class="pill pill--positive">价差套利</span></td>
+          <td><span class="pill pill--${escapeHtml(getStatusMeta(row.status_code).tone)}">${escapeHtml(getStatusMeta(row.status_code).label)}</span></td>
           <td>
             <div class="spread-symbol">
               <strong>${escapeHtml(row.symbol)}</strong>
@@ -74,8 +155,8 @@ function renderSpreadRows(rows) {
           </td>
           <td>
             <div class="pair-cell pair-cell--spread">
-              <span class="pair-cell__line is-positive">买入 ${escapeHtml(row.symbol)}/USDT / ${escapeHtml(row.buy_exchange)}</span>
-              <span class="pair-cell__line is-negative">卖出 ${escapeHtml(row.symbol)}/USDT / ${escapeHtml(row.sell_exchange)}</span>
+              <span class="pair-cell__line is-positive">${escapeHtml(row.buy_exchange)}</span>
+              <span class="pair-cell__line is-negative">${escapeHtml(row.sell_exchange)}</span>
             </div>
           </td>
           <td>
@@ -92,20 +173,20 @@ function renderSpreadRows(rows) {
           </td>
           <td>
             <div class="pair-cell pair-cell--hedge">
-              <span class="pair-cell__line pair-cell__line--hedge is-positive">${escapeHtml(row.buy_exchange)} ${escapeHtml(row.avg_long)}</span>
-              <span class="pair-cell__line pair-cell__line--hedge is-negative">${escapeHtml(row.sell_exchange)} ${escapeHtml(row.avg_short)}</span>
+              <span class="pair-cell__line pair-cell__line--hedge is-positive">${escapeHtml(row.avg_long)}</span>
+              <span class="pair-cell__line pair-cell__line--hedge is-negative">${escapeHtml(row.avg_short)}</span>
             </div>
           </td>
           <td>
             <div class="pair-cell pair-cell--hedge">
-              <span class="pair-cell__line pair-cell__line--hedge is-positive">${escapeHtml(row.buy_exchange)} ${escapeHtml(row.buy_funding_rate)}</span>
-              <span class="pair-cell__line pair-cell__line--hedge is-negative">${escapeHtml(row.sell_exchange)} ${escapeHtml(row.sell_funding_rate)}</span>
+              <span class="pair-cell__line pair-cell__line--hedge is-positive">${escapeHtml(row.buy_funding_rate)}</span>
+              <span class="pair-cell__line pair-cell__line--hedge is-negative">${escapeHtml(row.sell_funding_rate)}</span>
             </div>
           </td>
           <td>
             <div class="pair-cell pair-cell--hedge">
-              <span class="pair-cell__line pair-cell__line--hedge is-positive">${escapeHtml(row.buy_exchange)} ${escapeHtml(row.buy_fee_rate)}</span>
-              <span class="pair-cell__line pair-cell__line--hedge is-negative">${escapeHtml(row.sell_exchange)} ${escapeHtml(row.sell_fee_rate)}</span>
+              <span class="pair-cell__line pair-cell__line--hedge is-positive">${escapeHtml(row.buy_fee_rate)}</span>
+              <span class="pair-cell__line pair-cell__line--hedge is-negative">${escapeHtml(row.sell_fee_rate)}</span>
             </div>
           </td>
           <td>
@@ -120,12 +201,8 @@ function renderSpreadRows(rows) {
               <span class="pair-cell__line pair-cell__line--hedge is-negative spread-metric--strong">${escapeHtml(row.value_short)}</span>
             </div>
           </td>
-          <td>
-            <div class="spread-symbol">
-              <strong class="spread-metric spread-metric--strong">${escapeHtml(row.opportunity_time)}</strong>
-              <span class="spread-symbol__hint">机会时间</span>
-            </div>
-          </td>
+          <td>${renderSettlementTimeCell(row)}</td>
+          <td>${renderSettlementCell(row)}</td>
         </tr>
       `,
     )
@@ -233,6 +310,7 @@ function renderCurrentPage() {
     bindPagination(pageCount);
   }
   updateRuntimeBanner(latestRuntimeStatus, latestDiagnostics);
+  refreshSettlementCountdowns();
 }
 
 function bindPagination(pageCount) {
@@ -349,12 +427,16 @@ async function reloadCurrentPage() {
 function startLiveUpdates() {
   liveSocket?.close();
   activeSocketPage = currentPage;
+  const query = {
+    page: currentPage,
+    page_size: PAGE_SIZE,
+  };
+  if (lockedRowKeys.length) {
+    query.keys = lockedRowKeys.join(",");
+  }
   liveSocket = createLiveSocket({
     channel: "spread",
-    query: {
-      page: currentPage,
-      page_size: PAGE_SIZE,
-    },
+    query,
     suppressErrorToast: true,
     onMessage(payload) {
       if (!payload?.success) return;
@@ -365,8 +447,13 @@ function startLiveUpdates() {
 
 bindPrototypeActions();
 bindLogoutAction();
+ensureSettlementClock();
 reloadCurrentPage();
 
 window.addEventListener("beforeunload", () => {
   liveSocket?.close();
+  if (settlementClockHandle !== null) {
+    window.clearInterval(settlementClockHandle);
+    settlementClockHandle = null;
+  }
 });

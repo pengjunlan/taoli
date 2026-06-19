@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime
@@ -44,6 +45,34 @@ class ExchangeWsTarget:
     ws_symbol: str
 
 
+@dataclass(frozen=True)
+class BackfillTaskSpec:
+    task_key: str
+    exchange_code: str
+    market_type: str
+    task_type: str
+    symbols: Tuple[str, ...]
+
+
+@dataclass
+class BackfillTaskState:
+    task_key: str
+    exchange_code: str
+    market_type: str
+    task_type: str
+    symbol_count: int = 0
+    is_running: bool = False
+    last_started_at: datetime | None = None
+    last_finished_at: datetime | None = None
+    last_success_at: datetime | None = None
+    last_error_at: datetime | None = None
+    last_duration_ms: int = 0
+    last_success_count: int = 0
+    last_missing_count: int = 0
+    last_error_message: str = ""
+    last_round_id: int = 0
+
+
 class MarketDataMonitorService:
     def __init__(self) -> None:
         self._thread: threading.Thread | None = None
@@ -54,11 +83,12 @@ class MarketDataMonitorService:
         self._market_sync_interval_seconds = 60 * 60
         self._ticker_refresh_interval_seconds = 15
         self._funding_refresh_interval_seconds = 15
+        self._backfill_schedule_interval_seconds = 15
+        self._backfill_heartbeat_interval_seconds = 3
+        self._backfill_request_timeout_seconds = 8
         self._ws_cycle_max_seconds = 300
         self._monitor_key = "market_data_monitor"
         self._backfill_monitor_key = "market_data_backfill_monitor"
-        self._ticker_batch_size = 15
-        self._funding_batch_size = 10
         self._enable_catalog_sync = False
         self._enable_http_ticker_backfill = True
         self._enable_http_funding_backfill = True
@@ -75,6 +105,14 @@ class MarketDataMonitorService:
         self._runtime_mode_notice_emitted = False
         self._last_missing_market_exchange_codes: tuple[str, ...] = ()
         self._last_watch_target_summary_signature: tuple[tuple[str, int], ...] = ()
+        self._backfill_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=8,
+            thread_name_prefix="market-backfill",
+        )
+        self._backfill_state_lock = threading.Lock()
+        self._backfill_futures: Dict[str, concurrent.futures.Future] = {}
+        self._backfill_task_states: Dict[str, BackfillTaskState] = {}
+        self._backfill_round_id = 0
 
     def start(self) -> None:
         with self._lock:
@@ -1330,6 +1368,14 @@ class MarketDataMonitorService:
                 pass
 
     def _fetch_public_funding_rates(self, *, exchange_code: str, symbols: List[str]) -> Dict[str, FundingRateCacheItem]:
+        if exchange_code == "bitget":
+            return self._fetch_bitget_swap_funding_rates(symbols)
+        if exchange_code == "gate":
+            return self._fetch_gate_swap_funding_rates(symbols)
+        if exchange_code == "okx":
+            return self._fetch_okx_swap_funding_rates(symbols)
+        if exchange_code == "binance":
+            return self._fetch_binance_swap_funding_rates(symbols)
         exchange = self._build_public_exchange(exchange_code=exchange_code, market_type="swap")
         try:
             if not exchange.has.get("fetchFundingRates"):
@@ -1358,6 +1404,116 @@ class MarketDataMonitorService:
                 exchange.close()
             except Exception:
                 pass
+
+    def _fetch_bitget_swap_funding_rates(self, symbols: List[str]) -> Dict[str, FundingRateCacheItem]:
+        if not symbols:
+            return {}
+        payload = self._http_get_json(
+            "https://api.bitget.com/api/v2/mix/market/current-fund-rate",
+            params={"productType": "USDT-FUTURES"},
+        )
+        rows = payload.get("data") if isinstance(payload, dict) else []
+        if not isinstance(rows, list):
+            return {}
+        target_symbols = set(symbols)
+        result: Dict[str, FundingRateCacheItem] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            symbol = self._normalize_rest_symbol("bitget", str(row.get("symbol") or row.get("instId") or ""))
+            if not symbol or symbol not in target_symbols:
+                continue
+            next_funding_at = self._parse_ws_datetime(row.get("nextUpdate")) if row.get("nextUpdate") else None
+            result[symbol] = FundingRateCacheItem(
+                exchange_code="bitget",
+                symbol=symbol,
+                funding_rate_percent=self._safe_float(row.get("fundingRate")) * 100,
+                next_funding_at=next_funding_at,
+                synced_at=self._parse_backfill_datetime(row.get("ts")),
+            )
+        return result
+
+    def _fetch_gate_swap_funding_rates(self, symbols: List[str]) -> Dict[str, FundingRateCacheItem]:
+        if not symbols:
+            return {}
+        payload = self._http_get_json(
+            "https://api.gateio.ws/api/v4/futures/usdt/contracts",
+        )
+        rows = payload if isinstance(payload, list) else []
+        target_symbols = set(symbols)
+        result: Dict[str, FundingRateCacheItem] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            symbol = self._normalize_rest_symbol("gate", str(row.get("name") or row.get("contract") or ""))
+            if not symbol or symbol not in target_symbols:
+                continue
+            next_funding_at = self._parse_backfill_datetime(row.get("funding_next_apply")) if row.get("funding_next_apply") else None
+            result[symbol] = FundingRateCacheItem(
+                exchange_code="gate",
+                symbol=symbol,
+                funding_rate_percent=self._safe_float(row.get("funding_rate")) * 100,
+                next_funding_at=next_funding_at,
+                synced_at=datetime.now(),
+            )
+        return result
+
+    def _fetch_okx_swap_funding_rates(self, symbols: List[str]) -> Dict[str, FundingRateCacheItem]:
+        if not symbols:
+            return {}
+        exchange = self._build_public_exchange(exchange_code="okx", market_type="swap")
+        try:
+            if not exchange.has.get("fetchFundingRates"):
+                return {}
+            rows = exchange.fetch_funding_rates(symbols)
+        finally:
+            try:
+                exchange.close()
+            except Exception:
+                pass
+        result: Dict[str, FundingRateCacheItem] = {}
+        for symbol, item in rows.items():
+            row = item or {}
+            normalized_symbol = str(row.get("symbol") or symbol or "")
+            if not normalized_symbol:
+                continue
+            next_funding_timestamp = row.get("nextFundingTimestamp")
+            next_funding_at = (
+                datetime.fromtimestamp(next_funding_timestamp / 1000)
+                if next_funding_timestamp
+                else None
+            )
+            result[normalized_symbol] = FundingRateCacheItem(
+                exchange_code="okx",
+                symbol=normalized_symbol,
+                funding_rate_percent=float(row.get("fundingRate") or 0) * 100,
+                next_funding_at=next_funding_at,
+                synced_at=datetime.now(),
+            )
+        return result
+
+    def _fetch_binance_swap_funding_rates(self, symbols: List[str]) -> Dict[str, FundingRateCacheItem]:
+        if not symbols:
+            return {}
+        payload = self._http_get_json("https://fapi.binance.com/fapi/v1/premiumIndex")
+        rows = payload if isinstance(payload, list) else [payload] if isinstance(payload, dict) else []
+        target_symbols = set(symbols)
+        result: Dict[str, FundingRateCacheItem] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            symbol = self._normalize_rest_symbol("binance", str(row.get("symbol") or ""))
+            if not symbol or symbol not in target_symbols:
+                continue
+            next_funding_at = self._parse_ws_datetime(row.get("nextFundingTime")) if row.get("nextFundingTime") else None
+            result[symbol] = FundingRateCacheItem(
+                exchange_code="binance",
+                symbol=symbol,
+                funding_rate_percent=self._safe_float(row.get("lastFundingRate")) * 100,
+                next_funding_at=next_funding_at,
+                synced_at=datetime.now(),
+            )
+        return result
 
     def _fetch_public_funding_rate(self, *, exchange_code: str, symbol: str) -> FundingRateCacheItem | None:
         exchange = self._build_public_exchange(exchange_code=exchange_code, market_type="swap")
@@ -1482,7 +1638,7 @@ class MarketDataMonitorService:
         exchange_class = getattr(ccxt, exchange_class_name)
         params = {
             "enableRateLimit": True,
-            "timeout": 20000,
+            "timeout": max(1000, int(self._backfill_request_timeout_seconds * 1000)),
             "options": {
                 "defaultType": self._resolve_default_type(exchange_code=exchange_code, market_type=market_type),
             },
@@ -1561,6 +1717,291 @@ class MarketDataMonitorService:
             except ValueError:
                 return datetime.now()
         return self._parse_ws_datetime(value)
+
+    def _run_backfill_loop(self) -> None:
+        next_dispatch_monotonic = time.monotonic()
+        last_heartbeat_monotonic = 0.0
+        while True:
+            try:
+                self._collect_completed_backfill_tasks()
+                current_monotonic = time.monotonic()
+                if current_monotonic - last_heartbeat_monotonic >= self._backfill_heartbeat_interval_seconds:
+                    monitor_center_service.heartbeat(
+                        self._backfill_monitor_key,
+                        status="running",
+                        detail=self._build_backfill_monitor_detail(),
+                    )
+                    last_heartbeat_monotonic = current_monotonic
+
+                if current_monotonic >= next_dispatch_monotonic:
+                    self._dispatch_backfill_round()
+                    while next_dispatch_monotonic <= current_monotonic:
+                        next_dispatch_monotonic += self._backfill_schedule_interval_seconds
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Backfill side loop failed: %s", exc)
+                monitor_center_service.mark_error(
+                    self._backfill_monitor_key,
+                    f"行情回补异常: {exc}",
+                )
+                monitor_center_service.add_log(
+                    self._backfill_monitor_key,
+                    "warning",
+                    f"行情回补异常: {exc}",
+                )
+            time.sleep(0.5)
+
+    def _dispatch_backfill_round(self) -> None:
+        if self._enable_catalog_sync:
+            self._try_market_catalog_sync()
+
+        targets = self._collect_backfill_targets()
+        specs = self._build_backfill_task_specs(targets)
+        if not specs:
+            monitor_center_service.add_log(
+                self._backfill_monitor_key,
+                "warning",
+                "行情补位本轮没有可用的永续合约目标，已跳过调度",
+            )
+            return
+
+        self._backfill_round_id += 1
+        round_id = self._backfill_round_id
+        dispatched_count = 0
+        skipped_count = 0
+        now = datetime.now()
+
+        with self._backfill_state_lock:
+            for spec in specs:
+                existing_future = self._backfill_futures.get(spec.task_key)
+                if existing_future is not None and not existing_future.done():
+                    skipped_count += 1
+                    continue
+
+                state = self._ensure_backfill_task_state(spec)
+                state.symbol_count = len(spec.symbols)
+                state.is_running = True
+                state.last_started_at = now
+                state.last_finished_at = None
+                state.last_error_message = ""
+                state.last_round_id = round_id
+                future = self._backfill_executor.submit(self._run_backfill_task, spec)
+                self._backfill_futures[spec.task_key] = future
+                dispatched_count += 1
+
+        monitor_center_service.add_log(
+            self._backfill_monitor_key,
+            "info",
+            (
+                f"补位第 {round_id} 轮已调度 {dispatched_count}/{len(specs)} 个任务"
+                + (f"，跳过 {skipped_count} 个仍在运行中的任务" if skipped_count > 0 else "")
+            ),
+        )
+
+    def _build_backfill_task_specs(self, targets: List[WatchTarget]) -> List[BackfillTaskSpec]:
+        ticker_groups: Dict[tuple[str, str], List[str]] = {}
+        funding_groups: Dict[str, List[str]] = {}
+
+        for item in targets:
+            ticker_groups.setdefault((item.exchange_code, item.market_type), []).append(str(item.symbol))
+            if item.market_type == "swap":
+                funding_groups.setdefault(item.exchange_code, []).append(str(item.symbol))
+
+        specs: List[BackfillTaskSpec] = []
+        if self._enable_http_ticker_backfill:
+            for (exchange_code, market_type), symbols in sorted(ticker_groups.items()):
+                specs.append(
+                    BackfillTaskSpec(
+                        task_key=f"{exchange_code}:{market_type}:ticker",
+                        exchange_code=exchange_code,
+                        market_type=market_type,
+                        task_type="ticker",
+                        symbols=tuple(sorted(set(symbols))),
+                    )
+                )
+        if self._enable_http_funding_backfill:
+            for exchange_code, symbols in sorted(funding_groups.items()):
+                specs.append(
+                    BackfillTaskSpec(
+                        task_key=f"{exchange_code}:swap:funding",
+                        exchange_code=exchange_code,
+                        market_type="swap",
+                        task_type="funding",
+                        symbols=tuple(sorted(set(symbols))),
+                    )
+                )
+        return specs
+
+    def _run_backfill_task(self, spec: BackfillTaskSpec) -> Dict[str, int | str]:
+        started_monotonic = time.monotonic()
+        if spec.task_type == "ticker":
+            result = self._refresh_exchange_tickers(
+                exchange_code=spec.exchange_code,
+                market_type=spec.market_type,
+                symbols=list(spec.symbols),
+            )
+        else:
+            result = self._refresh_exchange_funding_rates(
+                exchange_code=spec.exchange_code,
+                symbols=list(spec.symbols),
+            )
+        duration_ms = int((time.monotonic() - started_monotonic) * 1000)
+        return {
+            **result,
+            "duration_ms": duration_ms,
+            "task_key": spec.task_key,
+            "task_type": spec.task_type,
+            "exchange_code": spec.exchange_code,
+        }
+
+    def _collect_completed_backfill_tasks(self) -> None:
+        completed: List[tuple[str, concurrent.futures.Future]] = []
+        with self._backfill_state_lock:
+            for task_key, future in list(self._backfill_futures.items()):
+                if future.done():
+                    completed.append((task_key, future))
+                    self._backfill_futures.pop(task_key, None)
+
+        for task_key, future in completed:
+            state = self._backfill_task_states.get(task_key)
+            now = datetime.now()
+            if state is None:
+                continue
+            state.is_running = False
+            state.last_finished_at = now
+            try:
+                result = future.result()
+                state.last_duration_ms = int(result.get("duration_ms") or 0)
+                state.last_success_count = int(result.get("success_count") or 0)
+                state.last_missing_count = int(result.get("missing_count") or 0)
+                state.last_success_at = now
+                state.last_error_message = ""
+            except Exception as exc:  # noqa: BLE001
+                state.last_duration_ms = 0
+                state.last_error_at = now
+                state.last_error_message = str(exc)
+                monitor_center_service.add_log(
+                    self._backfill_monitor_key,
+                    "warning",
+                    f"{task_key} 补位任务执行异常: {exc}",
+                )
+
+    def _ensure_backfill_task_state(self, spec: BackfillTaskSpec) -> BackfillTaskState:
+        state = self._backfill_task_states.get(spec.task_key)
+        if state is not None:
+            return state
+        state = BackfillTaskState(
+            task_key=spec.task_key,
+            exchange_code=spec.exchange_code,
+            market_type=spec.market_type,
+            task_type=spec.task_type,
+        )
+        self._backfill_task_states[spec.task_key] = state
+        return state
+
+    def _build_backfill_monitor_detail(self) -> str:
+        with self._backfill_state_lock:
+            states = list(self._backfill_task_states.values())
+        if not states:
+            return "行情补位线程已启动，等待首轮调度"
+
+        running_count = sum(1 for item in states if item.is_running)
+        success_count = sum(1 for item in states if item.last_success_at is not None)
+        samples: List[str] = []
+        for item in sorted(states, key=lambda row: (row.exchange_code, row.task_type))[:4]:
+            samples.append(f"{item.exchange_code}-{item.task_type}:{item.last_success_count}/{item.symbol_count}")
+        sample_text = " | ".join(samples) if samples else "暂无样例"
+        return f"补位轮次 {self._backfill_round_id}，运行中 {running_count}，最近成功任务 {success_count}，{sample_text}"
+
+    def _refresh_exchange_tickers(
+        self,
+        *,
+        exchange_code: str,
+        market_type: str,
+        symbols: List[str],
+    ) -> Dict[str, int | str]:
+        unique_symbols = sorted(set(str(item) for item in symbols if str(item)))
+        if not unique_symbols:
+            return {"success_count": 0, "missing_count": 0}
+
+        batch = self._fetch_public_tickers(
+            exchange_code=exchange_code,
+            market_type=market_type,
+            symbols=unique_symbols,
+        )
+        for symbol, ticker_data in batch.items():
+            if symbol not in unique_symbols:
+                continue
+            market_runtime_cache.set_ticker(ticker_data)
+
+        success_count = len(batch)
+        missing_count = max(0, len(unique_symbols) - success_count)
+        monitor_center_service.add_log(
+            self._backfill_monitor_key,
+            "info",
+            (
+                f"{exchange_code} Ticker 回补 {success_count}/{len(unique_symbols)} 条"
+                + self._format_ticker_samples(batch)
+            ),
+        )
+        if missing_count > 0:
+            monitor_center_service.add_log(
+                self._backfill_monitor_key,
+                "warning",
+                f"{exchange_code} Ticker 批量返回缺失 {missing_count} 条",
+            )
+        return {"success_count": success_count, "missing_count": missing_count}
+
+    def _refresh_exchange_funding_rates(
+        self,
+        *,
+        exchange_code: str,
+        symbols: List[str],
+    ) -> Dict[str, int | str]:
+        unique_symbols = sorted(set(str(item) for item in symbols if str(item)))
+        if not unique_symbols:
+            return {"success_count": 0, "missing_count": 0}
+
+        batch = self._fetch_public_funding_rates(
+            exchange_code=exchange_code,
+            symbols=unique_symbols,
+        )
+        for symbol, funding_data in batch.items():
+            if symbol not in unique_symbols:
+                continue
+            market_runtime_cache.set_funding_rate(funding_data)
+
+        success_count = len(batch)
+        missing_count = max(0, len(unique_symbols) - success_count)
+        monitor_center_service.add_log(
+            self._backfill_monitor_key,
+            "info",
+            (
+                f"{exchange_code} 资金费回补 {success_count}/{len(unique_symbols)} 条"
+                + self._format_funding_samples(batch)
+            ),
+        )
+        if missing_count > 0:
+            monitor_center_service.add_log(
+                self._backfill_monitor_key,
+                "warning",
+                f"{exchange_code} 资金费批量返回缺失 {missing_count} 条",
+            )
+        return {"success_count": success_count, "missing_count": missing_count}
+
+    def _http_get_json(self, url: str, *, params: Dict[str, object] | None = None):
+        query = urlencode({key: value for key, value in (params or {}).items() if value not in (None, "")})
+        final_url = f"{url}?{query}" if query else url
+        request = Request(
+            final_url,
+            headers={
+                "User-Agent": "ArbiMatrix/1.0",
+                "Accept": "application/json",
+            },
+            method="GET",
+        )
+        with urlopen(request, timeout=self._backfill_request_timeout_seconds) as response:
+            body = response.read().decode("utf-8")
+        return json.loads(body)
 
 
 market_data_monitor_service = MarketDataMonitorService()

@@ -198,11 +198,13 @@ class MarketSyncService:
         generated_at = datetime.now()
         pairs: List[Dict[str, Any]] = []
         for (symbol_key, _settle_asset, _contract_type), items in grouped.items():
-            ordered = sorted(items, key=lambda item: str(item.get("exchange_code") or ""))
+            ordered = self._dedupe_pair_markets(items)
             for left_index in range(len(ordered)):
                 for right_index in range(left_index + 1, len(ordered)):
                     left = ordered[left_index]
                     right = ordered[right_index]
+                    if str(left.get("exchange_code") or "") == str(right.get("exchange_code") or ""):
+                        continue
                     pair_key = f"funding:{left['exchange_code']}:{right['exchange_code']}:{symbol_key}"
                     pairs.append(
                         {
@@ -246,11 +248,13 @@ class MarketSyncService:
         generated_at = datetime.now()
         pairs: List[Dict[str, Any]] = []
         for (symbol_key, _settle_asset, _contract_type), items in grouped.items():
-            ordered = sorted(items, key=lambda item: str(item.get("exchange_code") or ""))
+            ordered = self._dedupe_pair_markets(items)
             for left_index in range(len(ordered)):
                 for right_index in range(left_index + 1, len(ordered)):
                     left = ordered[left_index]
                     right = ordered[right_index]
+                    if str(left.get("exchange_code") or "") == str(right.get("exchange_code") or ""):
+                        continue
                     pair_key = f"spread:swap:{left['exchange_code']}:{right['exchange_code']}:{symbol_key}"
                     pairs.append(
                         {
@@ -305,6 +309,29 @@ class MarketSyncService:
             "XBT": "BTC",
         }
         return aliases.get(asset, asset)
+
+    def _dedupe_pair_markets(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        deduped_map: Dict[tuple[str, str, str, str], Dict[str, Any]] = {}
+        for row in rows:
+            exchange_code = str(row.get("exchange_code") or "").strip().lower()
+            symbol_normalized = str(row.get("symbol_normalized") or "").strip().upper()
+            settle_asset = str(row.get("settle_asset") or "").strip().upper()
+            market_type = str(row.get("market_type") or "").strip().lower()
+            symbol = str(row.get("symbol") or "").strip()
+            if not exchange_code or not symbol_normalized or not settle_asset or not market_type or not symbol:
+                continue
+            dedupe_key = (exchange_code, symbol_normalized, settle_asset, market_type)
+            existing = deduped_map.get(dedupe_key)
+            if existing is None or symbol < str(existing.get("symbol") or ""):
+                deduped_map[dedupe_key] = row
+
+        return sorted(
+            deduped_map.values(),
+            key=lambda item: (
+                str(item.get("exchange_code") or ""),
+                str(item.get("symbol") or ""),
+            ),
+        )
 
 
 market_sync_service = MarketSyncService()

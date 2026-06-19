@@ -7,7 +7,7 @@ import threading
 import time
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from app.application.services.market_sync_service import market_sync_service
@@ -21,20 +21,26 @@ from app.shared.utils.formatters import format_countdown, format_percent, format
 
 
 logger = logging.getLogger(__name__)
+BEIJING_TZ = timezone(timedelta(hours=8))
 
 
 class OpportunityRuntimeService:
     _PUBLIC_SNAPSHOT_INTERVAL_SECONDS = 30 * 60
     _STRATEGY_SNAPSHOT_INTERVAL_SECONDS = 30 * 60
+    _STATUS_NORMAL = 1
+    _STATUS_STALE = 2
+    _STATUS_PRICE_GAP_TOO_LARGE = 3
+    _STATUS_MISSING = 4
 
     def __init__(self) -> None:
         self._started = False
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._interval_seconds = 1
+        self._status_stale_seconds = 60
         self._market_data_execution_stale_seconds = 150
         self._market_data_display_stale_seconds = 15 * 60
-        self._max_cross_exchange_price_gap_percent = 15.0
+        self._max_cross_exchange_price_gap_percent = 20.0
         self._monitor_key = "opportunity_runtime_sync"
         self._last_public_snapshot_hashes: Dict[str, str] = {}
         self._last_public_snapshot_persisted_at: Dict[str, datetime] = {}
@@ -271,12 +277,35 @@ class OpportunityRuntimeService:
                 else 0.0
             )
             is_price_aligned = has_market_data and cross_exchange_price_gap_percent <= self._max_cross_exchange_price_gap_percent
+            status_code = self._resolve_status_code(
+                has_market_data=has_market_data,
+                is_status_data_fresh=self._is_market_data_fresh(
+                    left_ticker=left_ticker,
+                    right_ticker=right_ticker,
+                    left_funding=left_funding,
+                    right_funding=right_funding,
+                    stale_seconds=self._status_stale_seconds,
+                ),
+                is_price_aligned=is_price_aligned,
+                left_price_value=long_price_value,
+                right_price_value=short_price_value,
+                has_required_funding_data=left_funding is not None and right_funding is not None,
+            )
 
-            next_funding_at = None
-            if left_funding is not None:
-                next_funding_at = left_funding.next_funding_at
-            if next_funding_at is None and right_funding is not None:
-                next_funding_at = right_funding.next_funding_at
+            next_funding_at = self._resolve_next_settlement_at(
+                left_funding.next_funding_at if left_funding is not None else None,
+                right_funding.next_funding_at if right_funding is not None else None,
+            )
+            long_settlement_at = (
+                right_funding.next_funding_at
+                if left_is_short_leg and right_funding is not None
+                else left_funding.next_funding_at if left_funding is not None else None
+            )
+            short_settlement_at = (
+                left_funding.next_funding_at
+                if left_is_short_leg and left_funding is not None
+                else right_funding.next_funding_at if right_funding is not None else None
+            )
             settlement = self._format_remaining(next_funding_at)
 
             result.append(
@@ -330,6 +359,11 @@ class OpportunityRuntimeService:
                     "avg_long": self._format_price(long_price_value),
                     "avg_short": self._format_price(short_price_value),
                     "settlement": settlement if has_market_data else "--",
+                    "settlement_at": self._format_beijing_datetime(next_funding_at) if has_market_data else "--",
+                    "settlement_at_ms": self._to_epoch_milliseconds(next_funding_at) if has_market_data else None,
+                    "long_settlement_at_ms": self._to_epoch_milliseconds(long_settlement_at) if has_market_data else None,
+                    "short_settlement_at_ms": self._to_epoch_milliseconds(short_settlement_at) if has_market_data else None,
+                    "status_code": status_code,
                     "has_market_data": has_market_data,
                     "is_market_data_fresh": is_market_data_fresh,
                     "is_market_data_display_ready": is_market_data_display_ready,
@@ -436,6 +470,41 @@ class OpportunityRuntimeService:
             left_funding = market_runtime_cache.get_funding_rate(left_exchange_code, str(pair["left_symbol"]))
             right_funding = market_runtime_cache.get_funding_rate(right_exchange_code, str(pair["right_symbol"]))
             has_funding_data = left_funding is not None and right_funding is not None
+            funding_display_ready = self._is_market_data_fresh(
+                left_ticker=None,
+                right_ticker=None,
+                left_funding=left_funding,
+                right_funding=right_funding,
+                stale_seconds=self._market_data_display_stale_seconds,
+            ) if has_funding_data else False
+            status_code = self._resolve_status_code(
+                has_market_data=has_market_data,
+                is_status_data_fresh=self._is_market_data_fresh(
+                    left_ticker=left_ticker,
+                    right_ticker=right_ticker,
+                    left_funding=left_funding,
+                    right_funding=right_funding,
+                    stale_seconds=self._status_stale_seconds,
+                ),
+                is_price_aligned=is_price_aligned,
+                left_price_value=buy_price_value,
+                right_price_value=sell_price_value,
+                has_required_funding_data=has_funding_data,
+            )
+            next_funding_at = self._resolve_next_settlement_at(
+                left_funding.next_funding_at if left_funding is not None else None,
+                right_funding.next_funding_at if right_funding is not None else None,
+            )
+            buy_settlement_at = (
+                left_funding.next_funding_at
+                if left_is_buy_leg and left_funding is not None
+                else right_funding.next_funding_at if right_funding is not None else None
+            )
+            sell_settlement_at = (
+                right_funding.next_funding_at
+                if left_is_buy_leg and right_funding is not None
+                else left_funding.next_funding_at if left_funding is not None else None
+            )
             funding_diff_percent = (
                 abs(left_funding.funding_rate_percent - right_funding.funding_rate_percent)
                 if has_funding_data
@@ -494,6 +563,11 @@ class OpportunityRuntimeService:
                     "avg_long": self._format_price(buy_price_value),
                     "avg_short": self._format_price(sell_price_value),
                     "opportunity_time": self._format_datetime(left_ticker.synced_at or right_ticker.synced_at) if has_market_data and left_ticker is not None and right_ticker is not None else "--",
+                    "settlement_at": self._format_beijing_datetime(next_funding_at) if next_funding_at is not None else "--",
+                    "settlement_at_ms": self._to_epoch_milliseconds(next_funding_at),
+                    "buy_settlement_at_ms": self._to_epoch_milliseconds(buy_settlement_at),
+                    "sell_settlement_at_ms": self._to_epoch_milliseconds(sell_settlement_at),
+                    "status_code": status_code,
                     "has_market_data": has_market_data,
                     "is_market_data_fresh": is_market_data_fresh,
                     "is_market_data_display_ready": is_market_data_display_ready,
@@ -505,7 +579,13 @@ class OpportunityRuntimeService:
         return self._finalize_rows(result)
 
     def _finalize_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        ordered = sorted(rows, key=lambda item: item["rank_sort"], reverse=True)
+        ordered = sorted(
+            rows,
+            key=lambda item: (
+                self._sort_priority_for_status(item.get("status_code")),
+                -float(item.get("rank_sort") or 0),
+            ),
+        )
         for index, row in enumerate(ordered, start=1):
             row["rank"] = index
             row.pop("rank_sort", None)
@@ -532,6 +612,28 @@ class OpportunityRuntimeService:
         if high_price <= 0 or low_price <= 0:
             return 0.0
         return abs((high_price - low_price) / low_price) * 100
+
+    def _resolve_status_code(
+        self,
+        *,
+        has_market_data: bool,
+        is_status_data_fresh: bool,
+        is_price_aligned: bool,
+        left_price_value: float,
+        right_price_value: float,
+        has_required_funding_data: bool = True,
+    ) -> int:
+        if not has_market_data or not has_required_funding_data or left_price_value <= 0 or right_price_value <= 0:
+            return self._STATUS_MISSING
+        if not is_status_data_fresh:
+            return self._STATUS_STALE
+        if not is_price_aligned:
+            return self._STATUS_PRICE_GAP_TOO_LARGE
+        return self._STATUS_NORMAL
+
+    def _sort_priority_for_status(self, status_code: Any) -> int:
+        normalized = int(status_code or self._STATUS_NORMAL)
+        return 1 if normalized in {self._STATUS_PRICE_GAP_TOO_LARGE, self._STATUS_MISSING} else 0
 
     def _filter_live_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         return [
@@ -602,6 +704,23 @@ class OpportunityRuntimeService:
             return "--"
         seconds = int((next_funding_at - datetime.now()).total_seconds())
         return format_countdown(max(seconds, 0))
+
+    def _resolve_next_settlement_at(self, *values: datetime | None) -> datetime | None:
+        candidates = [value for value in values if isinstance(value, datetime)]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda item: item.timestamp())
+
+    def _format_beijing_datetime(self, value: datetime | None) -> str:
+        if value is None:
+            return "--"
+        beijing_time = datetime.fromtimestamp(value.timestamp(), tz=BEIJING_TZ)
+        return beijing_time.strftime("%Y-%m-%d %H:%M:%S")
+
+    def _to_epoch_milliseconds(self, value: datetime | None) -> int | None:
+        if value is None:
+            return None
+        return int(value.timestamp() * 1000)
 
     def _format_price(self, price: float) -> str:
         if price >= 1000:

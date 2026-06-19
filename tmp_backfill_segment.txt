@@ -1,0 +1,31 @@
+    def _run_backfill_loop(self) -> None:
+        while True:
+            try:
+                monitor_center_service.heartbeat(
+                    self._backfill_monitor_key,
+                    status="running",
+                    detail="正在执行每分�?tick / 资金费回�?,
+                )
+                if self._enable_catalog_sync:
+                    self._try_market_catalog_sync()
+                targets = self._collect_backfill_targets()
+                if targets and self._enable_http_ticker_backfill:
+                    self._refresh_public_tickers_if_needed(targets)
+                if targets and self._enable_http_funding_backfill:
+                    self._refresh_public_funding_rates_if_needed(targets)
+                monitor_center_service.mark_success(
+                    self._backfill_monitor_key,
+                    "每分�?tick / 资金费回补已执行完成",
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Backfill side loop failed: %s", exc)
+                monitor_center_service.mark_error(
+                    self._backfill_monitor_key,
+                    f"行情回补异常: {exc}",
+                )
+                monitor_center_service.add_log(
+                    self._backfill_monitor_key,
+                    "warning",
+                    f"行情回补异常: {exc}",
+                )
+            time.sleep(self._funding_refresh_interval_seconds)

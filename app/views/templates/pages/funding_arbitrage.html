@@ -1,4 +1,4 @@
-{% extends 'base/layout.html' %}
+﻿{% extends 'base/layout.html' %}
 
 {% block content %}
 <div class="shell-container page-stack">
@@ -34,7 +34,7 @@
                 <thead>
                     <tr>
                         <th>排名</th>
-                        <th>类型</th>
+                        <th>状态</th>
                         <th>币种</th>
                         <th>套利组合</th>
                         <th>价差率</th>
@@ -44,12 +44,13 @@
                         <th>交易手续费</th>
                         <th>持仓数量</th>
                         <th>持仓市值</th>
-                        <th>关键字段</th>
+                        <th>结算时间</th>
+                        <th>结算计时</th>
                     </tr>
                 </thead>
                 <tbody data-funding-table-body>
                     <tr class="table-empty-row">
-                        <td colspan="12" class="spread-metric">加载中...</td>
+                        <td colspan="13" class="spread-metric">加载中...</td>
                     </tr>
                 </tbody>
             </table>
