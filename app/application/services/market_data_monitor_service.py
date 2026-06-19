@@ -52,6 +52,8 @@ class BackfillTaskSpec:
     market_type: str
     task_type: str
     symbols: Tuple[str, ...]
+    chunk_index: int = 1
+    chunk_total: int = 1
 
 
 @dataclass
@@ -86,6 +88,12 @@ class MarketDataMonitorService:
         self._backfill_schedule_interval_seconds = 15
         self._backfill_heartbeat_interval_seconds = 3
         self._backfill_request_timeout_seconds = 8
+        self._backfill_ticker_chunk_size = 120
+        self._backfill_funding_chunk_size = 80
+        self._backfill_bitget_ticker_chunk_size = 40
+        self._backfill_bitget_funding_chunk_size = 30
+        self._backfill_bitget_retry_attempts = 3
+        self._backfill_bitget_retry_delay_seconds = 0.5
         self._ws_cycle_max_seconds = 300
         self._monitor_key = "market_data_monitor"
         self._backfill_monitor_key = "market_data_backfill_monitor"
@@ -325,23 +333,46 @@ class MarketDataMonitorService:
             return []
 
         backfill_targets: Dict[Tuple[str, str, str], WatchTarget] = {}
-        market_rows = market_repository.list_active_markets(
-            exchange_codes=enabled_exchange_codes,
-            market_type="swap",
-        )
-        for row in market_rows:
-            exchange_code = str(row.get("exchange_code") or "")
-            market_type = str(row.get("market_type") or "")
-            symbol = str(row.get("symbol") or "")
-            if not exchange_code or market_type != "swap" or not symbol:
-                continue
-            if not is_u_margin_linear_swap_market(row):
-                continue
-            backfill_targets[(exchange_code, market_type, symbol)] = WatchTarget(
-                exchange_code=exchange_code,
-                market_type=market_type,
-                symbol=symbol,
+        for row in market_repository.list_active_pairs():
+            legs = (
+                (
+                    str(row.get("left_exchange_code") or "").strip(),
+                    str(row.get("left_market_type") or "").strip(),
+                    str(row.get("left_symbol") or "").strip(),
+                ),
+                (
+                    str(row.get("right_exchange_code") or "").strip(),
+                    str(row.get("right_market_type") or "").strip(),
+                    str(row.get("right_symbol") or "").strip(),
+                ),
             )
+            for exchange_code, market_type, symbol in legs:
+                if exchange_code not in enabled_exchange_codes or market_type != "swap" or not symbol:
+                    continue
+                backfill_targets[(exchange_code, market_type, symbol)] = WatchTarget(
+                    exchange_code=exchange_code,
+                    market_type=market_type,
+                    symbol=symbol,
+                )
+
+        if not backfill_targets:
+            market_rows = market_repository.list_active_markets(
+                exchange_codes=enabled_exchange_codes,
+                market_type="swap",
+            )
+            for row in market_rows:
+                exchange_code = str(row.get("exchange_code") or "")
+                market_type = str(row.get("market_type") or "")
+                symbol = str(row.get("symbol") or "")
+                if not exchange_code or market_type != "swap" or not symbol:
+                    continue
+                if not is_u_margin_linear_swap_market(row):
+                    continue
+                backfill_targets[(exchange_code, market_type, symbol)] = WatchTarget(
+                    exchange_code=exchange_code,
+                    market_type=market_type,
+                    symbol=symbol,
+                )
 
         return sorted(
             backfill_targets.values(),
@@ -1200,34 +1231,45 @@ class MarketDataMonitorService:
     def _fetch_bitget_swap_tickers(self, symbols: List[str]) -> Dict[str, TickerCacheItem]:
         if not symbols:
             return {}
-        payload = self._http_get_json(
-            "https://api.bitget.com/api/v2/mix/market/tickers",
-            params={"productType": "USDT-FUTURES"},
-        )
-        rows = payload.get("data") if isinstance(payload, dict) else []
-        if not isinstance(rows, list):
-            return {}
-        target_symbols = set(symbols)
-        result: Dict[str, TickerCacheItem] = {}
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            symbol = self._normalize_rest_symbol("bitget", str(row.get("symbol") or row.get("instId") or ""))
-            if not symbol or symbol not in target_symbols:
-                continue
-            ticker = self._build_ticker_from_values(
-                exchange_code="bitget",
-                market_type="swap",
-                symbol=symbol,
-                last_price=self._safe_float(row.get("lastPr")),
-                bid_price=self._safe_float(row.get("bidPr"), row.get("lastPr")),
-                ask_price=self._safe_float(row.get("askPr"), row.get("lastPr")),
-                quote_volume=self._safe_float(row.get("quoteVolume"), row.get("usdtVolume")),
-                synced_at=self._parse_backfill_datetime(row.get("ts")),
-            )
-            if ticker is not None:
-                result[symbol] = ticker
-        return result
+        last_error: Exception | None = None
+        for attempt in range(1, self._backfill_bitget_retry_attempts + 1):
+            try:
+                payload = self._http_get_json(
+                    "https://api.bitget.com/api/v2/mix/market/tickers",
+                    params={"productType": "USDT-FUTURES"},
+                )
+                rows = payload.get("data") if isinstance(payload, dict) else []
+                if not isinstance(rows, list):
+                    return {}
+                target_symbols = set(symbols)
+                result: Dict[str, TickerCacheItem] = {}
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    symbol = self._normalize_rest_symbol("bitget", str(row.get("symbol") or row.get("instId") or ""))
+                    if not symbol or symbol not in target_symbols:
+                        continue
+                    ticker = self._build_ticker_from_values(
+                        exchange_code="bitget",
+                        market_type="swap",
+                        symbol=symbol,
+                        last_price=self._safe_float(row.get("lastPr")),
+                        bid_price=self._safe_float(row.get("bidPr"), row.get("lastPr")),
+                        ask_price=self._safe_float(row.get("askPr"), row.get("lastPr")),
+                        quote_volume=self._safe_float(row.get("quoteVolume"), row.get("usdtVolume")),
+                        synced_at=self._parse_backfill_datetime(row.get("ts")),
+                    )
+                    if ticker is not None:
+                        result[symbol] = ticker
+                return result
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                if attempt >= self._backfill_bitget_retry_attempts:
+                    break
+                time.sleep(self._backfill_bitget_retry_delay_seconds)
+        if last_error is not None:
+            raise last_error
+        return {}
 
     def _fetch_gate_swap_tickers(self, symbols: List[str]) -> Dict[str, TickerCacheItem]:
         if not symbols:
@@ -1408,30 +1450,41 @@ class MarketDataMonitorService:
     def _fetch_bitget_swap_funding_rates(self, symbols: List[str]) -> Dict[str, FundingRateCacheItem]:
         if not symbols:
             return {}
-        payload = self._http_get_json(
-            "https://api.bitget.com/api/v2/mix/market/current-fund-rate",
-            params={"productType": "USDT-FUTURES"},
-        )
-        rows = payload.get("data") if isinstance(payload, dict) else []
-        if not isinstance(rows, list):
-            return {}
-        target_symbols = set(symbols)
-        result: Dict[str, FundingRateCacheItem] = {}
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            symbol = self._normalize_rest_symbol("bitget", str(row.get("symbol") or row.get("instId") or ""))
-            if not symbol or symbol not in target_symbols:
-                continue
-            next_funding_at = self._parse_ws_datetime(row.get("nextUpdate")) if row.get("nextUpdate") else None
-            result[symbol] = FundingRateCacheItem(
-                exchange_code="bitget",
-                symbol=symbol,
-                funding_rate_percent=self._safe_float(row.get("fundingRate")) * 100,
-                next_funding_at=next_funding_at,
-                synced_at=self._parse_backfill_datetime(row.get("ts")),
-            )
-        return result
+        last_error: Exception | None = None
+        for attempt in range(1, self._backfill_bitget_retry_attempts + 1):
+            try:
+                payload = self._http_get_json(
+                    "https://api.bitget.com/api/v2/mix/market/current-fund-rate",
+                    params={"productType": "USDT-FUTURES"},
+                )
+                rows = payload.get("data") if isinstance(payload, dict) else []
+                if not isinstance(rows, list):
+                    return {}
+                target_symbols = set(symbols)
+                result: Dict[str, FundingRateCacheItem] = {}
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    symbol = self._normalize_rest_symbol("bitget", str(row.get("symbol") or row.get("instId") or ""))
+                    if not symbol or symbol not in target_symbols:
+                        continue
+                    next_funding_at = self._parse_ws_datetime(row.get("nextUpdate")) if row.get("nextUpdate") else None
+                    result[symbol] = FundingRateCacheItem(
+                        exchange_code="bitget",
+                        symbol=symbol,
+                        funding_rate_percent=self._safe_float(row.get("fundingRate")) * 100,
+                        next_funding_at=next_funding_at,
+                        synced_at=self._parse_backfill_datetime(row.get("ts")),
+                    )
+                return result
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                if attempt >= self._backfill_bitget_retry_attempts:
+                    break
+                time.sleep(self._backfill_bitget_retry_delay_seconds)
+        if last_error is not None:
+            raise last_error
+        return {}
 
     def _fetch_gate_swap_funding_rates(self, symbols: List[str]) -> Dict[str, FundingRateCacheItem]:
         if not symbols:
@@ -1809,26 +1862,54 @@ class MarketDataMonitorService:
         specs: List[BackfillTaskSpec] = []
         if self._enable_http_ticker_backfill:
             for (exchange_code, market_type), symbols in sorted(ticker_groups.items()):
-                specs.append(
-                    BackfillTaskSpec(
-                        task_key=f"{exchange_code}:{market_type}:ticker",
-                        exchange_code=exchange_code,
-                        market_type=market_type,
-                        task_type="ticker",
-                        symbols=tuple(sorted(set(symbols))),
-                    )
+                ordered_symbols = self._sort_symbols_by_backfill_priority(
+                    exchange_code=exchange_code,
+                    market_type=market_type,
+                    task_type="ticker",
+                    symbols=symbols,
                 )
+                chunk_size = self._resolve_backfill_chunk_size(
+                    exchange_code=exchange_code,
+                    task_type="ticker",
+                )
+                chunks = self._chunk_symbols(ordered_symbols, chunk_size)
+                for chunk_index, symbol_chunk in enumerate(chunks, start=1):
+                    specs.append(
+                        BackfillTaskSpec(
+                            task_key=f"{exchange_code}:{market_type}:ticker:{chunk_index}",
+                            exchange_code=exchange_code,
+                            market_type=market_type,
+                            task_type="ticker",
+                            symbols=tuple(symbol_chunk),
+                            chunk_index=chunk_index,
+                            chunk_total=len(chunks),
+                        )
+                    )
         if self._enable_http_funding_backfill:
             for exchange_code, symbols in sorted(funding_groups.items()):
-                specs.append(
-                    BackfillTaskSpec(
-                        task_key=f"{exchange_code}:swap:funding",
-                        exchange_code=exchange_code,
-                        market_type="swap",
-                        task_type="funding",
-                        symbols=tuple(sorted(set(symbols))),
-                    )
+                ordered_symbols = self._sort_symbols_by_backfill_priority(
+                    exchange_code=exchange_code,
+                    market_type="swap",
+                    task_type="funding",
+                    symbols=symbols,
                 )
+                chunk_size = self._resolve_backfill_chunk_size(
+                    exchange_code=exchange_code,
+                    task_type="funding",
+                )
+                chunks = self._chunk_symbols(ordered_symbols, chunk_size)
+                for chunk_index, symbol_chunk in enumerate(chunks, start=1):
+                    specs.append(
+                        BackfillTaskSpec(
+                            task_key=f"{exchange_code}:swap:funding:{chunk_index}",
+                            exchange_code=exchange_code,
+                            market_type="swap",
+                            task_type="funding",
+                            symbols=tuple(symbol_chunk),
+                            chunk_index=chunk_index,
+                            chunk_total=len(chunks),
+                        )
+                    )
         return specs
 
     def _run_backfill_task(self, spec: BackfillTaskSpec) -> Dict[str, int | str]:
@@ -1851,7 +1932,50 @@ class MarketDataMonitorService:
             "task_key": spec.task_key,
             "task_type": spec.task_type,
             "exchange_code": spec.exchange_code,
+            "chunk_index": spec.chunk_index,
+            "chunk_total": spec.chunk_total,
         }
+
+    def _resolve_backfill_chunk_size(self, *, exchange_code: str, task_type: str) -> int:
+        normalized_exchange_code = str(exchange_code or "").strip().lower()
+        normalized_task_type = str(task_type or "").strip().lower()
+        if normalized_task_type == "ticker":
+            if normalized_exchange_code == "bitget":
+                return self._backfill_bitget_ticker_chunk_size
+            return self._backfill_ticker_chunk_size
+        if normalized_exchange_code == "bitget":
+            return self._backfill_bitget_funding_chunk_size
+        return self._backfill_funding_chunk_size
+
+    def _sort_symbols_by_backfill_priority(
+        self,
+        *,
+        exchange_code: str,
+        market_type: str,
+        task_type: str,
+        symbols: Iterable[str],
+    ) -> List[str]:
+        unique_symbols = sorted({str(item).strip() for item in symbols if str(item).strip()})
+        if not unique_symbols:
+            return []
+
+        def sort_key(symbol: str) -> tuple[int, float, str]:
+            if task_type == "ticker":
+                item = market_runtime_cache.get_ticker(exchange_code, market_type, symbol)
+                if item is None or item.synced_at is None:
+                    return (0, 0.0, symbol)
+                if float(item.last_price or 0) <= 0 or float(item.bid_price or 0) <= 0 or float(item.ask_price or 0) <= 0:
+                    return (1, item.synced_at.timestamp(), symbol)
+                return (2, item.synced_at.timestamp(), symbol)
+
+            item = market_runtime_cache.get_funding_rate(exchange_code, symbol)
+            if item is None or item.synced_at is None:
+                return (0, 0.0, symbol)
+            if float(item.funding_rate_percent or 0) == 0 and item.next_funding_at is None:
+                return (1, item.synced_at.timestamp(), symbol)
+            return (2, item.synced_at.timestamp(), symbol)
+
+        return sorted(unique_symbols, key=sort_key)
 
     def _collect_completed_backfill_tasks(self) -> None:
         completed: List[tuple[str, concurrent.futures.Future]] = []
