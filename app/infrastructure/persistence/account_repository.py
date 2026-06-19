@@ -163,6 +163,9 @@ class MySQLAccountRepository:
                     funding_ratio_percent,
                     current_available_amount,
                     current_available_synced_at,
+                    maker_fee_rate,
+                    taker_fee_rate,
+                    fee_rate_synced_at,
                     is_active,
                     created_at,
                     updated_at
@@ -238,6 +241,9 @@ class MySQLAccountRepository:
                     funding_ratio_percent,
                     current_available_amount,
                     current_available_synced_at,
+                    maker_fee_rate,
+                    taker_fee_rate,
+                    fee_rate_synced_at,
                     is_active,
                     created_at,
                     updated_at

@@ -125,6 +125,7 @@ class OpportunityUserOverlayService:
         item["right_account_id"] = int((right_account or {}).get("id") or 0)
         item["left_market_type"] = left_market_type
         item["right_market_type"] = right_market_type
+        self._apply_fee_overlay(channel=channel, item=item, left_account=left_account, right_account=right_account)
         item["has_required_accounts"] = has_required_accounts
         item["execution_ready"] = execution_ready
         item.setdefault("qty_long", self._format_quantity(0, str(item.get("symbol") or "")))
@@ -196,6 +197,43 @@ class OpportunityUserOverlayService:
             return 0.0
         return self._to_float(row.get("current_available_amount"))
 
+    def _apply_fee_overlay(
+        self,
+        *,
+        channel: str,
+        item: Dict[str, Any],
+        left_account: Dict[str, Any] | None,
+        right_account: Dict[str, Any] | None,
+    ) -> None:
+        normalized_channel = str(channel or "").strip().lower()
+        if normalized_channel == "funding":
+            self._set_fee_fields(item=item, prefix="long", account=left_account)
+            self._set_fee_fields(item=item, prefix="short", account=right_account)
+            return
+        if normalized_channel == "spread":
+            self._set_fee_fields(item=item, prefix="buy", account=left_account)
+            self._set_fee_fields(item=item, prefix="sell", account=right_account)
+
+    def _set_fee_fields(self, *, item: Dict[str, Any], prefix: str, account: Dict[str, Any] | None) -> None:
+        maker_fee_rate = self._resolve_account_fee_rate(account, field_name="maker_fee_rate")
+        taker_fee_rate = self._resolve_account_fee_rate(account, field_name="taker_fee_rate")
+        display_fee_rate = min(maker_fee_rate, taker_fee_rate)
+        item[f"{prefix}_maker_fee_rate"] = self._format_fee_rate(maker_fee_rate)
+        item[f"{prefix}_maker_fee_rate_value"] = maker_fee_rate
+        item[f"{prefix}_taker_fee_rate"] = self._format_fee_rate(taker_fee_rate)
+        item[f"{prefix}_taker_fee_rate_value"] = taker_fee_rate
+        item[f"{prefix}_fee_rate"] = self._format_fee_rate(display_fee_rate)
+        item[f"{prefix}_fee_rate_value"] = display_fee_rate
+
+    def _resolve_account_fee_rate(self, account: Dict[str, Any] | None, *, field_name: str) -> float:
+        if account is None:
+            return 0.05
+        value = self._to_float(account.get(field_name))
+        return value if value > 0 else 0.05
+
+    def _format_fee_rate(self, value: float) -> str:
+        return f"{max(float(value or 0), 0.0):.2f}%"
+
     def _estimate_quantity(self, available_amount: float, price: float) -> float:
         if available_amount <= 0 or price <= 0:
             return 0.0
@@ -224,4 +262,3 @@ class OpportunityUserOverlayService:
 
 
 opportunity_user_overlay_service = OpportunityUserOverlayService()
-

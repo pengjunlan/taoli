@@ -395,8 +395,8 @@ class OpportunityRuntimeService:
                         if has_market_data and ((left_is_short_leg and left_funding is not None) or right_funding is not None)
                         else "--"
                     ),
-                    "long_fee_rate": self._resolve_fee_rate_display(market_type="swap"),
-                    "short_fee_rate": self._resolve_fee_rate_display(market_type="swap"),
+                    **self._build_fee_fields(prefix="long", market_type="swap"),
+                    **self._build_fee_fields(prefix="short", market_type="swap"),
                     "avg_long": self._format_price(long_price_value),
                     "avg_short": self._format_price(short_price_value),
                     "settlement": settlement if has_market_data else "--",
@@ -638,8 +638,8 @@ class OpportunityRuntimeService:
                         if has_funding_data and ((left_is_buy_leg and right_funding is not None) or left_funding is not None)
                         else "--"
                     ),
-                    "buy_fee_rate": self._resolve_fee_rate_display(market_type=buy_market_type),
-                    "sell_fee_rate": self._resolve_fee_rate_display(market_type=sell_market_type),
+                    **self._build_fee_fields(prefix="buy", market_type=buy_market_type),
+                    **self._build_fee_fields(prefix="sell", market_type=sell_market_type),
                     "avg_long": self._format_price(buy_price_value),
                     "avg_short": self._format_price(sell_price_value),
                     "opportunity_time": self._format_datetime(left_ticker.synced_at or right_ticker.synced_at) if has_market_data and left_ticker is not None and right_ticker is not None else "--",
@@ -676,6 +676,20 @@ class OpportunityRuntimeService:
 
     def _resolve_fee_rate_display(self, *, market_type: str) -> str:
         return f"{self._resolve_fee_rate_value(market_type=market_type):.2f}%"
+
+    def _build_fee_fields(self, *, prefix: str, market_type: str) -> Dict[str, Any]:
+        maker_fee_rate = self._resolve_fee_rate_value(market_type=market_type)
+        taker_fee_rate = self._resolve_fee_rate_value(market_type=market_type)
+        display_fee_rate = min(maker_fee_rate, taker_fee_rate)
+        normalized_prefix = str(prefix or "").strip()
+        return {
+            f"{normalized_prefix}_maker_fee_rate": f"{maker_fee_rate:.2f}%",
+            f"{normalized_prefix}_maker_fee_rate_value": maker_fee_rate,
+            f"{normalized_prefix}_taker_fee_rate": f"{taker_fee_rate:.2f}%",
+            f"{normalized_prefix}_taker_fee_rate_value": taker_fee_rate,
+            f"{normalized_prefix}_fee_rate": f"{display_fee_rate:.2f}%",
+            f"{normalized_prefix}_fee_rate_value": display_fee_rate,
+        }
 
     def _resolve_fee_rate_value(self, *, market_type: str) -> float:
         normalized_market_type = self._market_code_from_label(str(market_type or ""))
