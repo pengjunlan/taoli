@@ -8,9 +8,22 @@
     min-width: 1160px;
 }
 
+.page-funding_arbitrage .data-table thead th:nth-child(2),
+.page-funding_arbitrage .data-table tbody td:nth-child(2) {
+    width: 96px;
+    min-width: 96px;
+    white-space: nowrap;
+}
+
 .page-funding_arbitrage .data-table tbody td {
     padding-top: 20px;
     padding-bottom: 20px;
+}
+
+.page-funding_arbitrage .data-table tbody td:nth-child(2) .pill {
+    min-width: 74px;
+    padding: 0 14px;
+    white-space: nowrap;
 }
 
 .page-funding_arbitrage .table-wrap {

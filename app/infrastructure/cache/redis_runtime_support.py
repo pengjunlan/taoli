@@ -122,6 +122,43 @@ class RedisRuntimeSupport:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Sync runtime hash cache failed: key=%s detail=%s", key, exc)
 
+    def set_hash_field_json(
+        self,
+        key: str,
+        field: str,
+        payload: Any,
+        *,
+        ttl_seconds: int | None = None,
+    ) -> None:
+        namespaced_key = self.key(key)
+        encoded_field = str(field or "").strip()
+        if not encoded_field:
+            return
+        encoded_value = json.dumps(payload, ensure_ascii=False, default=self._json_default)
+
+        def _write(client: redis.Redis) -> None:
+            pipeline = client.pipeline()
+            existing_type = str(client.type(namespaced_key) or "").lower()
+            if existing_type and existing_type not in {"none", "hash"}:
+                pipeline.delete(namespaced_key)
+                pipeline.execute()
+            pipeline.hset(namespaced_key, encoded_field, encoded_value)
+            if ttl_seconds and ttl_seconds > 0:
+                pipeline.expire(namespaced_key, ttl_seconds)
+            else:
+                pipeline.persist(namespaced_key)
+            pipeline.execute()
+
+        try:
+            self._run_with_retry(_write)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Set runtime hash field cache failed: key=%s field=%s detail=%s",
+                key,
+                encoded_field,
+                exc,
+            )
+
     def get_hash_json(self, key: str) -> dict[str, Any]:
         def _read(client: redis.Redis) -> dict[str, Any]:
             raw_mapping = client.hgetall(self.key(key))
@@ -139,6 +176,31 @@ class RedisRuntimeSupport:
             logger.warning("Get runtime hash cache failed: key=%s detail=%s", key, exc)
             return {}
 
+    def get_hash_field_json(self, key: str, field: str) -> Any | None:
+        encoded_field = str(field or "").strip()
+        if not encoded_field:
+            return None
+
+        def _read(client: redis.Redis) -> Any | None:
+            raw_value = client.hget(self.key(key), encoded_field)
+            if not raw_value:
+                return None
+            try:
+                return json.loads(raw_value)
+            except json.JSONDecodeError:
+                return raw_value
+
+        try:
+            return self._run_with_retry(_read)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Get runtime hash field cache failed: key=%s field=%s detail=%s",
+                key,
+                encoded_field,
+                exc,
+            )
+            return None
+
     def get_json(self, key: str) -> Any | None:
         try:
             value = self._run_with_retry(lambda client: client.get(self.key(key)))
@@ -154,6 +216,31 @@ class RedisRuntimeSupport:
             self._run_with_retry(lambda client: client.delete(self.key(key)))
         except Exception as exc:  # noqa: BLE001
             logger.warning("Delete runtime cache failed: key=%s detail=%s", key, exc)
+
+    def delete_hash_field(self, key: str, field: str) -> None:
+        encoded_field = str(field or "").strip()
+        if not encoded_field:
+            return
+
+        def _delete(client: redis.Redis) -> None:
+            namespaced_key = self.key(key)
+            pipeline = client.pipeline()
+            pipeline.hdel(namespaced_key, encoded_field)
+            pipeline.hlen(namespaced_key)
+            results = pipeline.execute()
+            remaining = int(results[-1] or 0)
+            if remaining <= 0:
+                client.delete(namespaced_key)
+
+        try:
+            self._run_with_retry(_delete)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Delete runtime hash field cache failed: key=%s field=%s detail=%s",
+                key,
+                encoded_field,
+                exc,
+            )
 
     def list_json(self, pattern: str) -> list[tuple[str, Any]]:
         result: list[tuple[str, Any]] = []

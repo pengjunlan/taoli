@@ -625,10 +625,10 @@ class OpportunityRuntimeService:
     ) -> int:
         if not has_market_data or not has_required_funding_data or left_price_value <= 0 or right_price_value <= 0:
             return self._STATUS_MISSING
-        if not is_status_data_fresh:
-            return self._STATUS_STALE
         if not is_price_aligned:
             return self._STATUS_PRICE_GAP_TOO_LARGE
+        if not is_status_data_fresh:
+            return self._STATUS_STALE
         return self._STATUS_NORMAL
 
     def _sort_priority_for_status(self, status_code: Any) -> int:

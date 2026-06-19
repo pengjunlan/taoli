@@ -9,27 +9,29 @@
 .page-spread_arbitrage .data-table {
     width: 100%;
     min-width: 0;
-    table-layout: auto;
+    table-layout: fixed;
 }
 
 .page-spread_arbitrage .data-table thead th:nth-child(1),
 .page-spread_arbitrage .data-table tbody td:nth-child(1) {
-    width: 5%;
+    width: 4.5%;
 }
 
 .page-spread_arbitrage .data-table thead th:nth-child(2),
 .page-spread_arbitrage .data-table tbody td:nth-child(2) {
-    width: 8%;
+    width: 7%;
+    min-width: 84px;
+    white-space: nowrap;
 }
 
 .page-spread_arbitrage .data-table thead th:nth-child(3),
 .page-spread_arbitrage .data-table tbody td:nth-child(3) {
-    width: 9%;
+    width: 11%;
 }
 
 .page-spread_arbitrage .data-table thead th:nth-child(4),
 .page-spread_arbitrage .data-table tbody td:nth-child(4) {
-    width: 18%;
+    width: 9%;
 }
 
 .page-spread_arbitrage .data-table thead th:nth-child(5),
@@ -46,14 +48,29 @@
 .page-spread_arbitrage .data-table thead th:nth-child(9),
 .page-spread_arbitrage .data-table tbody td:nth-child(9),
 .page-spread_arbitrage .data-table thead th:nth-child(10),
-.page-spread_arbitrage .data-table tbody td:nth-child(10) {
+.page-spread_arbitrage .data-table tbody td:nth-child(10),
+.page-spread_arbitrage .data-table thead th:nth-child(11),
+.page-spread_arbitrage .data-table tbody td:nth-child(11) {
     width: 8%;
+}
+
+.page-spread_arbitrage .data-table thead th:nth-child(12),
+.page-spread_arbitrage .data-table tbody td:nth-child(12),
+.page-spread_arbitrage .data-table thead th:nth-child(13),
+.page-spread_arbitrage .data-table tbody td:nth-child(13) {
+    width: 5.5%;
 }
 
 .page-spread_arbitrage .data-table tbody td {
     padding-top: 20px;
     padding-bottom: 20px;
     vertical-align: middle;
+}
+
+.page-spread_arbitrage .data-table tbody td:nth-child(2) .pill {
+    min-width: 74px;
+    padding: 0 14px;
+    white-space: nowrap;
 }
 
 .page-spread_arbitrage .data-table tbody tr:hover {
@@ -66,11 +83,34 @@
     min-width: 0;
 }
 
+.page-spread_arbitrage .data-table .spread-symbol,
+.page-spread_arbitrage .data-table .pair-cell {
+    min-width: 0;
+}
+
 .page-spread_arbitrage .pair-cell--spread .pair-cell__line {
     font-size: 0.95rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.page-spread_arbitrage .data-table .spread-symbol strong,
+.page-spread_arbitrage .data-table .spread-symbol__hint,
+.page-spread_arbitrage .data-table .pair-cell__line,
+.page-spread_arbitrage .data-table .pair-cell__line--hedge {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.page-spread_arbitrage .data-table tbody td:nth-child(5) .spread-symbol strong,
+.page-spread_arbitrage .data-table tbody td:nth-child(6) .spread-symbol strong {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.15;
 }
 
 .page-spread_arbitrage .data-table thead th,

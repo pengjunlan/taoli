@@ -14,6 +14,7 @@ from app.infrastructure.cache import redis_runtime_support
 MAX_WORKER_LOGS = 1000
 REDIS_MAX_WORKER_LOGS = 200
 RUNTIME_CACHE_KEY_PREFIX = "monitor-center:worker:"
+RUNTIME_CACHE_HASH_KEY = "monitor-center:workers"
 RUNTIME_CACHE_MIN_TTL_SECONDS = 5 * 60
 RUNTIME_CACHE_INTERVAL_MULTIPLIER = 10
 
@@ -167,11 +168,14 @@ class MonitorCenterService:
 
     def _save_state(self, state: WorkerState) -> None:
         item = self._serialize_state(state, log_limit=REDIS_MAX_WORKER_LOGS)
-        redis_runtime_support.set_json(
-            self._runtime_key(state.key),
+        ttl_seconds = self._runtime_ttl_seconds(state.interval_seconds)
+        redis_runtime_support.set_hash_field_json(
+            RUNTIME_CACHE_HASH_KEY,
+            state.key,
             item,
-            ttl_seconds=self._runtime_ttl_seconds(state.interval_seconds),
+            ttl_seconds=ttl_seconds,
         )
+        redis_runtime_support.set_json(self._runtime_key(state.key), item, ttl_seconds=ttl_seconds)
 
     def _runtime_ttl_seconds(self, interval_seconds: int) -> int:
         resolved_interval = max(1, int(interval_seconds or 0))
@@ -179,13 +183,21 @@ class MonitorCenterService:
 
     def _load_runtime_snapshot(self) -> List[dict]:
         result: List[dict] = []
+        payload_map = redis_runtime_support.get_hash_json(RUNTIME_CACHE_HASH_KEY)
+        for _, item in payload_map.items():
+            if isinstance(item, dict):
+                result.append(item)
+        if result:
+            return result
         for _, item in redis_runtime_support.list_json(f"{RUNTIME_CACHE_KEY_PREFIX}*"):
             if isinstance(item, dict):
                 result.append(item)
         return result
 
     def _load_state(self, key: str) -> WorkerState | None:
-        payload = redis_runtime_support.get_json(self._runtime_key(key))
+        payload = redis_runtime_support.get_hash_field_json(RUNTIME_CACHE_HASH_KEY, key)
+        if not isinstance(payload, dict):
+            payload = redis_runtime_support.get_json(self._runtime_key(key))
         if not isinstance(payload, dict):
             return None
         return self._deserialize_state(payload)

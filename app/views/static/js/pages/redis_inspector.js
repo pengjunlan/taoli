@@ -8,11 +8,13 @@ const REDIS_RESTART_POLL_INTERVAL_MS = 2000;
 const PAGE_SIZE = 20;
 
 let hasLoadedRedisData = false;
-let lastRedisSnapshot = null;
+let lastOverview = null;
 let currentGroups = [];
 let currentRows = [];
 let activeGroupKey = "";
 let currentPage = 1;
+let currentTotalRows = 0;
+let currentTotalPages = 0;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -119,49 +121,12 @@ function getGroupLabel(group) {
 }
 
 function getGroupItemCount(group) {
-  const items = Array.isArray(group?.items) ? group.items : [];
   const numericCount = Number(group?.key_count);
-  return Number.isFinite(numericCount) && numericCount >= 0 ? numericCount : items.length;
-}
-
-function buildRowsForGroup(group) {
-  const groupLabel = getGroupLabel(group);
-  const items = (Array.isArray(group?.items) ? group.items : [])
-    .slice()
-    .sort((left, right) => {
-      const leftSort = Number(left?.sort_index || 0);
-      const rightSort = Number(right?.sort_index || 0);
-      if (leftSort !== rightSort) return leftSort - rightSort;
-      return String(left?.key || "").localeCompare(String(right?.key || ""));
-    });
-
-  return items.map((entry) => ({
-    group: groupLabel,
-    key: entry?.key || "--",
-    value: normalizeValue(entry),
-    type: entry?.type || "--",
-    source: entry?.source || "--",
-    ttl: entry?.ttl_label || "--",
-    redisKey: entry?.redis_key || "",
-    hashField: entry?.hash_field || "",
-  }));
+  return Number.isFinite(numericCount) && numericCount >= 0 ? numericCount : 0;
 }
 
 function findActiveGroup() {
   return currentGroups.find((group) => getGroupKey(group) === activeGroupKey) || null;
-}
-
-function syncActiveGroup({ resetPage = false } = {}) {
-  const hasActiveGroup = currentGroups.some((group) => getGroupKey(group) === activeGroupKey);
-  const nextGroupKey = hasActiveGroup ? activeGroupKey : currentGroups[0] ? getGroupKey(currentGroups[0]) : "";
-  const hasGroupChanged = nextGroupKey !== activeGroupKey;
-
-  activeGroupKey = nextGroupKey;
-  currentRows = buildRowsForGroup(findActiveGroup());
-
-  if (resetPage || hasGroupChanged) {
-    currentPage = 1;
-  }
 }
 
 function renderGroupSummary() {
@@ -220,10 +185,6 @@ function updateRefreshNote(result) {
   setRedisStartButtonVisible(!snapshot.is_available);
 }
 
-function getTotalPages() {
-  return Math.max(1, Math.ceil(currentRows.length / PAGE_SIZE));
-}
-
 function buildPageItems(page, pageCount) {
   if (pageCount <= 7) {
     return Array.from({ length: pageCount }, (_, index) => index + 1);
@@ -245,43 +206,33 @@ function renderPagination() {
   const host = document.querySelector("[data-redis-pagination]");
   if (!host) return;
 
-  const total = currentRows.length;
-  const totalPages = getTotalPages();
-  if (currentPage > totalPages) currentPage = totalPages;
-  if (currentPage < 1) currentPage = 1;
-
-  const start = total === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
-  const end = total === 0 ? 0 : Math.min(currentPage * PAGE_SIZE, total);
-  const pageItems = buildPageItems(currentPage, totalPages);
+  const total = currentTotalRows;
+  const totalPages = currentTotalPages;
+  const page = currentPage;
+  const start = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const end = total === 0 ? 0 : Math.min(page * PAGE_SIZE, total);
+  const pageItems = totalPages > 0 ? buildPageItems(page, totalPages) : [];
 
   host.innerHTML = `
     <div class="pagination-bar redis-pagination-bar">
       <div class="pagination-bar__meta">共 ${total} 条，当前显示 ${start}-${end}</div>
       <div class="pagination-bar__actions">
-        <button class="table-action table-action--primary pagination-bar__more" type="button" data-page-action="more"${currentPage >= totalPages ? " disabled" : ""}>更多</button>
-        <button class="table-action pagination-bar__prev" type="button" data-page-action="prev"${currentPage <= 1 ? " disabled" : ""}>上一页</button>
+        <button class="table-action table-action--primary pagination-bar__more" type="button" data-page-action="more"${page >= totalPages ? " disabled" : ""}>更多</button>
+        <button class="table-action pagination-bar__prev" type="button" data-page-action="prev"${page <= 1 ? " disabled" : ""}>上一页</button>
         <div class="pagination-bar__pages">
           ${pageItems
             .map((item) => {
               if (typeof item !== "number") return `<span class="pagination-bar__ellipsis">...</span>`;
-              return `<button class="table-action pagination-bar__page${item === currentPage ? " is-active" : ""}" type="button" data-page-number="${item}">${item}</button>`;
+              return `<button class="table-action pagination-bar__page${item === page ? " is-active" : ""}" type="button" data-page-number="${item}">${item}</button>`;
             })
             .join("")}
         </div>
-        <button class="table-action pagination-bar__next" type="button" data-page-action="next"${currentPage >= totalPages ? " disabled" : ""}>下一页</button>
+        <button class="table-action pagination-bar__next" type="button" data-page-action="next"${page >= totalPages ? " disabled" : ""}>下一页</button>
       </div>
     </div>
   `;
 
   bindPagination();
-}
-
-function goToPage(page) {
-  const totalPages = getTotalPages();
-  const nextPage = Math.min(Math.max(1, Number(page || 1)), totalPages);
-  if (nextPage === currentPage) return;
-  currentPage = nextPage;
-  renderTableRows(currentRows);
 }
 
 function renderTableRows(rows) {
@@ -299,9 +250,7 @@ function renderTableRows(rows) {
   }
 
   const startIndex = (currentPage - 1) * PAGE_SIZE;
-  const pagedRows = rows.slice(startIndex, startIndex + PAGE_SIZE);
-
-  tbody.innerHTML = pagedRows
+  tbody.innerHTML = rows
     .map(
       (row, index) => `
         <tr>
@@ -312,8 +261,8 @@ function renderTableRows(rows) {
               row.hashField
                 ? `<div class="redis-subkey" title="${escapeHtml(row.hashField)}">${escapeHtml(row.hashField)}</div>`
                 : row.redisKey
-                ? `<div class="redis-subkey" title="${escapeHtml(row.redisKey)}">${escapeHtml(row.redisKey)}</div>`
-                : ""
+                  ? `<div class="redis-subkey" title="${escapeHtml(row.redisKey)}">${escapeHtml(row.redisKey)}</div>`
+                  : ""
             }
           </td>
           <td>
@@ -329,11 +278,16 @@ function renderTableRows(rows) {
   renderPagination();
 }
 
-function renderSnapshotRows(result, { resetPage = false } = {}) {
-  currentGroups = Array.isArray(result?.groups) ? result.groups : [];
-  syncActiveGroup({ resetPage });
-  renderGroupTabs();
-  renderTableRows(currentRows);
+function mapRows(items) {
+  return (Array.isArray(items) ? items : []).map((entry) => ({
+    key: entry?.key || "--",
+    value: normalizeValue(entry),
+    type: entry?.type || "--",
+    source: entry?.source || "--",
+    ttl: entry?.ttl_label || "--",
+    redisKey: entry?.redis_key || "",
+    hashField: entry?.hash_field || "",
+  }));
 }
 
 function renderUnavailableState(message, { preserveData = false } = {}) {
@@ -365,14 +319,16 @@ function renderUnavailableState(message, { preserveData = false } = {}) {
     activeGroupKey = "";
     currentRows = [];
     currentPage = 1;
+    currentTotalRows = 0;
+    currentTotalPages = 0;
     renderGroupTabs();
     renderTableRows([]);
   }
 
   updateRefreshNote({
     is_available: false,
-    group_count: preserveData && lastRedisSnapshot ? lastRedisSnapshot.group_count : 0,
-    key_count: preserveData && lastRedisSnapshot ? lastRedisSnapshot.key_count : 0,
+    group_count: preserveData && lastOverview ? lastOverview.group_count : 0,
+    key_count: preserveData && lastOverview ? lastOverview.key_count : 0,
   });
 }
 
@@ -381,6 +337,34 @@ function sleep(ms) {
 }
 
 let refreshLock = false;
+
+async function refreshGroupPage(page, { silent = false } = {}) {
+  if (!activeGroupKey) {
+    currentRows = [];
+    currentPage = 1;
+    currentTotalRows = 0;
+    currentTotalPages = 0;
+    renderTableRows([]);
+    return;
+  }
+
+  const url = `/api/redis/group?group_key=${encodeURIComponent(activeGroupKey)}&page=${encodeURIComponent(page)}&page_size=${encodeURIComponent(PAGE_SIZE)}`;
+  try {
+    const result = await getJson(url);
+    if (!result.success) {
+      throw new Error(result.message || "读取 Redis 分组数据失败。");
+    }
+    currentRows = mapRows(result.items);
+    currentPage = Number(result.page || 1);
+    currentTotalRows = Number(result.key_count || 0);
+    currentTotalPages = Number(result.page_count || 0);
+    renderTableRows(currentRows);
+  } catch (error) {
+    if (!silent) {
+      showToast(error?.message || "读取 Redis 分组数据失败，请稍后再试。");
+    }
+  }
+}
 
 async function refreshRedisOverview({ silent = false, resetPage = false } = {}) {
   if (refreshLock) return;
@@ -402,19 +386,25 @@ async function refreshRedisOverview({ silent = false, resetPage = false } = {}) 
     updateSummaryCards(result.summary_cards || []);
 
     if (!shouldPreserveData) {
-      renderSnapshotRows(result, { resetPage });
-      lastRedisSnapshot = result;
+      currentGroups = groups;
+      const hasActiveGroup = currentGroups.some((group) => getGroupKey(group) === activeGroupKey);
+      activeGroupKey = hasActiveGroup ? activeGroupKey : currentGroups[0] ? getGroupKey(currentGroups[0]) : "";
+      renderGroupTabs();
+      lastOverview = result;
       hasLoadedRedisData = hasLoadedRedisData || groups.length > 0 || Number(result.key_count || 0) > 0;
-    } else if (lastRedisSnapshot) {
-      renderSnapshotRows(lastRedisSnapshot, { resetPage: false });
+      await refreshGroupPage(resetPage ? 1 : currentPage || 1, { silent });
+    } else if (lastOverview) {
+      currentGroups = Array.isArray(lastOverview.groups) ? lastOverview.groups : [];
+      renderGroupTabs();
+      renderTableRows(currentRows);
     }
 
     updateRefreshNote(
-      shouldPreserveData && lastRedisSnapshot
+      shouldPreserveData && lastOverview
         ? {
             ...result,
-            group_count: lastRedisSnapshot.group_count,
-            key_count: lastRedisSnapshot.key_count,
+            group_count: lastOverview.group_count,
+            key_count: lastOverview.key_count,
           }
         : result,
     );
@@ -446,7 +436,7 @@ function bindGroupTabsAction() {
   const container = document.querySelector("[data-redis-group-tabs]");
   if (!container) return;
 
-  container.addEventListener("click", (event) => {
+  container.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-redis-group-tab]");
     if (!button) return;
 
@@ -455,9 +445,12 @@ function bindGroupTabsAction() {
 
     activeGroupKey = nextGroupKey;
     currentPage = 1;
-    currentRows = buildRowsForGroup(findActiveGroup());
+    currentRows = [];
+    currentTotalRows = 0;
+    currentTotalPages = 0;
     renderGroupTabs();
-    renderTableRows(currentRows);
+    renderTableRows([]);
+    await refreshGroupPage(1);
   });
 }
 
@@ -470,24 +463,24 @@ function bindPagination() {
   if (!host) return;
 
   host.querySelectorAll("[data-page-number]").forEach((button) => {
-    button.addEventListener("click", () => {
-      goToPage(Number(button.dataset.pageNumber || 1));
+    button.addEventListener("click", async () => {
+      await refreshGroupPage(Number(button.dataset.pageNumber || 1));
     });
   });
 
   host.querySelectorAll("[data-page-action]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const action = String(button.dataset.pageAction || "");
       if (action === "prev" && currentPage > 1) {
-        goToPage(currentPage - 1);
+        await refreshGroupPage(currentPage - 1);
         return;
       }
-      if (action === "next" && currentPage < getTotalPages()) {
-        goToPage(currentPage + 1);
+      if (action === "next" && currentPage < currentTotalPages) {
+        await refreshGroupPage(currentPage + 1);
         return;
       }
-      if (action === "more" && currentPage < getTotalPages()) {
-        goToPage(Math.min(currentPage + 5, getTotalPages()));
+      if (action === "more" && currentPage < currentTotalPages) {
+        await refreshGroupPage(Math.min(currentPage + 5, currentTotalPages));
       }
     });
   });
@@ -513,19 +506,10 @@ function bindRedisStartAction() {
       for (let attempt = 0; attempt < REDIS_RESTART_POLL_ATTEMPTS; attempt += 1) {
         await sleep(REDIS_RESTART_POLL_INTERVAL_MS);
         const overview = await getJson("/api/redis/overview");
-        if (overview.success) {
-          updateSummaryCards(overview.summary_cards || []);
-          renderSnapshotRows(overview, { resetPage: true });
-          updateRefreshNote(overview);
-          if (overview.is_available) {
-            lastRedisSnapshot = overview;
-            hasLoadedRedisData =
-              hasLoadedRedisData ||
-              (Array.isArray(overview.groups) && overview.groups.length > 0) ||
-              Number(overview.key_count || 0) > 0;
-            showToast("Redis 已恢复可用。");
-            return;
-          }
+        if (overview.success && overview.is_available) {
+          await refreshRedisOverview({ resetPage: true });
+          showToast("Redis 已恢复可用。");
+          return;
         }
       }
 
