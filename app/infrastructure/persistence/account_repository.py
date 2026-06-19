@@ -29,6 +29,9 @@ class MySQLAccountRepository:
                     a.funding_ratio_percent,
                     a.current_available_amount,
                     a.current_available_synced_at,
+                    a.maker_fee_rate,
+                    a.taker_fee_rate,
+                    a.fee_rate_synced_at,
                     a.is_active,
                     a.created_at,
                     a.updated_at,
@@ -65,6 +68,9 @@ class MySQLAccountRepository:
                     a.funding_ratio_percent,
                     a.current_available_amount,
                     a.current_available_synced_at,
+                    a.maker_fee_rate,
+                    a.taker_fee_rate,
+                    a.fee_rate_synced_at,
                     a.is_active,
                     a.created_at,
                     a.updated_at,
@@ -116,9 +122,12 @@ class MySQLAccountRepository:
                     connection_test_status,
                     funding_ratio_percent,
                     current_available_amount,
-                    current_available_synced_at
+                    current_available_synced_at,
+                    maker_fee_rate,
+                    taker_fee_rate,
+                    fee_rate_synced_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     user_id,
@@ -131,6 +140,9 @@ class MySQLAccountRepository:
                     connection_test_status,
                     funding_ratio_percent,
                     0,
+                    None,
+                    0.05,
+                    0.05,
                     None,
                 ),
             )
@@ -436,6 +448,44 @@ class MySQLAccountRepository:
             )
             connection.commit()
             return cursor.rowcount > 0
+
+    def update_fee_rates(
+        self,
+        *,
+        account_id: int,
+        user_id: int,
+        maker_fee_rate: float,
+        taker_fee_rate: float,
+        synced_at,
+    ) -> bool:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                UPDATE exchange_accounts
+                SET
+                    maker_fee_rate = %s,
+                    taker_fee_rate = %s,
+                    fee_rate_synced_at = %s
+                WHERE id = %s AND user_id = %s
+                """,
+                (maker_fee_rate, taker_fee_rate, synced_at, account_id, user_id),
+            )
+            connection.commit()
+            if cursor.rowcount > 0:
+                return True
+
+            verify_cursor = connection.cursor(dictionary=True)
+            verify_cursor.execute(
+                """
+                SELECT id
+                FROM exchange_accounts
+                WHERE id = %s AND user_id = %s
+                LIMIT 1
+                """,
+                (account_id, user_id),
+            )
+            return verify_cursor.fetchone() is not None
 
     def create_transfer_record(
         self,
@@ -1098,6 +1148,9 @@ class MySQLAccountRepository:
                     a.funding_ratio_percent,
                     a.current_available_amount,
                     a.current_available_synced_at,
+                    a.maker_fee_rate,
+                    a.taker_fee_rate,
+                    a.fee_rate_synced_at,
                     a.is_active,
                     a.created_at,
                     a.updated_at,
@@ -1134,6 +1187,9 @@ class MySQLAccountRepository:
                     a.funding_ratio_percent,
                     a.current_available_amount,
                     a.current_available_synced_at,
+                    a.maker_fee_rate,
+                    a.taker_fee_rate,
+                    a.fee_rate_synced_at,
                     a.is_active,
                     a.created_at,
                     a.updated_at,
@@ -1174,6 +1230,9 @@ class MySQLAccountRepository:
                     a.funding_ratio_percent,
                     a.current_available_amount,
                     a.current_available_synced_at,
+                    a.maker_fee_rate,
+                    a.taker_fee_rate,
+                    a.fee_rate_synced_at,
                     a.is_active,
                     a.created_at,
                     a.updated_at,
@@ -1208,6 +1267,9 @@ class MySQLAccountRepository:
             funding_ratio_percent=float(row.get("funding_ratio_percent") or 0),
             current_available_amount=float(row.get("current_available_amount") or 0),
             current_available_synced_at=row.get("current_available_synced_at"),
+            maker_fee_rate=float(row.get("maker_fee_rate") or 0.05),
+            taker_fee_rate=float(row.get("taker_fee_rate") or 0.05),
+            fee_rate_synced_at=row.get("fee_rate_synced_at"),
             is_active=bool(row["is_active"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],

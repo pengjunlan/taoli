@@ -32,6 +32,12 @@ class BalanceSnapshot:
     total_amount: float
 
 
+@dataclass(frozen=True)
+class TradingFeeSnapshot:
+    maker_fee_rate: float
+    taker_fee_rate: float
+
+
 class ExchangeConnectionService:
     """Calls a private exchange API to validate whether submitted credentials work."""
 
@@ -159,6 +165,47 @@ class ExchangeConnectionService:
                 "读取余额失败：交易所返回了未预期的异常。\n"
                 f"原始原因：{self._truncate_message(str(exc))}"
             ) from exc
+        finally:
+            try:
+                exchange.close()
+            except Exception:
+                pass
+
+    def fetch_trading_fee_snapshot(self, payload: ExchangeConnectionTestRequest) -> TradingFeeSnapshot:
+        normalized = self._normalize_payload(payload)
+        self._validate_payload(normalized)
+
+        exchange = self._build_exchange(normalized)
+        try:
+            maker_fee_rate = 0.05
+            taker_fee_rate = 0.05
+            fee_payload = None
+
+            try:
+                if hasattr(exchange, "fetch_trading_fees") and exchange.has.get("fetchTradingFees"):
+                    fee_payload = exchange.fetch_trading_fees()
+                elif hasattr(exchange, "fetchTradingFees") and exchange.has.get("fetchTradingFees"):
+                    fee_payload = exchange.fetchTradingFees()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "Fetch trading fees failed: exchange=%s market_type=%s detail=%s",
+                    normalized["exchange_code"],
+                    normalized["market_type"],
+                    exc,
+                )
+
+            parsed = self._extract_trading_fee_snapshot(
+                fee_payload,
+                exchange_code=normalized["exchange_code"],
+                market_type=normalized["market_type"],
+            )
+            if parsed is not None:
+                maker_fee_rate, taker_fee_rate = parsed
+
+            return TradingFeeSnapshot(
+                maker_fee_rate=max(float(maker_fee_rate or 0), 0.0),
+                taker_fee_rate=max(float(taker_fee_rate or 0), 0.0),
+            )
         finally:
             try:
                 exchange.close()
@@ -434,6 +481,50 @@ class ExchangeConnectionService:
             except (TypeError, ValueError):
                 continue
         return None
+
+    def _extract_trading_fee_snapshot(
+        self,
+        payload: Any,
+        *,
+        exchange_code: str,
+        market_type: str,
+    ) -> tuple[float, float] | None:
+        if payload is None:
+            return None
+
+        candidate_rows: list[dict] = []
+        if isinstance(payload, dict):
+            candidate_rows.append(payload)
+            for value in payload.values():
+                if isinstance(value, dict):
+                    candidate_rows.append(value)
+        elif isinstance(payload, list):
+            candidate_rows.extend(item for item in payload if isinstance(item, dict))
+
+        best: tuple[float, float] | None = None
+        market_hint = "swap" if market_type == "swap" else "spot"
+
+        for row in candidate_rows:
+            symbol_text = " ".join(
+                str(row.get(key) or "")
+                for key in ("symbol", "id", "market", "type")
+            ).lower()
+            if market_hint == "swap":
+                if not any(token in symbol_text for token in ("swap", "future", "perp", "usdt", "linear")) and symbol_text:
+                    continue
+
+            maker = self._pick_first_numeric(row, ("maker", "makerFee", "maker_fee", "makerCommission"))
+            taker = self._pick_first_numeric(row, ("taker", "takerFee", "taker_fee", "takerCommission"))
+            if maker is None and taker is None:
+                continue
+
+            maker_percent = abs(float(maker or taker or 0)) * 100
+            taker_percent = abs(float(taker or maker or 0)) * 100
+            best = (maker_percent, taker_percent)
+            if symbol_text:
+                break
+
+        return best
 
     def _build_connection_error_message(self, error: Exception) -> str:
         return self._map_exchange_error(str(error), prefix="连接测试失败")

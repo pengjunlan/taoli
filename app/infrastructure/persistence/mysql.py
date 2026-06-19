@@ -176,6 +176,9 @@ class MySQLConnectionManager:
                 funding_ratio_percent DECIMAL(10,2) NOT NULL DEFAULT 0.00,
                 current_available_amount DECIMAL(18,8) NOT NULL DEFAULT 0.00000000,
                 current_available_synced_at DATETIME NULL,
+                maker_fee_rate DECIMAL(10,6) NOT NULL DEFAULT 0.050000,
+                taker_fee_rate DECIMAL(10,6) NOT NULL DEFAULT 0.050000,
+                fee_rate_synced_at DATETIME NULL,
                 is_active TINYINT(1) NOT NULL DEFAULT 1,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -1082,6 +1085,75 @@ class MySQLConnectionManager:
                         ALTER TABLE arbitrage_order_legs
                         ADD COLUMN last_retry_at DATETIME NULL
                         AFTER acknowledged_at
+                        """
+                    )
+                except MySQLError as exc:
+                    if "Duplicate column name" not in str(exc):
+                        raise
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s
+                  AND TABLE_NAME = 'exchange_accounts'
+                  AND COLUMN_NAME = 'maker_fee_rate'
+                """,
+                (mysql_config.database,),
+            )
+            has_exchange_accounts_maker_fee_rate = int(cursor.fetchone()[0]) > 0
+            if not has_exchange_accounts_maker_fee_rate:
+                try:
+                    cursor.execute(
+                        """
+                        ALTER TABLE exchange_accounts
+                        ADD COLUMN maker_fee_rate DECIMAL(10,6) NOT NULL DEFAULT 0.050000
+                        AFTER current_available_synced_at
+                        """
+                    )
+                except MySQLError as exc:
+                    if "Duplicate column name" not in str(exc):
+                        raise
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s
+                  AND TABLE_NAME = 'exchange_accounts'
+                  AND COLUMN_NAME = 'taker_fee_rate'
+                """,
+                (mysql_config.database,),
+            )
+            has_exchange_accounts_taker_fee_rate = int(cursor.fetchone()[0]) > 0
+            if not has_exchange_accounts_taker_fee_rate:
+                try:
+                    cursor.execute(
+                        """
+                        ALTER TABLE exchange_accounts
+                        ADD COLUMN taker_fee_rate DECIMAL(10,6) NOT NULL DEFAULT 0.050000
+                        AFTER maker_fee_rate
+                        """
+                    )
+                except MySQLError as exc:
+                    if "Duplicate column name" not in str(exc):
+                        raise
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s
+                  AND TABLE_NAME = 'exchange_accounts'
+                  AND COLUMN_NAME = 'fee_rate_synced_at'
+                """,
+                (mysql_config.database,),
+            )
+            has_exchange_accounts_fee_rate_synced_at = int(cursor.fetchone()[0]) > 0
+            if not has_exchange_accounts_fee_rate_synced_at:
+                try:
+                    cursor.execute(
+                        """
+                        ALTER TABLE exchange_accounts
+                        ADD COLUMN fee_rate_synced_at DATETIME NULL
+                        AFTER taker_fee_rate
                         """
                     )
                 except MySQLError as exc:

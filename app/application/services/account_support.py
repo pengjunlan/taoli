@@ -68,6 +68,9 @@ class AccountDetailResult:
     api_passphrase: str
     connection_test_status: str
     funding_ratio_percent: float
+    maker_fee_rate: float
+    taker_fee_rate: float
+    fee_rate_synced_at: datetime | None
     address_network: str
     address_value: str
     address_memo: str

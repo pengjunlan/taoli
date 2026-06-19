@@ -191,9 +191,26 @@ class AccountCommandService(AccountServiceSupport):
                         )
                     )
                     synced_at = datetime.now()
+                    fee_snapshot = exchange_connection_service.fetch_trading_fee_snapshot(
+                        ExchangeConnectionTestRequest(
+                            account_id=account_id,
+                            market_type=str(detail.get("market_type") or ""),
+                            exchange_code=str(detail.get("exchange_code") or ""),
+                            api_key=str(detail.get("api_key") or ""),
+                            api_secret=str(detail.get("api_secret") or ""),
+                            api_passphrase=str(detail.get("api_passphrase") or ""),
+                        )
+                    )
                     account_repository.update_current_available_amount(
                         account_id=account_id,
                         amount=round(float(snapshot.available_amount or 0), 8),
+                        synced_at=synced_at,
+                    )
+                    account_repository.update_fee_rates(
+                        account_id=account_id,
+                        user_id=current_user.id,
+                        maker_fee_rate=round(float(fee_snapshot.maker_fee_rate or 0.05), 6),
+                        taker_fee_rate=round(float(fee_snapshot.taker_fee_rate or 0.05), 6),
                         synced_at=synced_at,
                     )
                     account_monitor_service.seed_account(

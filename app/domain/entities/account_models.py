@@ -20,6 +20,9 @@ class ExchangeAccount:
     funding_ratio_percent: float
     current_available_amount: float
     current_available_synced_at: datetime | None
+    maker_fee_rate: float
+    taker_fee_rate: float
+    fee_rate_synced_at: datetime | None
     is_active: bool
     created_at: datetime
     updated_at: datetime
