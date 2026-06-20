@@ -38,6 +38,7 @@ class AccountAutoTransferService:
                 is_enabled=is_enabled,
                 trigger_ratio=round(trigger_ratio, 4),
             )
+            # User account/config changes clear the runtime block and allow retries.
             auto_transfer_runtime_guard_service.clear(current_user.id)
         except Exception as exc:
             raise AccountPersistenceError("保存自动调拨配置失败：数据库操作异常。") from exc
@@ -52,15 +53,7 @@ class AccountAutoTransferService:
         if not config.is_enabled:
             raise AccountValidationError("请先开启自动调拨。")
         if auto_transfer_runtime_guard_service.is_blocked(current_user.id):
-            raise AccountValidationError("自动调拨已被暂时阻断，请修改账户配置后等待下一次扫描。")
-
-        pending_transfer = account_repository.get_open_worker_transfer_record_by_user_id(current_user.id)
-        if pending_transfer is not None:
-            record_id = int(pending_transfer["id"])
-            status = str(pending_transfer.get("execute_status") or pending_transfer.get("status") or "pending_execute")
-            raise AccountValidationError(
-                f"当前已有未完成的调拨记录 #{record_id}（状态：{status}），等待执行完成后再生成新的自动调拨。"
-            )
+            raise AccountValidationError("自动调拨已因账户配置或账户状态异常而暂停，请修正账户后再重试。")
 
         account_rows = self._query_service.build_account_rows_for_user(current_user.id)
         active_account_rows = [row for row in account_rows if bool(row.get("is_active", True))]
@@ -68,6 +61,20 @@ class AccountAutoTransferService:
         candidate = self._pick_supported_auto_transfer_candidate(current_user.id, balance_rows, config.trigger_ratio)
         if candidate is None:
             raise AccountValidationError("当前没有同时满足自动调拨条件且支持真实执行的账户组合。")
+
+        pending_transfer = account_repository.get_open_worker_transfer_record_by_target_account_id(
+            int(candidate["to_account_id"])
+        )
+        if pending_transfer is not None:
+            record_id = int(pending_transfer["id"])
+            status = str(
+                pending_transfer.get("execute_status")
+                or pending_transfer.get("status")
+                or "pending_execute"
+            )
+            raise AccountValidationError(
+                f"当前目标账户已有未完成的调拨记录 #{record_id}（状态：{status}），请等待执行完成后再继续自动调拨。"
+            )
 
         try:
             transfer_record = account_repository.create_transfer_record(
@@ -82,9 +89,8 @@ class AccountAutoTransferService:
                 config_fingerprint=auto_transfer_runtime_guard_service.build_config_version(current_user.id),
                 is_worker_enabled=True,
                 result=(
-                    f"自动调拨任务已创建，后台将按真实执行链路处理；"
-                    f"触发比例 {int(config.trigger_ratio * 100)}%；"
-                    f"本次计划调拨 {self._query_service._format_currency(float(candidate['amount']))}。"
+                    "自动调拨任务已创建，后台将按真实执行链路处理。"
+                    f" 本次计划调拨 {self._query_service._format_currency(float(candidate['amount']))}。"
                 ),
             )
         except Exception as exc:

@@ -86,6 +86,15 @@ class AccountQueryService(AccountServiceSupport):
                 if cached_balance is not None
                 else float(row.get("current_available_amount") or 0)
             )
+            current_total_amount = (
+                max(
+                    float(cached_balance.total_amount or 0),
+                    float(cached_balance.amount or 0) + float(cached_balance.frozen_amount or 0),
+                    float(cached_balance.amount or 0),
+                )
+                if cached_balance is not None
+                else float(row.get("current_available_amount") or 0)
+            )
             current_available_synced_at = (
                 cached_balance.synced_at
                 if cached_balance is not None and cached_balance.synced_at is not None
@@ -112,6 +121,7 @@ class AccountQueryService(AccountServiceSupport):
                     "connection_test_status_tone": self._connection_test_status_tone(connection_test_status),
                     "funding_ratio_percent": funding_ratio_percent,
                     "current_available_amount": current_available_amount,
+                    "current_total_amount": current_total_amount,
                     "current_available_synced_at": self._format_datetime(current_available_synced_at) if current_available_synced_at else "--",
                     "maker_fee_rate": float(row.get("maker_fee_rate") or 0.05),
                     "taker_fee_rate": float(row.get("taker_fee_rate") or 0.05),
@@ -178,6 +188,7 @@ class AccountQueryService(AccountServiceSupport):
 
         for row, available_value, available, funding_ratio_percent in available_rows:
             exchange = str(row.get("exchange") or "")
+            current_total_amount_value = float(row.get("current_total_amount") or 0)
             if funding_ratio_percent > 0:
                 ratio = funding_ratio_percent / 100
             else:
@@ -193,6 +204,7 @@ class AccountQueryService(AccountServiceSupport):
                     "exchange": exchange or "--",
                     "market_type": str(row.get("market_type") or "--"),
                     "available": available,
+                    "current_balance": self._format_amount(int(round(current_total_amount_value))),
                     "allocation_ratio": self._format_percent(funding_ratio_percent / 100) if funding_ratio_percent > 0 else "0%",
                     "funding_ratio_percent": funding_ratio_percent,
                     "target": self._format_amount(target_value),

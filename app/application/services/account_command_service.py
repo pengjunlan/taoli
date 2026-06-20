@@ -266,8 +266,6 @@ class AccountCommandService(AccountServiceSupport):
         if to_account is None:
             raise AccountNotFoundError("转入账户不存在，或你无权操作该账户。")
 
-        self._transfer_capability_service.ensure_transfer_supported(from_account, to_account)
-
         reason = str(payload.reason or "").strip() or "手动调拨"
 
         is_worker_enabled = MANUAL_TRANSFER_EXECUTION_MODE == "worker_enabled"

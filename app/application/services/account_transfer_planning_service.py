@@ -16,21 +16,34 @@ class AccountTransferPlanningService(AccountServiceSupport):
         normalized_rows: List[Dict[str, float | str]] = []
         for row in balance_rows:
             available_value = self._parse_amount(str(row.get("available") or "$0"))
+            current_balance_value = self._parse_amount(str(row.get("current_balance") or "$0"))
             target_value = self._parse_amount(str(row.get("target") or "$0"))
-            deviation_value = available_value - target_value
+            trigger_value = self._parse_amount(str(row.get("auto_trigger_value") or "$0"))
+            decision_value = min(available_value, current_balance_value)
+            deviation_value = decision_value - target_value
             normalized_rows.append(
                 {
                     "id": str(row.get("id") or ""),
                     "name": str(row.get("name") or "--"),
                     "available_value": float(available_value),
+                    "current_balance_value": float(current_balance_value),
                     "target_value": float(target_value),
+                    "trigger_value": float(trigger_value),
+                    "decision_value": float(decision_value),
                     "deviation_value": float(deviation_value),
                 }
             )
 
         demand_rows = [
             row for row in normalized_rows
-            if float(row["target_value"]) > 0 and float(row["available_value"]) < float(row["target_value"]) * trigger_ratio
+            if (
+                float(row["target_value"]) > 0
+                and float(row["trigger_value"]) > 0
+                and (
+                    float(row["available_value"]) < float(row["trigger_value"])
+                    or float(row["current_balance_value"]) < float(row["trigger_value"])
+                )
+            )
         ]
         if not demand_rows:
             return []
@@ -38,7 +51,7 @@ class AccountTransferPlanningService(AccountServiceSupport):
         demand_rows.sort(key=lambda item: float(item["deviation_value"]))
         source_rows = [
             row for row in normalized_rows
-            if float(row["available_value"]) > float(row["target_value"])
+            if float(row["decision_value"]) > float(row["target_value"])
         ]
         if not source_rows:
             return []
@@ -51,14 +64,14 @@ class AccountTransferPlanningService(AccountServiceSupport):
                 if str(source_row["id"]) == str(target_row["id"]):
                     continue
 
-                source_surplus = max(0.0, float(source_row["available_value"]) - float(source_row["target_value"]))
-                target_need = max(0.0, float(target_row["target_value"]) - float(target_row["available_value"]))
+                source_surplus = max(0.0, float(source_row["decision_value"]) - float(source_row["target_value"]))
+                target_need = max(0.0, float(target_row["target_value"]) - float(target_row["decision_value"]))
                 transfer_amount = min(source_surplus, target_need)
 
                 if transfer_amount <= 0:
                     continue
 
-                source_after = float(source_row["available_value"]) - transfer_amount
+                source_after = float(source_row["decision_value"]) - transfer_amount
                 if source_after < float(source_row["target_value"]):
                     continue
 

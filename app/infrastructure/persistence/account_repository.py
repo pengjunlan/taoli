@@ -645,6 +645,40 @@ class MySQLAccountRepository:
             )
             return cursor.fetchone()
 
+    def get_open_worker_transfer_record_by_target_account_id(self, to_account_id: int) -> Dict[str, Any] | None:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    user_id,
+                    from_account_id,
+                    to_account_id,
+                    amount,
+                    reason,
+                    status,
+                    execute_status,
+                    result_status,
+                    failure_type,
+                    failure_reason,
+                    config_fingerprint,
+                    is_worker_enabled,
+                    result,
+                    processed_at,
+                    created_at,
+                    updated_at
+                FROM account_transfer_records
+                WHERE to_account_id = %s
+                  AND is_worker_enabled = 1
+                  AND execute_status IN ('pending_execute', 'executing')
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (to_account_id,),
+            )
+            return cursor.fetchone()
+
     def mark_transfer_record_processing(self, record_id: int) -> bool:
         with mysql_manager.connection() as connection:
             cursor = connection.cursor()

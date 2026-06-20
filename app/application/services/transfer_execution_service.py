@@ -50,6 +50,28 @@ class TransferExecutionOutcome:
 
 
 class TransferExecutionService:
+    USER_ACCOUNT_FAILURE_HINTS = (
+        "api key",
+        "api secret",
+        "passphrase",
+        "签名",
+        "密钥",
+        "权限",
+        "白名单",
+        "ip",
+        "restricted ip",
+        "地址",
+        "uid",
+        "网络",
+        "账户类型",
+        "账户映射",
+        "提现",
+        "充值",
+        "未配置",
+        "不支持",
+        "停用",
+    )
+
     def execute(self, context: Dict[str, Any]) -> TransferExecutionOutcome:
         self._validate_context(context)
 
@@ -332,6 +354,15 @@ class TransferExecutionService:
                 if value:
                     return str(value)
         return "--"
+
+    def is_user_account_failure(self, error: Exception) -> bool:
+        if isinstance(error, ExchangeValidationError):
+            return True
+        if not isinstance(error, ExchangeConnectionError):
+            return False
+
+        message = str(error or "").strip().lower()
+        return any(hint in message for hint in self.USER_ACCOUNT_FAILURE_HINTS)
 
 
 transfer_execution_service = TransferExecutionService()

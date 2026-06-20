@@ -11,7 +11,7 @@ from app.application.services.auto_transfer_runtime_guard_service import auto_tr
 from app.application.services.monitor_center_service import monitor_center_service
 from app.application.services.transfer_execution_service import transfer_execution_service
 from app.infrastructure.persistence.account_repository import account_repository
-from app.shared.exceptions import ExchangeError, ExchangeValidationError
+from app.shared.exceptions import ExchangeError
 
 
 logger = logging.getLogger(__name__)
@@ -110,7 +110,11 @@ class TransferExecutionMonitorService:
                 f"调拨记录 #{record_id} 执行成功: {outcome.result}",
             )
         except ExchangeError as exc:
-            failure_type = "config" if isinstance(exc, ExchangeValidationError) else "temporary"
+            failure_type = (
+                "config"
+                if transfer_execution_service.is_user_account_failure(exc)
+                else "temporary"
+            )
             account_repository.update_transfer_record_status(
                 record_id,
                 status="failed",
@@ -120,7 +124,7 @@ class TransferExecutionMonitorService:
                 failure_type=failure_type,
                 failure_reason=str(exc),
             )
-            if isinstance(exc, ExchangeValidationError):
+            if failure_type == "config" and str(context.get("config_fingerprint") or "").strip():
                 user_id = int(context.get("user_id") or 0)
                 if user_id > 0:
                     auto_transfer_runtime_guard_service.mark_config_error(
