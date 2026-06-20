@@ -3,6 +3,14 @@ import { fetchAccountsList } from "./api.js";
 import { escapeHtml } from "./formatters.js";
 import { getLatestAccountsResult, setLatestAccountsResult } from "./state.js";
 
+function formatFeeRate(value) {
+  const numeric = Number.parseFloat(String(value ?? ""));
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "0.05%";
+  }
+  return `${numeric.toFixed(2)}%`;
+}
+
 export function findBalanceRowById(accountId) {
   const rows = Array.isArray(getLatestAccountsResult().balance_rows) ? getLatestAccountsResult().balance_rows : [];
   return rows.find((item) => String(item.id || "") === String(accountId || ""));
@@ -97,6 +105,8 @@ export function renderBalanceTableRows(rows) {
           <td>
             <span class="pill pill--${escapeHtml(row.connection_test_status_tone)}">${escapeHtml(row.connection_test_status)}</span>
           </td>
+          <td class="spread-metric">${escapeHtml(formatFeeRate(row.maker_fee_rate))}</td>
+          <td class="spread-metric">${escapeHtml(formatFeeRate(row.taker_fee_rate))}</td>
           <td class="spread-metric">${escapeHtml(row.updated_at)}</td>
           <td>
             <div class="account-actions">

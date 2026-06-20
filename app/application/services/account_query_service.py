@@ -202,6 +202,8 @@ class AccountQueryService(AccountServiceSupport):
                     "address_status_tone": str(row.get("address_status_tone") or "warning"),
                     "connection_test_status": str(row.get("connection_test_status") or "未测试"),
                     "connection_test_status_tone": str(row.get("connection_test_status_tone") or "warning"),
+                    "maker_fee_rate": float(row.get("maker_fee_rate") or 0.05),
+                    "taker_fee_rate": float(row.get("taker_fee_rate") or 0.05),
                     "transfer_supported": bool(row.get("transfer_supported")),
                     "transfer_option_count": int(row.get("transfer_option_count") or 0),
                     "transfer_block_reason": str(row.get("transfer_block_reason") or ""),
