@@ -40,21 +40,22 @@
                         <th>账户</th>
                         <th>市场类型</th>
                         <th>当前可用</th>
+                        <th>当前余额</th>
                         <th>资金占比</th>
                         <th>目标资金</th>
                         <th>自动触发值</th>
                         <th>偏差</th>
                         <th>地址配置</th>
                         <th>连接测试</th>
-                        <th>Maker 手续费</th>
-                        <th>Taker 手续费</th>
+                        <th>Maker</th>
+                        <th>Tick</th>
                         <th>更新时间</th>
                         <th>操作</th>
                     </tr>
                 </thead>
                 <tbody data-balance-table-body>
                     <tr class="table-empty-row">
-                        <td colspan="13" class="spread-metric">加载中...</td>
+                        <td colspan="14" class="spread-metric">加载中...</td>
                     </tr>
                 </tbody>
             </table>
@@ -203,12 +204,13 @@
     <div class="account-confirm__dialog card balance-config-dialog transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="transfer-title">
         <div class="account-confirm__content">
             <h2 id="transfer-title">手动调拨</h2>
-            <p data-transfer-notice>当前仅支持 Binance / OKX 的真实调拨路径，提交后会进入后台真实执行，请确认账户、网络与金额无误。</p>
+            <p data-transfer-notice>提交后仅创建手动划转记录，实际执行由后台进程处理，请确认账户和金额无误。</p>
             <form class="form-stack" data-transfer-form>
-                <input type="hidden" name="from_account_id" value="">
                 <label class="field">
                     <span class="field__label">转出账户</span>
-                    <input class="field__control" type="text" name="from_account_name" value="" readonly>
+                    <select class="field__control" name="from_account_id">
+                        <option value="">请选择转出账户</option>
+                    </select>
                 </label>
                 <label class="field">
                     <span class="field__label">转入账户</span>
@@ -216,7 +218,7 @@
                         <option value="">请选择转入账户</option>
                     </select>
                 </label>
-                <div class="inline-note" data-transfer-option-summary>正在读取可执行目标...</div>
+                <div class="inline-note" data-transfer-option-summary>请选择转出账户。</div>
                 <label class="field">
                     <span class="field__label">划转金额</span>
                     <input class="field__control" type="number" name="amount" min="0" step="0.01" value="" placeholder="请输入划转金额">
@@ -261,7 +263,7 @@
         </div>
         <div class="account-confirm__actions">
             <button class="button button--ghost" type="button" data-transfer-close>取消</button>
-            <button class="button button--primary" type="button" data-transfer-save>提交真实调拨</button>
+            <button class="button button--primary" type="button" data-transfer-save>提交手动划转</button>
         </div>
     </div>
 </div>

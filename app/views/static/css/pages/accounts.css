@@ -50,12 +50,12 @@
 .page-accounts .balance-table thead th:nth-child(3),
 .page-accounts .balance-table tbody td:nth-child(3),
 .page-accounts .balance-table thead th:nth-child(4),
-.page-accounts .balance-table tbody td:nth-child(4),
-.page-accounts .balance-table thead th:nth-child(5),
-.page-accounts .balance-table tbody td:nth-child(5) {
+.page-accounts .balance-table tbody td:nth-child(4) {
     width: 6%;
 }
 
+.page-accounts .balance-table thead th:nth-child(5),
+.page-accounts .balance-table tbody td:nth-child(5),
 .page-accounts .balance-table thead th:nth-child(6),
 .page-accounts .balance-table tbody td:nth-child(6),
 .page-accounts .balance-table thead th:nth-child(7),
@@ -65,32 +65,34 @@
 
 .page-accounts .balance-table thead th:nth-child(8),
 .page-accounts .balance-table tbody td:nth-child(8) {
-    width: 7%;
+    width: 6%;
 }
 
 .page-accounts .balance-table thead th:nth-child(9),
-.page-accounts .balance-table tbody td:nth-child(9) {
-    width: 7%;
-}
-
+.page-accounts .balance-table tbody td:nth-child(9),
 .page-accounts .balance-table thead th:nth-child(10),
 .page-accounts .balance-table tbody td:nth-child(10) {
-    width: 5%;
+    display: none;
 }
 
 .page-accounts .balance-table thead th:nth-child(11),
 .page-accounts .balance-table tbody td:nth-child(11) {
-    width: 5%;
+    width: 7%;
 }
 
 .page-accounts .balance-table thead th:nth-child(12),
 .page-accounts .balance-table tbody td:nth-child(12) {
-    width: 8%;
+    width: 7%;
 }
 
 .page-accounts .balance-table thead th:nth-child(13),
 .page-accounts .balance-table tbody td:nth-child(13) {
-    width: 11%;
+    width: 10%;
+}
+
+.page-accounts .balance-table thead th:nth-child(14),
+.page-accounts .balance-table tbody td:nth-child(14) {
+    width: 13%;
 }
 
 .page-accounts .balance-table tbody td {
@@ -99,16 +101,16 @@
     white-space: nowrap;
 }
 
-.page-accounts .balance-table thead th:nth-child(13),
-.page-accounts .balance-table tbody td:nth-child(13) {
+.page-accounts .balance-table thead th:nth-child(14),
+.page-accounts .balance-table tbody td:nth-child(14) {
     overflow: visible;
     text-overflow: clip;
 }
 
-.page-accounts .balance-table thead th:nth-child(10),
-.page-accounts .balance-table tbody td:nth-child(10),
 .page-accounts .balance-table thead th:nth-child(11),
-.page-accounts .balance-table tbody td:nth-child(11) {
+.page-accounts .balance-table tbody td:nth-child(11),
+.page-accounts .balance-table thead th:nth-child(12),
+.page-accounts .balance-table tbody td:nth-child(12) {
     text-align: center;
 }
 

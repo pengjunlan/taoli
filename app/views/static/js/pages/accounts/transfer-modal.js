@@ -1,9 +1,10 @@
 import { showToast } from "../../core/utils.js";
-import { createTransferRecord, fetchTransferOptions } from "./api.js";
+import { createTransferRecord } from "./api.js";
 import { escapeHtml, formatMoney, parseMoney } from "./formatters.js";
 import { findBalanceRowById, resolveBalanceAccountId } from "./render.js";
+import { getLatestAccountsResult } from "./state.js";
 
-const DEFAULT_REAL_TRANSFER_NOTICE = "当前仅支持 Binance / OKX 的真实调拨路径，提交后会进入后台真实执行，请确认账户、网络与金额无误。";
+const DEFAULT_TRANSFER_NOTICE = "提交后仅创建手动划转记录，实际执行由后台进程处理。";
 
 export function bindTransferModal({ elements, syncBodyScrollLock }) {
   const {
@@ -17,7 +18,18 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
     transferOptionSummary,
   } = elements;
 
-  let currentTransferContext = null;
+  const getBalanceRows = () => {
+    const rows = getLatestAccountsResult()?.balance_rows;
+    return Array.isArray(rows) ? rows : [];
+  };
+
+  const getAccountLabel = (row) =>
+    [String(row?.name || "").trim(), String(row?.exchange || "").trim()].filter(Boolean).join(" / ");
+
+  const getAccountLabelById = (accountId) => {
+    const row = getBalanceRows().find((item) => String(item.id || "") === String(accountId || ""));
+    return row ? getAccountLabel(row) : "";
+  };
 
   const setTransferOptionSummary = (text) => {
     if (transferOptionSummary) {
@@ -31,19 +43,43 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
     }
   };
 
-  const fillTransferTargetOptions = (options) => {
+  const fillSourceAccountOptions = ({ selectedAccountId = "" } = {}) => {
     if (!transferForm) return;
-    const select = transferForm.elements.to_account_id;
+
+    const select = transferForm.elements.from_account_id;
     if (!select) return;
 
-    const items = Array.isArray(options) ? options : [];
-    const optionHtml = items.map(
-      (item) =>
-        `<option value="${escapeHtml(item.id || "")}">${escapeHtml(item.name || "")} / ${escapeHtml(item.exchange || "")} / ${escapeHtml(item.market_type || "")} / ${escapeHtml(item.mode_label || "真实调拨")}</option>`,
-    );
+    const optionHtml = getBalanceRows()
+      .filter((row) => String(row.id || "").trim())
+      .map((row) => {
+        const id = String(row.id || "").trim();
+        return `<option value="${escapeHtml(id)}">${escapeHtml(getAccountLabel(row) || "--")}</option>`;
+      });
+
+    select.innerHTML = `<option value="">请选择转出账户</option>${optionHtml.join("")}`;
+    select.value = String(selectedAccountId || "");
+  };
+
+  const fillTargetAccountOptions = ({ selectedAccountId = "" } = {}) => {
+    if (!transferForm) return;
+
+    const select = transferForm.elements.to_account_id;
+    const fromAccountId = String(transferForm.elements.from_account_id.value || "").trim();
+    if (!select) return;
+
+    const optionHtml = getBalanceRows()
+      .filter((row) => {
+        const id = String(row.id || "").trim();
+        return id && id !== fromAccountId;
+      })
+      .map((row) => {
+        const id = String(row.id || "").trim();
+        return `<option value="${escapeHtml(id)}">${escapeHtml(getAccountLabel(row) || "--")}</option>`;
+      });
 
     select.innerHTML = `<option value="">请选择转入账户</option>${optionHtml.join("")}`;
-    select.disabled = items.length === 0;
+    select.disabled = !fromAccountId || optionHtml.length === 0;
+    select.value = String(selectedAccountId || "");
   };
 
   const renderTransferPreview = () => {
@@ -57,9 +93,6 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
 
     if (!fromRow || !toRow) {
       transferPreview.hidden = true;
-      if (transferDefaultHint) {
-        transferDefaultHint.textContent = "默认划拨金额：-";
-      }
       return;
     }
 
@@ -96,7 +129,7 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
 
     if (!fromRow || !toRow) {
       if (transferDefaultHint) {
-        transferDefaultHint.textContent = "默认划拨金额：-";
+        transferDefaultHint.textContent = "默认划转金额：-";
       }
       renderTransferPreview();
       return;
@@ -110,36 +143,65 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
     const toNeed = Math.max(0, toTarget - toAvailable);
     const defaultAmount = Math.min(fromExcess, toNeed);
 
-    currentTransferContext = {
-      fromExcess,
-      toNeed,
-      defaultAmount,
-    };
-
     transferForm.elements.amount.value = defaultAmount > 0 ? String(Number(defaultAmount.toFixed(2))) : "";
+
     if (transferDefaultHint) {
-      transferDefaultHint.textContent = `默认划拨金额：${formatMoney(defaultAmount)}（转出超出 ${formatMoney(fromExcess)}，转入待补 ${formatMoney(toNeed)}）`;
+      transferDefaultHint.textContent = `默认划转金额：${formatMoney(defaultAmount)}（转出超出 ${formatMoney(fromExcess)}，转入待补 ${formatMoney(toNeed)}）`;
     }
+
     renderTransferPreview();
+  };
+
+  const syncTransferTargets = ({ selectedTargetId = "" } = {}) => {
+    if (!transferForm) return;
+
+    const fromAccountId = String(transferForm.elements.from_account_id.value || "").trim();
+    fillTargetAccountOptions({ selectedAccountId: selectedTargetId });
+
+    const targetSelect = transferForm.elements.to_account_id;
+    const availableTargetCount = Array.from(targetSelect.options || []).filter((option) => option.value).length;
+
+    if (!fromAccountId) {
+      setTransferOptionSummary("请选择转出账户。");
+      if (transferDefaultHint) {
+        transferDefaultHint.textContent = "默认划转金额：-";
+      }
+      if (transferPreview) {
+        transferPreview.hidden = true;
+      }
+      return;
+    }
+
+    if (!availableTargetCount) {
+      setTransferOptionSummary("当前没有可选的转入账户。");
+      if (transferDefaultHint) {
+        transferDefaultHint.textContent = "默认划转金额：-";
+      }
+      if (transferPreview) {
+        transferPreview.hidden = true;
+      }
+      return;
+    }
+
+    setTransferOptionSummary(`当前可选转入账户 ${availableTargetCount} 个。`);
+    syncDefaultTransferAmount();
   };
 
   const closeTransferModal = () => {
     if (!transferModal || !transferForm) return;
+
     transferModal.hidden = true;
     transferForm.reset();
-    transferForm.elements.from_account_id.value = "";
-    transferForm.elements.from_account_name.value = "";
-    transferForm.elements.to_account_id.innerHTML = `<option value="">请选择转入账户</option>`;
-    transferForm.elements.to_account_id.disabled = false;
-    currentTransferContext = null;
+    fillSourceAccountOptions();
+    fillTargetAccountOptions();
     if (transferPreview) {
       transferPreview.hidden = true;
     }
     if (transferDefaultHint) {
-      transferDefaultHint.textContent = "默认划拨金额：-";
+      transferDefaultHint.textContent = "默认划转金额：-";
     }
-    setTransferOptionSummary("正在读取可执行目标...");
-    setTransferNotice(DEFAULT_REAL_TRANSFER_NOTICE);
+    setTransferOptionSummary("请选择转出账户。");
+    setTransferNotice(DEFAULT_TRANSFER_NOTICE);
     syncBodyScrollLock();
   };
 
@@ -158,6 +220,10 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
   });
 
   if (transferForm) {
+    transferForm.elements.from_account_id?.addEventListener("change", () => {
+      syncTransferTargets();
+    });
+
     transferForm.elements.to_account_id?.addEventListener("change", () => {
       syncDefaultTransferAmount();
     });
@@ -171,63 +237,31 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
     const balanceActionButton = event.target.closest("[data-balance-action]");
     if (!balanceActionButton || !transferModal || !transferForm) return;
 
-    const isSupported = String(balanceActionButton.getAttribute("data-balance-action-supported") || "true") === "true";
-    if (!isSupported) {
-      showToast(balanceActionButton.getAttribute("data-balance-action-reason") || "当前没有可真实执行的调拨目标。");
-      return;
-    }
-
-    const balanceRow = balanceActionButton.closest("[data-balance-row]");
     let accountId = String(balanceActionButton.getAttribute("data-balance-action") || "").trim();
+
     try {
       if (!accountId) {
         accountId = await resolveBalanceAccountId(balanceActionButton);
       }
+
       if (!accountId) {
         showToast("账户缺失，暂时无法调拨。");
         return;
       }
 
-      const accountName = String(
-        balanceRow?.querySelector(".spread-symbol strong")?.textContent || "",
-      ).trim();
-      const exchangeName = String(
-        balanceRow?.querySelector(".spread-symbol__hint")?.textContent || "",
-      ).trim();
-
-      transferForm.elements.from_account_id.value = accountId;
-      transferForm.elements.from_account_name.value = [accountName, exchangeName].filter(Boolean).join(" / ");
       transferModal.hidden = false;
       syncBodyScrollLock();
-      transferForm.elements.to_account_id.innerHTML = `<option value="">正在读取可执行目标...</option>`;
-      transferForm.elements.to_account_id.disabled = true;
-      setTransferOptionSummary("正在读取可执行目标...");
-      setTransferNotice(DEFAULT_REAL_TRANSFER_NOTICE);
-      if (transferPreview) {
-        transferPreview.hidden = true;
-      }
-      if (transferDefaultHint) {
-        transferDefaultHint.textContent = "默认划拨金额：-";
-      }
-      const optionsResult = await fetchTransferOptions(accountId);
-      if (!optionsResult.success) {
-        showToast(optionsResult.message || "读取可执行调拨目标失败。");
-        closeTransferModal();
-        return;
-      }
+      setTransferNotice(DEFAULT_TRANSFER_NOTICE);
+      fillSourceAccountOptions({ selectedAccountId: accountId });
+      syncTransferTargets();
 
-      fillTransferTargetOptions(optionsResult.options || []);
-      setTransferNotice(optionsResult.notice || DEFAULT_REAL_TRANSFER_NOTICE);
-      setTransferOptionSummary(
-        `当前可真实执行目标 ${Number(optionsResult.option_count || 0)} 个，已过滤不可执行目标 ${Number(optionsResult.blocked_count || 0)} 个`,
-      );
-
-      if (!Array.isArray(optionsResult.options) || !optionsResult.options.length) {
-        showToast("当前没有可真实执行的调拨目标，请先检查目标账户支持范围和地址配置。");
-        return;
-      }
-
-      window.setTimeout(() => transferForm.elements.to_account_id.focus(), 20);
+      window.setTimeout(() => {
+        if (transferForm.elements.to_account_id.disabled) {
+          transferForm.elements.from_account_id.focus();
+          return;
+        }
+        transferForm.elements.to_account_id.focus();
+      }, 20);
     } catch (error) {
       showToast(error?.message || "读取账户失败，无法打开调拨窗口。");
       closeTransferModal();
@@ -256,22 +290,16 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
         showToast("请输入正确的划转金额。");
         return;
       }
-      if (currentTransferContext && amount > currentTransferContext.defaultAmount && currentTransferContext.defaultAmount > 0) {
-        showToast(`划转金额不能超过默认可划转金额 ${formatMoney(currentTransferContext.defaultAmount)}。`);
-        return;
-      }
 
-      const toAccountLabel = String(
-        transferForm.elements.to_account_id.selectedOptions?.[0]?.textContent || "",
-      ).trim();
       const confirmMessage = [
-        "确认发起真实调拨？",
-        `转出账户：${String(transferForm.elements.from_account_name.value || "").trim() || "--"}`,
-        `转入账户：${toAccountLabel || "--"}`,
+        "确认创建手动划转记录？",
+        `转出账户：${getAccountLabelById(fromAccountId) || "--"}`,
+        `转入账户：${getAccountLabelById(toAccountId) || "--"}`,
         `划转金额：${formatMoney(amount)}`,
         "",
-        "该操作会调用交易所接口并进入后台执行，请确认账户、网络与金额无误。",
+        "提交后由后台进程继续处理实际划转。",
       ].join("\n");
+
       if (!window.confirm(confirmMessage)) {
         return;
       }
@@ -282,14 +310,15 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
           from_account_id: fromAccountId,
           to_account_id: toAccountId,
           amount,
-          reason: "手动真实调拨",
+          reason: "手动划转",
         });
+
         if (!result.success) {
           showToast(result.message || "保存调拨记录失败。");
           return;
         }
 
-        showToast(result.message || "真实调拨任务已创建。");
+        showToast(result.message || "手动划转记录已创建。");
         closeTransferModal();
       } catch (error) {
         showToast(error?.message || "保存调拨记录失败，请稍后再试。");
@@ -298,6 +327,11 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
       }
     });
   }
+
+  fillSourceAccountOptions();
+  fillTargetAccountOptions();
+  setTransferNotice(DEFAULT_TRANSFER_NOTICE);
+  setTransferOptionSummary("请选择转出账户。");
 
   return {
     handleEscape() {

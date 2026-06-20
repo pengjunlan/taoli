@@ -4,11 +4,15 @@ import { escapeHtml } from "./formatters.js";
 import { getLatestAccountsResult, setLatestAccountsResult } from "./state.js";
 
 function formatFeeRate(value) {
-  const numeric = Number.parseFloat(String(value ?? ""));
+  const raw = String(value ?? "").trim().replace(/%$/u, "");
+  const numeric = Number.parseFloat(raw);
   if (!Number.isFinite(numeric) || numeric <= 0) {
     return "0.05%";
   }
-  return `${numeric.toFixed(2)}%`;
+  const normalized = raw.includes(".")
+    ? raw.replace(/0+$/u, "").replace(/\.$/u, "")
+    : raw;
+  return `${normalized || numeric.toString()}%`;
 }
 
 export function findBalanceRowById(accountId) {
@@ -73,17 +77,14 @@ export function renderBalanceTableRows(rows) {
   if (!Array.isArray(rows) || !rows.length) {
     return `
       <tr class="table-empty-row">
-        <td colspan="11" class="spread-metric">暂无账户资金分布数据</td>
+        <td colspan="14" class="spread-metric">暂无账户资金分布数据</td>
       </tr>
     `;
   }
 
   return rows
     .map((row) => {
-      const canTransfer = Boolean(row.transfer_supported);
-      const transferActionHint = canTransfer
-        ? String(row.transfer_action_hint || `当前可真实调拨到 ${Number(row.transfer_option_count || 0)} 个目标账户。`)
-        : String(row.transfer_block_reason || "当前没有可真实执行的调拨目标。");
+      const transferActionHint = "提交后仅创建手动划转记录，实际执行由后台进程处理。";
 
       return `
         <tr data-balance-row="${escapeHtml(row.id || "")}">
@@ -95,6 +96,7 @@ export function renderBalanceTableRows(rows) {
           </td>
           <td>${escapeHtml(row.market_type)}</td>
           <td class="spread-metric spread-metric--strong">${escapeHtml(row.available)}</td>
+          <td class="spread-metric">${escapeHtml(row.current_balance || row.available)}</td>
           <td class="spread-metric">${escapeHtml(row.allocation_ratio || "0%")}</td>
           <td class="spread-metric">${escapeHtml(row.target)}</td>
           <td class="spread-metric">${escapeHtml(row.auto_trigger_value || "$0")}</td>
@@ -115,11 +117,9 @@ export function renderBalanceTableRows(rows) {
                 class="table-action"
                 type="button"
                 data-balance-action="${escapeHtml(row.id || "")}"
-                data-balance-action-supported="${canTransfer ? "true" : "false"}"
                 data-balance-action-reason="${escapeHtml(transferActionHint)}"
                 title="${escapeHtml(transferActionHint)}"
-                ${canTransfer ? "" : "disabled aria-disabled=\"true\""}
-              >${canTransfer ? "调拨" : "不可调拨"}</button>
+              >调拨</button>
             </div>
           </td>
         </tr>
