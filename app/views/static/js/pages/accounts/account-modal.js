@@ -6,6 +6,7 @@ import {
   testAccountConnection,
   updateAccount,
 } from "./api.js";
+import { getFormField } from "./form-fields.js";
 
 export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountTables }) {
   const {
@@ -24,6 +25,7 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
   const hiddenAccountId = accountForm?.querySelector('input[name="account_id"]');
   const hiddenConnectionStatus = accountForm?.querySelector('input[name="connection_test_status"]');
   const submitButton = accountForm?.querySelector('button[type="submit"]');
+  const getAccountField = (name) => getFormField(accountForm, name);
 
   if (
     !accountModal ||
@@ -128,17 +130,39 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
   };
 
   const fillForm = (account) => {
+    const marketTypeField = getAccountField("market_type");
+    const exchangeCodeField = getAccountField("exchange_code");
+    const apiKeyField = getAccountField("api_key");
+    const apiSecretField = getAccountField("api_secret");
+    const apiPassphraseField = getAccountField("api_passphrase");
+    const addressNetworkField = getAccountField("address_network");
+    const addressValueField = getAccountField("address_value");
+    const addressMemoField = getAccountField("address_memo");
+
+    if (
+      !marketTypeField ||
+      !exchangeCodeField ||
+      !apiKeyField ||
+      !apiSecretField ||
+      !apiPassphraseField ||
+      !addressNetworkField ||
+      !addressValueField ||
+      !addressMemoField
+    ) {
+      throw new Error("账户表单加载不完整，请刷新页面后重试。");
+    }
+
     accountForm.dataset.mode = "edit";
     hiddenAccountId.value = String(account.account_id || "");
     hiddenConnectionStatus.value = String(account.connection_test_status || "untested");
-    accountForm.elements.market_type.value = account.market_type || "";
-    accountForm.elements.exchange_code.value = account.exchange_code || "";
-    accountForm.elements.api_key.value = account.api_key || "";
-    accountForm.elements.api_secret.value = account.api_secret || "";
-    accountForm.elements.api_passphrase.value = account.api_passphrase || "";
-    accountForm.elements.address_network.value = account.address_network || "";
-    accountForm.elements.address_value.value = account.address_value || "";
-    accountForm.elements.address_memo.value = account.address_memo || "";
+    marketTypeField.value = account.market_type || "";
+    exchangeCodeField.value = account.exchange_code || "";
+    apiKeyField.value = account.api_key || "";
+    apiSecretField.value = account.api_secret || "";
+    apiPassphraseField.value = account.api_passphrase || "";
+    addressNetworkField.value = account.address_network || "";
+    addressValueField.value = account.address_value || "";
+    addressMemoField.value = account.address_memo || "";
     originalConnectionSnapshot = readConnectionSnapshot();
     accountModalTitle.textContent = "编辑账户";
     submitButton.textContent = "保存修改";
@@ -157,7 +181,7 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
   };
 
   connectionFieldNames.forEach((name) => {
-    const field = accountForm.elements[name];
+    const field = getAccountField(name);
     if (!field) return;
 
     field.addEventListener("input", syncConnectionStatusByConfig);

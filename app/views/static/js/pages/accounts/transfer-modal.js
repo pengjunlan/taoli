@@ -1,6 +1,7 @@
 import { showToast } from "../../core/utils.js";
 import { createTransferRecord } from "./api.js";
 import { escapeHtml, formatMoney, parseMoney } from "./formatters.js";
+import { getFormField } from "./form-fields.js";
 import { findBalanceRowById, resolveBalanceAccountId } from "./render.js";
 import { getLatestAccountsResult } from "./state.js";
 
@@ -43,10 +44,12 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
     }
   };
 
+  const getTransferField = (name) => getFormField(transferForm, name);
+
   const fillSourceAccountOptions = ({ selectedAccountId = "" } = {}) => {
     if (!transferForm) return;
 
-    const select = transferForm.elements.from_account_id;
+    const select = getTransferField("from_account_id");
     if (!select) return;
 
     const optionHtml = getBalanceRows()
@@ -63,8 +66,9 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
   const fillTargetAccountOptions = ({ selectedAccountId = "" } = {}) => {
     if (!transferForm) return;
 
-    const select = transferForm.elements.to_account_id;
-    const fromAccountId = String(transferForm.elements.from_account_id.value || "").trim();
+    const select = getTransferField("to_account_id");
+    const fromSelect = getTransferField("from_account_id");
+    const fromAccountId = String(fromSelect?.value || "").trim();
     if (!select) return;
 
     const optionHtml = getBalanceRows()
@@ -85,9 +89,12 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
   const renderTransferPreview = () => {
     if (!transferForm || !transferPreview) return;
 
-    const fromAccountId = String(transferForm.elements.from_account_id.value || "").trim();
-    const toAccountId = String(transferForm.elements.to_account_id.value || "").trim();
-    const amount = Number(transferForm.elements.amount.value || 0);
+    const fromSelect = getTransferField("from_account_id");
+    const toSelect = getTransferField("to_account_id");
+    const amountField = getTransferField("amount");
+    const fromAccountId = String(fromSelect?.value || "").trim();
+    const toAccountId = String(toSelect?.value || "").trim();
+    const amount = Number(amountField?.value || 0);
     const fromRow = findBalanceRowById(fromAccountId);
     const toRow = findBalanceRowById(toAccountId);
 
@@ -122,8 +129,15 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
   const syncDefaultTransferAmount = () => {
     if (!transferForm) return;
 
-    const fromAccountId = String(transferForm.elements.from_account_id.value || "").trim();
-    const toAccountId = String(transferForm.elements.to_account_id.value || "").trim();
+    const fromSelect = getTransferField("from_account_id");
+    const toSelect = getTransferField("to_account_id");
+    const amountField = getTransferField("amount");
+    if (!fromSelect || !toSelect || !amountField) {
+      throw new Error("手动调拨表单加载不完整，请刷新页面后重试。");
+    }
+
+    const fromAccountId = String(fromSelect.value || "").trim();
+    const toAccountId = String(toSelect.value || "").trim();
     const fromRow = findBalanceRowById(fromAccountId);
     const toRow = findBalanceRowById(toAccountId);
 
@@ -143,7 +157,7 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
     const toNeed = Math.max(0, toTarget - toAvailable);
     const defaultAmount = Math.min(fromExcess, toNeed);
 
-    transferForm.elements.amount.value = defaultAmount > 0 ? String(Number(defaultAmount.toFixed(2))) : "";
+    amountField.value = defaultAmount > 0 ? String(Number(defaultAmount.toFixed(2))) : "";
 
     if (transferDefaultHint) {
       transferDefaultHint.textContent = `默认划转金额：${formatMoney(defaultAmount)}（转出超出 ${formatMoney(fromExcess)}，转入待补 ${formatMoney(toNeed)}）`;
@@ -155,10 +169,19 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
   const syncTransferTargets = ({ selectedTargetId = "" } = {}) => {
     if (!transferForm) return;
 
-    const fromAccountId = String(transferForm.elements.from_account_id.value || "").trim();
+    const fromSelect = getTransferField("from_account_id");
+    if (!fromSelect) {
+      throw new Error("手动调拨表单加载不完整，请刷新页面后重试。");
+    }
+
+    const fromAccountId = String(fromSelect.value || "").trim();
     fillTargetAccountOptions({ selectedAccountId: selectedTargetId });
 
-    const targetSelect = transferForm.elements.to_account_id;
+    const targetSelect = getTransferField("to_account_id");
+    if (!targetSelect) {
+      throw new Error("手动调拨表单加载不完整，请刷新页面后重试。");
+    }
+
     const availableTargetCount = Array.from(targetSelect.options || []).filter((option) => option.value).length;
 
     if (!fromAccountId) {
@@ -220,15 +243,15 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
   });
 
   if (transferForm) {
-    transferForm.elements.from_account_id?.addEventListener("change", () => {
+    getTransferField("from_account_id")?.addEventListener("change", () => {
       syncTransferTargets();
     });
 
-    transferForm.elements.to_account_id?.addEventListener("change", () => {
+    getTransferField("to_account_id")?.addEventListener("change", () => {
       syncDefaultTransferAmount();
     });
 
-    transferForm.elements.amount?.addEventListener("input", () => {
+    getTransferField("amount")?.addEventListener("input", () => {
       renderTransferPreview();
     });
   }
@@ -256,11 +279,17 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
       syncTransferTargets();
 
       window.setTimeout(() => {
-        if (transferForm.elements.to_account_id.disabled) {
-          transferForm.elements.from_account_id.focus();
+        const fromSelect = getTransferField("from_account_id");
+        const targetSelect = getTransferField("to_account_id");
+        if (!fromSelect || !targetSelect) {
           return;
         }
-        transferForm.elements.to_account_id.focus();
+
+        if (targetSelect.disabled) {
+          fromSelect.focus();
+          return;
+        }
+        targetSelect.focus();
       }, 20);
     } catch (error) {
       showToast(error?.message || "读取账户失败，无法打开调拨窗口。");
@@ -270,9 +299,17 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
 
   if (transferSaveButton && transferForm) {
     transferSaveButton.addEventListener("click", async () => {
-      const fromAccountId = Number(transferForm.elements.from_account_id.value || 0);
-      const toAccountId = Number(transferForm.elements.to_account_id.value || 0);
-      const amount = Number(transferForm.elements.amount.value || 0);
+      const fromSelect = getTransferField("from_account_id");
+      const toSelect = getTransferField("to_account_id");
+      const amountField = getTransferField("amount");
+      if (!fromSelect || !toSelect || !amountField) {
+        showToast("手动调拨表单加载不完整，请刷新页面后重试。");
+        return;
+      }
+
+      const fromAccountId = Number(fromSelect.value || 0);
+      const toAccountId = Number(toSelect.value || 0);
+      const amount = Number(amountField.value || 0);
 
       if (!fromAccountId) {
         showToast("转出账户不能为空。");

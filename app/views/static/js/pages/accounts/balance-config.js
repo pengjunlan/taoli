@@ -1,5 +1,6 @@
 import { showToast } from "../../core/utils.js";
 import { updateFundingRatio } from "./api.js";
+import { getFormField } from "./form-fields.js";
 import { resolveBalanceAccountId } from "./render.js";
 
 export function bindBalanceConfigControls({ elements, syncBodyScrollLock, refreshAccountTables }) {
@@ -12,10 +13,19 @@ export function bindBalanceConfigControls({ elements, syncBodyScrollLock, refres
 
   const closeBalanceConfigModal = () => {
     if (!balanceConfigModal || !balanceConfigForm) return;
+
+    const accountIdField = getFormField(balanceConfigForm, "account_id");
+    const fundingRatioField = getFormField(balanceConfigForm, "funding_ratio_percent");
     balanceConfigModal.hidden = true;
     balanceConfigForm.reset();
-    balanceConfigForm.elements.account_id.value = "";
-    balanceConfigForm.elements.funding_ratio_percent.value = "0";
+
+    if (accountIdField) {
+      accountIdField.value = "";
+    }
+    if (fundingRatioField) {
+      fundingRatioField.value = "0";
+    }
+
     syncBodyScrollLock();
   };
 
@@ -55,11 +65,17 @@ export function bindBalanceConfigControls({ elements, syncBodyScrollLock, refres
         return;
       }
 
-      balanceConfigForm.elements.account_id.value = accountId;
-      balanceConfigForm.elements.funding_ratio_percent.value = currentValue;
+      const accountIdField = getFormField(balanceConfigForm, "account_id");
+      const fundingRatioField = getFormField(balanceConfigForm, "funding_ratio_percent");
+      if (!accountIdField || !fundingRatioField) {
+        throw new Error("资金占比配置表单加载不完整，请刷新页面后重试。");
+      }
+
+      accountIdField.value = accountId;
+      fundingRatioField.value = currentValue;
       balanceConfigModal.hidden = false;
       syncBodyScrollLock();
-      window.setTimeout(() => balanceConfigForm.elements.funding_ratio_percent.focus(), 20);
+      window.setTimeout(() => fundingRatioField.focus(), 20);
     } catch (error) {
       showToast(error?.message || "读取账户失败，无法配置资金占比。");
     }
@@ -67,8 +83,15 @@ export function bindBalanceConfigControls({ elements, syncBodyScrollLock, refres
 
   if (balanceConfigSaveButton && balanceConfigForm) {
     balanceConfigSaveButton.addEventListener("click", async () => {
-      const accountId = String(balanceConfigForm.elements.account_id.value || "").trim();
-      const fundingRatioPercent = Number(balanceConfigForm.elements.funding_ratio_percent.value || 0);
+      const accountIdField = getFormField(balanceConfigForm, "account_id");
+      const fundingRatioField = getFormField(balanceConfigForm, "funding_ratio_percent");
+      if (!accountIdField || !fundingRatioField) {
+        showToast("资金占比配置表单加载不完整，请刷新页面后重试。");
+        return;
+      }
+
+      const accountId = String(accountIdField.value || "").trim();
+      const fundingRatioPercent = Number(fundingRatioField.value || 0);
       if (!accountId) {
         showToast("账户 ID 缺失，无法保存。");
         return;

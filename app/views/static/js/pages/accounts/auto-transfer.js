@@ -1,5 +1,6 @@
 import { showToast } from "../../core/utils.js";
 import { fetchAutoTransferConfig, updateAutoTransferConfig } from "./api.js";
+import { getFormField } from "./form-fields.js";
 import { getLatestAutoTransferConfig, setLatestAutoTransferConfig } from "./state.js";
 
 export function syncAutoTransferToggleUi(elements) {
@@ -40,6 +41,8 @@ export function bindAutoTransferControls({ elements, syncBodyScrollLock, refresh
     syncBodyScrollLock();
   };
 
+  const getTriggerRatioField = () => getFormField(autoTransferForm, "trigger_ratio_percent");
+
   if (autoTransferModal) {
     autoTransferModal.addEventListener("click", (event) => {
       if (event.target === autoTransferModal) {
@@ -58,7 +61,12 @@ export function bindAutoTransferControls({ elements, syncBodyScrollLock, refresh
     autoTransferOpenButton.addEventListener("click", async () => {
       try {
         const config = await refreshAutoTransferConfig(elements);
-        autoTransferForm.elements.trigger_ratio_percent.value = String(
+        const triggerRatioField = getTriggerRatioField();
+        if (!triggerRatioField) {
+          throw new Error("自动调拨配置表单加载不完整，请刷新页面后重试。");
+        }
+
+        triggerRatioField.value = String(
           Math.round(Number(config.trigger_ratio || 0.5) * 100),
         );
         autoTransferModal.hidden = false;
@@ -88,9 +96,12 @@ export function bindAutoTransferControls({ elements, syncBodyScrollLock, refresh
         await refreshAccountTables();
 
         if (autoTransferForm) {
-          autoTransferForm.elements.trigger_ratio_percent.value = String(
+          const triggerRatioField = getTriggerRatioField();
+          if (triggerRatioField) {
+            triggerRatioField.value = String(
             Math.round(Number(getLatestAutoTransferConfig().trigger_ratio || 0.5) * 100),
-          );
+            );
+          }
         }
 
         showToast(
@@ -108,7 +119,13 @@ export function bindAutoTransferControls({ elements, syncBodyScrollLock, refresh
 
   if (autoTransferSaveButton && autoTransferForm) {
     autoTransferSaveButton.addEventListener("click", async () => {
-      const triggerRatioPercent = Number(autoTransferForm.elements.trigger_ratio_percent.value || 50);
+      const triggerRatioField = getTriggerRatioField();
+      if (!triggerRatioField) {
+        showToast("自动调拨配置表单加载不完整，请刷新页面后重试。");
+        return;
+      }
+
+      const triggerRatioPercent = Number(triggerRatioField.value || 50);
       if (Number.isNaN(triggerRatioPercent) || triggerRatioPercent <= 0 || triggerRatioPercent > 100) {
         showToast("触发比例必须在 1 到 100 之间。");
         return;
