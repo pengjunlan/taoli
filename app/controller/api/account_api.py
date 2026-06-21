@@ -47,6 +47,7 @@ async def account_list_api(
     address_rows = account_service.build_address_rows_for_user(current_user.id)
     auto_transfer_config = account_service.get_auto_transfer_config(current_user.id)
     balance_rows = account_service.build_balance_rows_from_accounts(account_rows, auto_transfer_config.trigger_ratio)
+    auto_transfer_alert = account_service.build_auto_transfer_alert_for_user(current_user.id)
     summary_cards = account_service.build_summary_cards(
         account_rows,
         balance_rows,
@@ -61,6 +62,7 @@ async def account_list_api(
         "summary_cards": summary_cards,
         "account_count": len(account_rows),
         "address_count": len(address_rows),
+        "auto_transfer_alert": auto_transfer_alert,
         "auto_transfer_config": {
             "is_enabled": auto_transfer_config.is_enabled,
             "trigger_ratio": auto_transfer_config.trigger_ratio,
@@ -170,6 +172,26 @@ async def update_auto_transfer_config_api(
         "auto_transfer_executed": False,
         "transfer_id": None,
     }
+
+
+@router.post("/api/accounts/{account_id}/auto-transfer-unlock")
+async def unlock_auto_transfer_account_api(
+    account_id: int,
+    current_user: AuthUser = Depends(require_api_user),
+) -> Dict[str, object]:
+    try:
+        account_service.unlock_auto_transfer_account(current_user.id, account_id)
+    except AccountError as exc:
+        return AccountResponse(success=False, message=str(exc)).to_dict()
+    except Exception:
+        logger.exception(
+            "Unlock auto transfer account failed unexpectedly for user_id=%s account_id=%s",
+            current_user.id,
+            account_id,
+        )
+        return AccountResponse(success=False, message="解冻自动调拨失败：服务内部异常，请查看后端日志。").to_dict()
+
+    return AccountResponse(success=True, message="该账户自动调拨已解冻。", account_id=account_id).to_dict()
 
 
 @router.post("/api/accounts/auto-transfer/execute")

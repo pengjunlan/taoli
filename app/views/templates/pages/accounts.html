@@ -60,6 +60,16 @@
                 </tbody>
             </table>
         </div>
+        <div class="auto-transfer-alert" data-auto-transfer-alert hidden>
+            <div class="auto-transfer-alert__content">
+                <strong data-auto-transfer-alert-title>自动调拨告警</strong>
+                <span data-auto-transfer-alert-message>--</span>
+            </div>
+            <div class="auto-transfer-alert__actions">
+                <button class="table-action" type="button" data-auto-transfer-alert-config hidden>去配置</button>
+                <button class="table-action table-action--primary" type="button" data-auto-transfer-alert-unlock hidden>解冻</button>
+            </div>
+        </div>
     </section>
 
     <section class="card card--section">
@@ -159,7 +169,7 @@
     <div class="account-confirm__dialog card balance-config-dialog transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="auto-transfer-title">
         <div class="account-confirm__content">
             <h2 id="auto-transfer-title">自动调拨配置</h2>
-            <p>当账户当前资金低于目标资金的一定比例时，自动从溢出资金最多的账户转出，并按最小偏差值生成真实调拨任务。</p>
+            <p>当账户当前可用或当前余额任一值低于目标资金的一定比例时，自动从偏差值最大的富余账户转出，优先补给偏差最缺的目标账户。</p>
             <form class="form-stack" data-auto-transfer-form>
                 <label class="field">
                     <span class="field__label">触发比例（%）</span>
@@ -167,7 +177,7 @@
                 </label>
                 <div class="transfer-preview" data-auto-transfer-rule>
                     <div class="transfer-preview__head">当前规则</div>
-                    <div class="transfer-preview__hint">低于目标资金该比例时触发；从溢出资金最多的账户转出；金额取转出超出值和转入缺口值的较小值；转出后不能低于转出账户自己的目标资金。</div>
+                    <div class="transfer-preview__hint">当前可用、当前余额只要任一值低于触发线就可触发；目标账户按偏差最缺优先；转出账户按偏差最大优先；金额取转出富余值与转入缺口值的较小值；同一账户连续两次出现同类配置/权限问题时自动冻结，需手动解冻。</div>
                 </div>
             </form>
         </div>
@@ -204,7 +214,7 @@
     <div class="account-confirm__dialog card balance-config-dialog transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="transfer-title">
         <div class="account-confirm__content">
             <h2 id="transfer-title">手动调拨</h2>
-            <p data-transfer-notice>提交后仅创建手动划转记录，实际执行由后台进程处理，请确认账户和金额无误。</p>
+            <p data-transfer-notice>手动调拨可直接提交，后台会按记录尝试执行，成功或失败以执行结果为准，请确认账户和金额无误。</p>
             <form class="form-stack" data-transfer-form>
                 <label class="field">
                     <span class="field__label">转出账户</span>

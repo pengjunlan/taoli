@@ -48,7 +48,7 @@ FALLBACK_AVAILABLE_AMOUNTS = {
 # are expected to execute against real exchange APIs.
 MANUAL_TRANSFER_EXECUTION_MODE = "worker_enabled"
 MANUAL_TRANSFER_EXECUTION_RESULT_HINT = "手动调拨任务已创建，后台将立即进入真实执行流程。"
-MANUAL_TRANSFER_UI_NOTICE = "当前仅支持 Binance / OKX 的真实调拨路径，提交后会进入后台真实执行，请确认账户、网络与金额无误。"
+MANUAL_TRANSFER_UI_NOTICE = "手动调拨可直接提交，后台会按记录尝试执行，成功或失败以执行结果为准。"
 
 REAL_TRANSFER_EXECUTION_SUPPORTED_EXCHANGES = {"binance", "okx"}
 

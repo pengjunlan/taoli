@@ -5,12 +5,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Dict, Optional
 
+from app.application.services.auto_transfer_account_guard_service import auto_transfer_account_guard_service
 from app.application.services.account_support import AutoTransferConfigResult, AutoTransferExecutionResult
 from app.application.services.account_transfer_capability_service import AccountTransferCapabilityService
-from app.application.services.auto_transfer_runtime_guard_service import auto_transfer_runtime_guard_service
 from app.domain.entities import AuthUser
 from app.infrastructure.persistence.account_repository import account_repository
-from app.shared.exceptions import AccountPersistenceError, AccountValidationError
+from app.shared.exceptions import AccountNotFoundError, AccountPersistenceError, AccountValidationError
+
+
+AUTO_REAL_TRANSFER_REASON = "自动真实调拨"
 
 
 class AccountAutoTransferService:
@@ -38,8 +41,6 @@ class AccountAutoTransferService:
                 is_enabled=is_enabled,
                 trigger_ratio=round(trigger_ratio, 4),
             )
-            # User account/config changes clear the runtime block and allow retries.
-            auto_transfer_runtime_guard_service.clear(current_user.id)
         except Exception as exc:
             raise AccountPersistenceError("保存自动调拨配置失败：数据库操作异常。") from exc
 
@@ -52,15 +53,13 @@ class AccountAutoTransferService:
         config = self.get_auto_transfer_config(current_user.id)
         if not config.is_enabled:
             raise AccountValidationError("请先开启自动调拨。")
-        if auto_transfer_runtime_guard_service.is_blocked(current_user.id):
-            raise AccountValidationError("自动调拨已因账户配置或账户状态异常而暂停，请修正账户后再重试。")
 
         account_rows = self._query_service.build_account_rows_for_user(current_user.id)
         active_account_rows = [row for row in account_rows if bool(row.get("is_active", True))]
         balance_rows = self._query_service.build_balance_rows_from_accounts(active_account_rows, config.trigger_ratio)
-        candidate = self._pick_supported_auto_transfer_candidate(current_user.id, balance_rows, config.trigger_ratio)
+        candidate = self._pick_auto_transfer_candidate(current_user.id, balance_rows, config.trigger_ratio)
         if candidate is None:
-            raise AccountValidationError("当前没有同时满足自动调拨条件且支持真实执行的账户组合。")
+            raise AccountValidationError("当前没有同时满足自动调拨条件的账户组合。")
 
         pending_transfer = account_repository.get_open_worker_transfer_record_by_target_account_id(
             int(candidate["to_account_id"])
@@ -82,11 +81,11 @@ class AccountAutoTransferService:
                 from_account_id=int(candidate["from_account_id"]),
                 to_account_id=int(candidate["to_account_id"]),
                 amount=round(float(candidate["amount"]), 2),
-                reason="自动真实调拨",
+                reason=AUTO_REAL_TRANSFER_REASON,
                 status="pending",
                 execute_status="pending_execute",
                 result_status="none",
-                config_fingerprint=auto_transfer_runtime_guard_service.build_config_version(current_user.id),
+                config_fingerprint="",
                 is_worker_enabled=True,
                 result=(
                     "自动调拨任务已创建，后台将按真实执行链路处理。"
@@ -101,8 +100,6 @@ class AccountAutoTransferService:
     def maybe_execute_auto_transfer(self, user_id: int) -> Optional[AutoTransferExecutionResult]:
         config = self.get_auto_transfer_config(user_id)
         if not config.is_enabled:
-            return None
-        if auto_transfer_runtime_guard_service.is_blocked(user_id):
             return None
 
         now = datetime.now()
@@ -120,7 +117,7 @@ class AccountAutoTransferService:
         except AccountValidationError:
             return None
 
-    def _pick_supported_auto_transfer_candidate(
+    def _pick_auto_transfer_candidate(
         self,
         user_id: int,
         balance_rows,
@@ -132,11 +129,16 @@ class AccountAutoTransferService:
 
         account_rows = account_repository.list_active_accounts_with_address_by_user_id(user_id)
         account_map = {int(row["id"]): row for row in account_rows}
+        fallback_candidate: Optional[Dict[str, float | int | str]] = None
 
         for candidate in candidates:
             from_account = account_map.get(int(candidate["from_account_id"]))
             to_account = account_map.get(int(candidate["to_account_id"]))
             if from_account is None or to_account is None:
+                continue
+            if auto_transfer_account_guard_service.is_frozen(user_id, int(candidate["from_account_id"])):
+                continue
+            if auto_transfer_account_guard_service.is_frozen(user_id, int(candidate["to_account_id"])):
                 continue
             if not bool(from_account.get("is_active")) or not bool(to_account.get("is_active")):
                 continue
@@ -146,12 +148,23 @@ class AccountAutoTransferService:
                 continue
 
             capability = self._transfer_capability_service.build_transfer_capability(from_account, to_account)
-            if not capability["supported"]:
-                continue
-
-            return {
+            enriched_candidate = {
                 **candidate,
-                "mode": str(capability["mode"] or ""),
+                "mode": str(capability.get("mode") or ""),
+                "route_supported": bool(capability.get("supported")),
+                "route_block_reason": str(capability.get("reason") or ""),
             }
 
-        return None
+            if capability["supported"]:
+                return enriched_candidate
+
+            if fallback_candidate is None:
+                fallback_candidate = enriched_candidate
+
+        return fallback_candidate
+
+    def unlock_auto_transfer_account(self, user_id: int, account_id: int) -> None:
+        account = account_repository.get_account_with_address_by_id(account_id, user_id)
+        if account is None:
+            raise AccountNotFoundError("账户不存在，或你无权解冻该账户。")
+        auto_transfer_account_guard_service.unlock_account(user_id, account_id)

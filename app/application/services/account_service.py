@@ -90,6 +90,9 @@ class AccountService:
     def maybe_execute_auto_transfer(self, user_id: int) -> Optional[AutoTransferExecutionResult]:
         return self._auto_transfer_service.maybe_execute_auto_transfer(user_id)
 
+    def unlock_auto_transfer_account(self, user_id: int, account_id: int) -> None:
+        self._auto_transfer_service.unlock_auto_transfer_account(user_id, account_id)
+
     def build_account_rows_for_user(self, user_id: int) -> List[Dict[str, str]]:
         return self._query_service.build_account_rows_for_user(user_id)
 
@@ -115,6 +118,9 @@ class AccountService:
 
     def build_transfer_rows_for_user(self, user_id: int) -> List[Dict[str, str]]:
         return self._query_service.build_transfer_rows_for_user(user_id)
+
+    def build_auto_transfer_alert_for_user(self, user_id: int) -> Dict[str, object] | None:
+        return self._query_service.build_auto_transfer_alert_for_user(user_id)
 
     def build_transfer_options_for_user(self, from_account_id: int, user_id: int) -> Dict[str, object]:
         return self._query_service.build_transfer_options_for_user(from_account_id, user_id)

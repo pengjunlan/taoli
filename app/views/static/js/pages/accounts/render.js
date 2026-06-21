@@ -73,6 +73,53 @@ export function updateSummaryCards(cards) {
   });
 }
 
+export function renderAutoTransferAlert(alert) {
+  const container = document.querySelector("[data-auto-transfer-alert]");
+  const title = document.querySelector("[data-auto-transfer-alert-title]");
+  const message = document.querySelector("[data-auto-transfer-alert-message]");
+  const configButton = document.querySelector("[data-auto-transfer-alert-config]");
+  const unlockButton = document.querySelector("[data-auto-transfer-alert-unlock]");
+
+  if (!container || !title || !message) return;
+
+  if (!alert || !alert.message) {
+    container.hidden = true;
+    container.className = "auto-transfer-alert";
+    if (configButton) {
+      configButton.hidden = true;
+      configButton.removeAttribute("data-account-id");
+    }
+    if (unlockButton) {
+      unlockButton.hidden = true;
+      unlockButton.removeAttribute("data-account-id");
+    }
+    return;
+  }
+
+  container.hidden = false;
+  container.className = `auto-transfer-alert auto-transfer-alert--${escapeHtml(String(alert.level || "warning"))}`;
+  title.textContent = alert.is_frozen ? "自动调拨已冻结" : "自动调拨异常告警";
+  message.textContent = String(alert.message || "");
+
+  if (configButton) {
+    configButton.hidden = !Boolean(alert.account_id);
+    if (alert.account_id) {
+      configButton.setAttribute("data-account-id", String(alert.account_id));
+    } else {
+      configButton.removeAttribute("data-account-id");
+    }
+  }
+
+  if (unlockButton) {
+    unlockButton.hidden = !Boolean(alert.is_frozen && alert.account_id);
+    if (alert.is_frozen && alert.account_id) {
+      unlockButton.setAttribute("data-account-id", String(alert.account_id));
+    } else {
+      unlockButton.removeAttribute("data-account-id");
+    }
+  }
+}
+
 export function renderBalanceTableRows(rows) {
   if (!Array.isArray(rows) || !rows.length) {
     return `
@@ -84,7 +131,12 @@ export function renderBalanceTableRows(rows) {
 
   return rows
     .map((row) => {
-      const transferActionHint = "提交后仅创建手动划转记录，实际执行由后台进程处理。";
+      const transferActionHint = "手动调拨可直接提交，后台会按记录尝试执行，成功或失败以执行结果为准。";
+      const guard = row.auto_transfer_guard || null;
+      const showUnlock = Boolean(row.auto_transfer_frozen && row.id);
+      const guardBadge = guard
+        ? `<div class="inline-guard inline-guard--${escapeHtml(String(row.auto_transfer_status_tone || "warning"))}">${escapeHtml(String(row.auto_transfer_status_label || "异常告警"))}</div>`
+        : "";
 
       return `
         <tr data-balance-row="${escapeHtml(row.id || "")}">
@@ -93,6 +145,7 @@ export function renderBalanceTableRows(rows) {
               <strong>${escapeHtml(row.name)}</strong>
               <span class="spread-symbol__hint">${escapeHtml(row.exchange)}</span>
             </div>
+            ${guardBadge}
           </td>
           <td>${escapeHtml(row.market_type)}</td>
           <td class="spread-metric spread-metric--strong">${escapeHtml(row.available)}</td>
@@ -120,6 +173,7 @@ export function renderBalanceTableRows(rows) {
                 data-balance-action-reason="${escapeHtml(transferActionHint)}"
                 title="${escapeHtml(transferActionHint)}"
               >调拨</button>
+              ${showUnlock ? `<button class="table-action table-action--primary" type="button" data-auto-transfer-unlock="${escapeHtml(row.id || "")}">解冻</button>` : ""}
             </div>
           </td>
         </tr>
@@ -211,6 +265,7 @@ export function applyAccountsPayload(result) {
   const addressCount = document.querySelector("[data-address-count]");
 
   updateSummaryCards(result.summary_cards || []);
+  renderAutoTransferAlert(result.auto_transfer_alert || null);
 
   if (balanceBody) {
     balanceBody.innerHTML = renderBalanceTableRows(result.balance_rows || []);

@@ -43,6 +43,7 @@ class LivePushService:
             auto_transfer_config = account_service.get_auto_transfer_config(user_id)
             balance_rows = account_service.build_balance_rows_from_accounts(account_rows, auto_transfer_config.trigger_ratio)
             address_rows = account_service.build_address_rows_for_user(user_id)
+            auto_transfer_alert = account_service.build_auto_transfer_alert_for_user(user_id)
             summary_cards = account_service.build_summary_cards(
                 account_rows,
                 balance_rows,
@@ -54,6 +55,7 @@ class LivePushService:
                 "account_rows": account_rows,
                 "address_rows": address_rows,
                 "balance_rows": balance_rows,
+                "auto_transfer_alert": auto_transfer_alert,
                 "summary_cards": summary_cards,
                 "account_count": len(account_rows),
                 "address_count": len(address_rows),

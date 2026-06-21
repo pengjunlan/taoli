@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, List
 
+from app.application.services.auto_transfer_account_guard_service import auto_transfer_account_guard_service
 from app.application.services.account_monitor_service import account_monitor_service
 from app.application.services.account_transfer_capability_service import AccountTransferCapabilityService
 from app.application.services.account_support import (
@@ -24,7 +25,7 @@ class AccountQueryService(AccountServiceSupport):
 
     def build_active_account_rows_for_user(self, user_id: int) -> List[Dict[str, str]]:
         rows = account_repository.list_active_accounts_with_address_by_user_id(user_id)
-        return self._build_account_rows(rows)
+        return self._build_account_rows(rows, user_id=user_id)
 
     def get_account_detail(self, account_id: int, user_id: int) -> AccountDetailResult:
         row = account_repository.get_account_with_address_by_id(account_id, user_id)
@@ -59,10 +60,11 @@ class AccountQueryService(AccountServiceSupport):
 
     def build_account_rows_for_user(self, user_id: int) -> List[Dict[str, str]]:
         rows = account_repository.list_accounts_with_address_by_user_id(user_id)
-        return self._build_account_rows(rows)
+        return self._build_account_rows(rows, user_id=user_id)
 
-    def _build_account_rows(self, rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    def _build_account_rows(self, rows: List[Dict[str, str]], user_id: int | None = None) -> List[Dict[str, str]]:
         result: List[Dict[str, str]] = []
+        guard_states = auto_transfer_account_guard_service.list_states(int(user_id or 0)) if user_id else {}
 
         for row in rows:
             transfer_source_summary = self._build_transfer_source_summary(row, rows)
@@ -100,6 +102,18 @@ class AccountQueryService(AccountServiceSupport):
                 if cached_balance is not None and cached_balance.synced_at is not None
                 else row.get("current_available_synced_at")
             )
+            auto_transfer_guard = guard_states.get(int(row["id"]))
+            auto_transfer_frozen = bool(auto_transfer_guard and auto_transfer_guard.get("is_frozen"))
+            auto_transfer_warning = bool(auto_transfer_guard and not auto_transfer_guard.get("is_frozen"))
+            if auto_transfer_frozen:
+                auto_transfer_status_label = "已冻结"
+                auto_transfer_status_tone = "negative"
+            elif auto_transfer_warning:
+                auto_transfer_status_label = "异常告警"
+                auto_transfer_status_tone = "warning"
+            else:
+                auto_transfer_status_label = "正常"
+                auto_transfer_status_tone = "positive"
 
             result.append(
                 {
@@ -130,6 +144,10 @@ class AccountQueryService(AccountServiceSupport):
                     "transfer_option_count": int(transfer_source_summary["transfer_option_count"]),
                     "transfer_block_reason": str(transfer_source_summary["transfer_block_reason"]),
                     "transfer_action_hint": str(transfer_source_summary["transfer_action_hint"]),
+                    "auto_transfer_guard": auto_transfer_guard or None,
+                    "auto_transfer_frozen": auto_transfer_frozen,
+                    "auto_transfer_status_label": auto_transfer_status_label,
+                    "auto_transfer_status_tone": auto_transfer_status_tone,
                     "updated_at": self._format_datetime(updated_at),
                 }
             )
@@ -220,6 +238,10 @@ class AccountQueryService(AccountServiceSupport):
                     "transfer_option_count": int(row.get("transfer_option_count") or 0),
                     "transfer_block_reason": str(row.get("transfer_block_reason") or ""),
                     "transfer_action_hint": str(row.get("transfer_action_hint") or ""),
+                    "auto_transfer_guard": row.get("auto_transfer_guard") or None,
+                    "auto_transfer_frozen": bool(row.get("auto_transfer_frozen")),
+                    "auto_transfer_status_label": str(row.get("auto_transfer_status_label") or "正常"),
+                    "auto_transfer_status_tone": str(row.get("auto_transfer_status_tone") or "positive"),
                     "updated_at": str(row.get("updated_at") or "--"),
                 }
             )
@@ -272,6 +294,23 @@ class AccountQueryService(AccountServiceSupport):
 
         return result
 
+    def build_auto_transfer_alert_for_user(self, user_id: int) -> Dict[str, object] | None:
+        alert = auto_transfer_account_guard_service.build_alert_summary(user_id)
+        if not alert:
+            return None
+
+        return {
+            "level": str(alert.get("level") or "warning"),
+            "message": str(alert.get("message") or ""),
+            "account_id": int(alert.get("account_id") or 0),
+            "account_name": str(alert.get("account_name") or ""),
+            "error_label": str(alert.get("error_label") or ""),
+            "raw_message": str(alert.get("raw_message") or ""),
+            "is_frozen": bool(alert.get("is_frozen")),
+            "consecutive_count": int(alert.get("consecutive_count") or 0),
+            "last_error_at": str(alert.get("last_error_at") or "--"),
+        }
+
     def build_transfer_options_for_user(self, from_account_id: int, user_id: int) -> Dict[str, object]:
         rows = account_repository.list_accounts_with_address_by_user_id(user_id)
         from_account = next((row for row in rows if int(row["id"]) == int(from_account_id)), None)
@@ -289,7 +328,6 @@ class AccountQueryService(AccountServiceSupport):
             capability = self._transfer_capability_service.build_transfer_capability(from_account, row)
             if not capability["supported"]:
                 blocked_count += 1
-                continue
 
             options.append(
                 {
@@ -298,7 +336,13 @@ class AccountQueryService(AccountServiceSupport):
                     "exchange": self._exchange_label(str(row["exchange_code"])),
                     "market_type": self._market_label(str(row["market_type"])),
                     "mode": str(capability["mode"] or ""),
-                    "mode_label": self._transfer_mode_label(str(capability["mode"] or "")),
+                    "mode_label": (
+                        self._transfer_mode_label(str(capability["mode"] or ""))
+                        if capability["supported"]
+                        else "后台尝试执行"
+                    ),
+                    "route_supported": bool(capability["supported"]),
+                    "route_hint": str(capability["reason"] or ""),
                 }
             )
 

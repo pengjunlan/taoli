@@ -5,7 +5,7 @@ import { getFormField } from "./form-fields.js";
 import { findBalanceRowById, resolveBalanceAccountId } from "./render.js";
 import { getLatestAccountsResult } from "./state.js";
 
-const DEFAULT_TRANSFER_NOTICE = "提交后仅创建手动划转记录，实际执行由后台进程处理。";
+const DEFAULT_TRANSFER_NOTICE = "手动调拨可直接提交，后台会按记录尝试执行，成功或失败以执行结果为准。";
 
 export function bindTransferModal({ elements, syncBodyScrollLock }) {
   const {
@@ -334,7 +334,7 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
         `转入账户：${getAccountLabelById(toAccountId) || "--"}`,
         `划转金额：${formatMoney(amount)}`,
         "",
-        "提交后由后台进程继续处理实际划转。",
+        "提交后由后台进程继续尝试执行实际划转。",
       ].join("\n");
 
       if (!window.confirm(confirmMessage)) {

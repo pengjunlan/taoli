@@ -39,6 +39,10 @@ export function updateAutoTransferConfig(payload) {
   return postJson("/api/accounts/auto-transfer-config", payload);
 }
 
+export function unlockAutoTransferAccount(accountId) {
+  return postJson(`/api/accounts/${accountId}/auto-transfer-unlock`);
+}
+
 export function fetchAccountDetail(accountId) {
   return getJson(`/api/accounts/${accountId}`);
 }

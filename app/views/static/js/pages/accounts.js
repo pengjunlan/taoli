@@ -8,6 +8,7 @@ import { applyAccountsPayload, refreshAccountTables } from "./accounts/render.js
 import { setLatestAutoTransferConfig } from "./accounts/state.js";
 import { bindAccountTabs } from "./accounts/tabs.js";
 import { bindTransferModal } from "./accounts/transfer-modal.js";
+import { bindAutoTransferGuardControls } from "./accounts/auto-transfer-guard.js";
 
 let liveSocket = null;
 
@@ -42,6 +43,11 @@ function getAccountPageElements() {
     transferDefaultHint: document.querySelector("[data-transfer-default-hint]"),
     transferNotice: document.querySelector("[data-transfer-notice]"),
     transferOptionSummary: document.querySelector("[data-transfer-option-summary]"),
+    autoTransferAlert: document.querySelector("[data-auto-transfer-alert]"),
+    autoTransferAlertTitle: document.querySelector("[data-auto-transfer-alert-title]"),
+    autoTransferAlertMessage: document.querySelector("[data-auto-transfer-alert-message]"),
+    autoTransferAlertConfigButton: document.querySelector("[data-auto-transfer-alert-config]"),
+    autoTransferAlertUnlockButton: document.querySelector("[data-auto-transfer-alert-unlock]"),
   };
 }
 
@@ -105,6 +111,11 @@ const autoTransferControls = bindAutoTransferControls({
 const transferModalControls = bindTransferModal({
   elements,
   syncBodyScrollLock,
+});
+
+bindAutoTransferGuardControls({
+  elements,
+  refreshAccountTables,
 });
 
 document.addEventListener("keydown", (event) => {

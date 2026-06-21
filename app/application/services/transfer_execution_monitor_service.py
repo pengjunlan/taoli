@@ -6,8 +6,8 @@ import logging
 import threading
 import time
 
+from app.application.services.auto_transfer_account_guard_service import auto_transfer_account_guard_service
 from app.application.services.account_support import MANUAL_TRANSFER_EXECUTION_MODE
-from app.application.services.auto_transfer_runtime_guard_service import auto_transfer_runtime_guard_service
 from app.application.services.monitor_center_service import monitor_center_service
 from app.application.services.transfer_execution_service import transfer_execution_service
 from app.infrastructure.persistence.account_repository import account_repository
@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 # Current business behavior is intentionally preserved:
 # worker-enabled manual transfer records are still executed by this background monitor.
 WORKER_EXECUTION_SCOPE = MANUAL_TRANSFER_EXECUTION_MODE
+AUTO_REAL_TRANSFER_REASON = "自动真实调拨"
 
 
 class TransferExecutionMonitorService:
@@ -97,6 +98,14 @@ class TransferExecutionMonitorService:
 
         try:
             outcome = transfer_execution_service.execute(context)
+            if str(context.get("reason") or "").strip() == AUTO_REAL_TRANSFER_REASON:
+                auto_transfer_account_guard_service.clear_accounts(
+                    int(context.get("user_id") or 0),
+                    [
+                        int(context.get("from_account_id") or 0),
+                        int(context.get("to_account_id") or 0),
+                    ],
+                )
             account_repository.update_transfer_record_status(
                 record_id,
                 status=outcome.status,
@@ -124,13 +133,8 @@ class TransferExecutionMonitorService:
                 failure_type=failure_type,
                 failure_reason=str(exc),
             )
-            if failure_type == "config" and str(context.get("config_fingerprint") or "").strip():
-                user_id = int(context.get("user_id") or 0)
-                if user_id > 0:
-                    auto_transfer_runtime_guard_service.mark_config_error(
-                        user_id=user_id,
-                        reason=str(exc),
-                    )
+            if str(context.get("reason") or "").strip() == AUTO_REAL_TRANSFER_REASON:
+                self._record_auto_transfer_account_failure(context, exc)
             monitor_center_service.add_log(
                 self._monitor_key,
                 "warning",
@@ -138,6 +142,8 @@ class TransferExecutionMonitorService:
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Transfer record execution failed: record_id=%s", record_id)
+            if str(context.get("reason") or "").strip() == AUTO_REAL_TRANSFER_REASON:
+                self._record_auto_transfer_account_failure(context, exc)
             account_repository.update_transfer_record_status(
                 record_id,
                 status="failed",
@@ -152,6 +158,25 @@ class TransferExecutionMonitorService:
                 "error",
                 f"调拨记录 #{record_id} 执行异常: {exc}",
             )
+
+    def _record_auto_transfer_account_failure(self, context, error: Exception) -> None:
+        user_id = int(context.get("user_id") or 0)
+        if user_id <= 0:
+            return
+
+        failure = transfer_execution_service.classify_auto_transfer_failure(context, error)
+        if not failure["freeze_worthy"] or int(failure["account_id"] or 0) <= 0:
+            return
+
+        auto_transfer_account_guard_service.record_failure(
+            user_id=user_id,
+            account_id=int(failure["account_id"]),
+            exchange_code=str(failure["exchange_code"] or ""),
+            account_name=str(failure["account_name"] or ""),
+            error_category=str(failure["category"] or ""),
+            error_label=str(failure["label"] or ""),
+            raw_message=str(failure["raw_message"] or ""),
+        )
 
 
 transfer_execution_monitor_service = TransferExecutionMonitorService()
