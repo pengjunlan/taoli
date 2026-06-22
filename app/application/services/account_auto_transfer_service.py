@@ -129,7 +129,6 @@ class AccountAutoTransferService:
 
         account_rows = account_repository.list_active_accounts_with_address_by_user_id(user_id)
         account_map = {int(row["id"]): row for row in account_rows}
-        fallback_candidate: Optional[Dict[str, float | int | str]] = None
 
         for candidate in candidates:
             from_account = account_map.get(int(candidate["from_account_id"]))
@@ -157,11 +156,7 @@ class AccountAutoTransferService:
 
             if capability["supported"]:
                 return enriched_candidate
-
-            if fallback_candidate is None:
-                fallback_candidate = enriched_candidate
-
-        return fallback_candidate
+        return None
 
     def unlock_auto_transfer_account(self, user_id: int, account_id: int) -> None:
         account = account_repository.get_account_with_address_by_id(account_id, user_id)

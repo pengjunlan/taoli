@@ -103,7 +103,7 @@ class TransferExecutionService:
         },
         "route_unsupported": {
             "label": "调拨路径不支持",
-            "freeze_worthy": True,
+            "freeze_worthy": False,
             "responsible_side": "from",
         },
         "temporary_network": {

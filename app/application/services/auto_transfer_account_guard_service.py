@@ -10,12 +10,14 @@ from app.infrastructure.cache import redis_runtime_support
 
 AUTO_TRANSFER_ACCOUNT_GUARD_PREFIX = "auto-transfer:account-guard:user:"
 AUTO_TRANSFER_ACCOUNT_GUARD_TTL_SECONDS = 90 * 24 * 60 * 60
+NON_ACCOUNT_GUARD_ERROR_CATEGORIES = {"route_unsupported"}
 
 
 class AutoTransferAccountGuardService:
     def list_states(self, user_id: int) -> Dict[int, Dict[str, Any]]:
         raw_mapping = redis_runtime_support.get_hash_json(self._key(user_id))
         result: Dict[int, Dict[str, Any]] = {}
+        stale_account_ids: list[int] = []
         if not isinstance(raw_mapping, dict):
             return result
 
@@ -26,14 +28,25 @@ class AutoTransferAccountGuardService:
                 continue
             if not isinstance(payload, dict):
                 continue
-            result[account_id] = self._normalize_payload(payload)
+            normalized = self._normalize_payload(payload)
+            if not self._should_keep_payload(normalized):
+                stale_account_ids.append(account_id)
+                continue
+            result[account_id] = normalized
+
+        if stale_account_ids:
+            self.clear_accounts(user_id, stale_account_ids)
         return result
 
     def get_state(self, user_id: int, account_id: int) -> Dict[str, Any] | None:
         payload = redis_runtime_support.get_hash_field_json(self._key(user_id), self._field(account_id))
         if not isinstance(payload, dict):
             return None
-        return self._normalize_payload(payload)
+        normalized = self._normalize_payload(payload)
+        if not self._should_keep_payload(normalized):
+            self.clear_account(user_id, account_id)
+            return None
+        return normalized
 
     def is_frozen(self, user_id: int, account_id: int) -> bool:
         state = self.get_state(user_id, account_id)
@@ -87,6 +100,27 @@ class AutoTransferAccountGuardService:
 
     def unlock_account(self, user_id: int, account_id: int) -> None:
         self.clear_account(user_id, account_id)
+
+    def clear_non_frozen_account_by_categories(
+        self,
+        user_id: int,
+        account_id: int,
+        categories: set[str] | None = None,
+    ) -> bool:
+        state = self.get_state(user_id, account_id)
+        if not state or bool(state.get("is_frozen")):
+            return False
+
+        normalized_categories = {
+            str(category or "").strip().lower()
+            for category in (categories or set())
+            if str(category or "").strip()
+        }
+        if normalized_categories and str(state.get("error_category") or "") not in normalized_categories:
+            return False
+
+        self.clear_account(user_id, account_id)
+        return True
 
     def build_alert_summary(self, user_id: int) -> Dict[str, Any] | None:
         states = [
@@ -143,6 +177,12 @@ class AutoTransferAccountGuardService:
 
     def _field(self, account_id: int) -> str:
         return str(int(account_id))
+
+    def _should_keep_payload(self, payload: Dict[str, Any]) -> bool:
+        category = str(payload.get("error_category") or "").strip().lower()
+        if not category:
+            return True
+        return category not in NON_ACCOUNT_GUARD_ERROR_CATEGORIES
 
     def _normalize_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return {

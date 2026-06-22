@@ -6,6 +6,7 @@ from datetime import datetime
 
 from app.application.dto.requests import AccountCreateRequest, AccountTransferCreateRequest, AccountUpdateRequest
 from app.application.dto.requests.exchange_requests import ExchangeConnectionTestRequest
+from app.application.services.auto_transfer_account_guard_service import auto_transfer_account_guard_service
 from app.application.services.account_monitor_service import account_monitor_service
 from app.application.services.account_support import (
     AccountCreateResult,
@@ -27,6 +28,25 @@ from app.shared.exceptions import (
 
 
 class AccountCommandService(AccountServiceSupport):
+    CONNECTION_UPDATE_CLEARABLE_GUARD_CATEGORIES = {
+        "permission_denied",
+        "api_auth_failed",
+        "ip_whitelist_blocked",
+        "withdraw_disabled",
+        "account_mapping_invalid",
+    }
+    ADDRESS_UPDATE_CLEARABLE_GUARD_CATEGORIES = {
+        "address_invalid",
+        "network_invalid",
+        "deposit_info_invalid",
+    }
+    CONNECTION_TEST_SUCCESS_CLEARABLE_GUARD_CATEGORIES = {
+        "permission_denied",
+        "api_auth_failed",
+        "ip_whitelist_blocked",
+        "account_mapping_invalid",
+    }
+
     def __init__(self) -> None:
         self._transfer_capability_service = AccountTransferCapabilityService()
 
@@ -142,6 +162,12 @@ class AccountCommandService(AccountServiceSupport):
                 address_value=normalized["address_value"],
                 memo_tag=normalized["address_memo"],
             )
+            self._clear_recoverable_auto_transfer_guard_on_account_update(
+                user_id=current_user.id,
+                account_id=account.id,
+                existing=existing,
+                normalized=normalized,
+            )
         except AccountNotFoundError:
             raise
         except Exception as exc:
@@ -227,6 +253,11 @@ class AccountCommandService(AccountServiceSupport):
                     pass
                 except Exception:
                     pass
+            auto_transfer_account_guard_service.clear_non_frozen_account_by_categories(
+                current_user.id,
+                account_id,
+                self.CONNECTION_TEST_SUCCESS_CLEARABLE_GUARD_CATEGORIES,
+            )
 
     def update_funding_ratio_percent(self, account_id: int, current_user: AuthUser, funding_ratio_percent: float) -> None:
         if funding_ratio_percent < 0 or funding_ratio_percent > 100:
@@ -288,3 +319,44 @@ class AccountCommandService(AccountServiceSupport):
             raise AccountPersistenceError("保存调拨记录失败：数据库操作异常。") from exc
 
         return TransferCreateResult(transfer_record=transfer_record)
+
+    def _clear_recoverable_auto_transfer_guard_on_account_update(
+        self,
+        *,
+        user_id: int,
+        account_id: int,
+        existing,
+        normalized,
+    ) -> None:
+        clearable_categories: set[str] = set()
+        if self._has_connection_config_changed(existing, normalized):
+            clearable_categories.update(self.CONNECTION_UPDATE_CLEARABLE_GUARD_CATEGORIES)
+        if self._has_address_config_changed(existing, normalized):
+            clearable_categories.update(self.ADDRESS_UPDATE_CLEARABLE_GUARD_CATEGORIES)
+        if not clearable_categories:
+            return
+        auto_transfer_account_guard_service.clear_non_frozen_account_by_categories(
+            user_id,
+            account_id,
+            clearable_categories,
+        )
+
+    def _has_connection_config_changed(self, existing, normalized) -> bool:
+        return any(
+            [
+                str(existing.get("market_type") or "").strip().lower() != str(normalized.get("market_type") or "").strip().lower(),
+                str(existing.get("exchange_code") or "").strip().lower() != str(normalized.get("exchange_code") or "").strip().lower(),
+                str(existing.get("api_key") or "").strip() != str(normalized.get("api_key") or "").strip(),
+                str(existing.get("api_secret") or "").strip() != str(normalized.get("api_secret") or "").strip(),
+                str(existing.get("api_passphrase") or "").strip() != str(normalized.get("api_passphrase") or "").strip(),
+            ]
+        )
+
+    def _has_address_config_changed(self, existing, normalized) -> bool:
+        return any(
+            [
+                str(existing.get("network") or "").strip().lower() != str(normalized.get("address_network") or "").strip().lower(),
+                str(existing.get("address_value") or "").strip() != str(normalized.get("address_value") or "").strip(),
+                str(existing.get("memo_tag") or "").strip() != str(normalized.get("address_memo") or "").strip(),
+            ]
+        )
