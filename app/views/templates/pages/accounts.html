@@ -370,16 +370,21 @@
                 </div>
 
                 <div class="account-form__grid account-form__grid--address">
-                    <label class="field field--full">
-                        <span class="field__label field__label--row">
+                    <div class="field field--full">
+                        <div class="field__label field__label--row">
                             <span>网络类型（选填）</span>
                             <button class="table-action" type="button" data-account-network-refresh>更新网络</button>
-                        </span>
-                        <select class="field__control" name="address_network" data-account-network-select>
+                        </div>
+                        <select
+                            class="field__control"
+                            id="account-address-network"
+                            name="address_network"
+                            data-account-network-select
+                        >
                             <option value="">请先选择交易所</option>
                         </select>
                         <span class="account-form__hint" data-account-network-hint>选择交易所后，这里会按该交易所的 USDT 可用网络联动加载。</span>
-                    </label>
+                    </div>
 
                     <label class="field field--full">
                         <span class="field__label">接收地址 / UID（选填）</span>

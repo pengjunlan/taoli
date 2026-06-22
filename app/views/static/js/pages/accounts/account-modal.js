@@ -311,7 +311,9 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
   }
 
   if (accountNetworkRefreshButton) {
-    accountNetworkRefreshButton.addEventListener("click", async () => {
+    accountNetworkRefreshButton.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       const selectedExchangeCode = String(getAccountField("exchange_code")?.value || "").trim();
       if (!selectedExchangeCode) {
         showToast("请选择交易所。");

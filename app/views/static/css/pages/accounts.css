@@ -664,6 +664,10 @@
     gap: 12px;
 }
 
+.page-accounts .field__label--row .table-action {
+    flex: 0 0 auto;
+}
+
 .page-accounts .account-form__section-head h3 {
     font-size: 1rem;
     line-height: 1.3;
