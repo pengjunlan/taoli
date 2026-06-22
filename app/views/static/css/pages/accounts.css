@@ -205,6 +205,10 @@
     flex: 0 0 auto;
 }
 
+.page-accounts .auto-transfer-alert__actions [hidden] {
+    display: none !important;
+}
+
 .page-accounts .balance-config-dialog {
     width: min(420px, calc(100vw - 32px));
 }
