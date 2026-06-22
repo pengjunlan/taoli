@@ -92,6 +92,7 @@ export function renderAutoTransferAlert(alert) {
     if (unlockButton) {
       unlockButton.hidden = true;
       unlockButton.removeAttribute("data-account-id");
+      unlockButton.removeAttribute("data-auto-transfer-unlock");
     }
     return;
   }
@@ -114,8 +115,10 @@ export function renderAutoTransferAlert(alert) {
     unlockButton.hidden = !Boolean(alert.is_frozen && alert.account_id);
     if (alert.is_frozen && alert.account_id) {
       unlockButton.setAttribute("data-account-id", String(alert.account_id));
+      unlockButton.setAttribute("data-auto-transfer-unlock", String(alert.account_id));
     } else {
       unlockButton.removeAttribute("data-account-id");
+      unlockButton.removeAttribute("data-auto-transfer-unlock");
     }
   }
 }

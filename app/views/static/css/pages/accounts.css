@@ -383,13 +383,15 @@
     white-space: nowrap;
 }
 
-.page-accounts .account-tabs-shell {
+.page-accounts .account-tabs-shell,
+.page-transfer_records .account-tabs-shell {
     padding-bottom: 0;
     border-bottom: 1px solid rgba(217, 225, 236, 0.92);
     background: #ffffff;
 }
 
-.page-accounts .account-tabs {
+.page-accounts .account-tabs,
+.page-transfer_records .account-tabs {
     display: flex;
     gap: 28px;
     align-items: center;
@@ -398,7 +400,8 @@
     padding-top: 0;
 }
 
-.page-accounts .account-tabs .tab-chip {
+.page-accounts .account-tabs .tab-chip,
+.page-transfer_records .account-tabs .tab-chip {
     min-height: 36px;
     padding: 0 2px;
     border: none;
@@ -412,23 +415,27 @@
     position: relative;
 }
 
-.page-accounts .account-tabs .tab-chip + .tab-chip {
+.page-accounts .account-tabs .tab-chip + .tab-chip,
+.page-transfer_records .account-tabs .tab-chip + .tab-chip {
     margin-left: 0;
 }
 
-.page-accounts .account-tabs .tab-chip:hover {
+.page-accounts .account-tabs .tab-chip:hover,
+.page-transfer_records .account-tabs .tab-chip:hover {
     transform: none;
     border-color: transparent;
     color: var(--brand);
 }
 
-.page-accounts .account-tabs .tab-chip.is-active {
+.page-accounts .account-tabs .tab-chip.is-active,
+.page-transfer_records .account-tabs .tab-chip.is-active {
     color: var(--brand);
     background: transparent;
     box-shadow: none;
 }
 
-.page-accounts .account-tabs .tab-chip.is-active::after {
+.page-accounts .account-tabs .tab-chip.is-active::after,
+.page-transfer_records .account-tabs .tab-chip.is-active::after {
     content: "";
     position: absolute;
     left: 0;
@@ -739,14 +746,21 @@
 }
 
 @media (max-width: 860px) {
-    .page-accounts .table-wrap {
+    .page-accounts .table-wrap,
+    .page-transfer_records .table-wrap {
         padding-left: 16px;
         padding-right: 16px;
     }
 
-    .page-accounts .account-tabs-shell {
+    .page-accounts .account-tabs-shell,
+    .page-transfer_records .account-tabs-shell {
         padding-left: 16px;
         padding-right: 16px;
+    }
+
+    .page-accounts .account-tabs,
+    .page-transfer_records .account-tabs {
+        gap: 20px;
     }
 
     .page-accounts .account-modal__dialog {

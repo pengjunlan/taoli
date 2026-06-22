@@ -7,17 +7,13 @@ export function bindAutoTransferGuardControls({ elements, refreshAccountTables }
     autoTransferAlertUnlockButton,
   } = elements;
 
-  document.addEventListener("click", async (event) => {
-    const unlockButton = event.target.closest("[data-auto-transfer-unlock]");
-    if (!unlockButton) return;
-
-    const accountId = Number(unlockButton.getAttribute("data-auto-transfer-unlock") || 0);
+  async function handleUnlock(button, accountId) {
     if (!accountId) {
       showToast("账户标识缺失，无法解冻自动调拨。");
       return;
     }
 
-    unlockButton.disabled = true;
+    button.disabled = true;
     try {
       const result = await unlockAutoTransferAccount(accountId);
       if (!result.success) {
@@ -30,8 +26,16 @@ export function bindAutoTransferGuardControls({ elements, refreshAccountTables }
     } catch (error) {
       showToast(error?.message || "解冻自动调拨失败，请稍后再试。");
     } finally {
-      unlockButton.disabled = false;
+      button.disabled = false;
     }
+  }
+
+  document.addEventListener("click", async (event) => {
+    const unlockButton = event.target.closest("[data-auto-transfer-unlock]");
+    if (!unlockButton) return;
+
+    const accountId = Number(unlockButton.getAttribute("data-auto-transfer-unlock") || 0);
+    await handleUnlock(unlockButton, accountId);
   });
 
   if (autoTransferAlertConfigButton) {
@@ -49,18 +53,4 @@ export function bindAutoTransferGuardControls({ elements, refreshAccountTables }
     });
   }
 
-  if (autoTransferAlertUnlockButton) {
-    autoTransferAlertUnlockButton.addEventListener("click", () => {
-      const accountId = Number(autoTransferAlertUnlockButton.getAttribute("data-account-id") || 0);
-      if (!accountId) {
-        return;
-      }
-      const rowButton = document.querySelector(`[data-auto-transfer-unlock="${accountId}"]`);
-      if (!rowButton) {
-        showToast("未找到对应解冻按钮，请刷新页面后重试。");
-        return;
-      }
-      rowButton.click();
-    });
-  }
 }

@@ -28,11 +28,8 @@ class AccountTransferCapabilityService:
         elif to_exchange not in REAL_TRANSFER_EXECUTION_SUPPORTED_EXCHANGES:
             reason = f"当前暂不支持 {to_exchange or '--'} 的真实调拨执行。"
         elif same_exchange and same_master_account:
-            if from_exchange in {"binance", "okx"}:
-                supported = True
-                mode = "same_exchange_internal"
-            else:
-                reason = f"当前暂不支持 {from_exchange} 的交易所内真实调拨。"
+            supported = True
+            mode = "same_exchange_internal"
         else:
             if not self._is_cross_exchange_route_supported(from_exchange, to_exchange):
                 reason = f"当前暂不支持 {from_exchange} -> {to_exchange} 的跨交易所真实调拨。"

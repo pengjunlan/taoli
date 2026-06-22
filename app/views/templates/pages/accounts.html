@@ -17,9 +17,14 @@
     </section>
 
     <section class="card card--section">
+        <div class="card__header account-tabs-shell">
+            <div class="account-tabs" role="tablist" aria-label="资金与调拨记录切换">
+                <a class="tab-chip is-active" href="/accounts" role="tab" aria-selected="true">账户资金分布</a>
+                <a class="tab-chip" href="/transfer-records" role="tab" aria-selected="false">调拨记录</a>
+            </div>
+        </div>
         <div class="card__header card__header--row">
             <div>
-                <h2>账户资金分布</h2>
                 <p>统一查看当前可用资金、目标分配、偏差和账户配置状态，这里是自动套利是否可执行的资金基础。</p>
             </div>
             <div class="table-actions">
@@ -30,7 +35,6 @@
                     <span class="auto-transfer-toggle__label" data-auto-transfer-toggle-label>自动调拨加载中...</span>
                 </button>
                 <button class="table-action" type="button" data-auto-transfer-open>自动调拨</button>
-                <a class="table-action table-action--primary" href="/transfer-records">调拨记录</a>
             </div>
         </div>
         <div class="table-wrap">

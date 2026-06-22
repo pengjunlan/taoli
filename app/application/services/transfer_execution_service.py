@@ -25,6 +25,16 @@ BINANCE_INTERNAL_ACCOUNT_BY_MARKET = {
     "swap": "linear",
 }
 
+GATE_INTERNAL_ACCOUNT_BY_MARKET = {
+    "spot": "spot",
+    "swap": "swap",
+}
+
+BITGET_INTERNAL_ACCOUNT_BY_MARKET = {
+    "spot": "spot",
+    "swap": "swap",
+}
+
 OKX_INTERNAL_ACCOUNT_BY_MARKET = {
     "spot": "funding",
     "swap": "trading",
@@ -193,7 +203,11 @@ class TransferExecutionService:
         exchange_code = str(context["from_exchange_code"]).strip().lower()
         from_market_type = str(context["from_market_type"]).strip().lower()
         to_market_type = str(context["to_market_type"]).strip().lower()
-        client = self._create_client_from_context(context, prefix="from")
+        client = self._create_client_from_context(
+            context,
+            prefix="from",
+            market_type_override=self._transfer_client_market_type(exchange_code),
+        )
 
         try:
             if exchange_code == "binance":
@@ -202,6 +216,12 @@ class TransferExecutionService:
             elif exchange_code == "okx":
                 from_account = self._map_okx_account_type(from_market_type)
                 to_account = self._map_okx_account_type(to_market_type)
+            elif exchange_code == "gate":
+                from_account = self._map_gate_account_type(from_market_type)
+                to_account = self._map_gate_account_type(to_market_type)
+            elif exchange_code == "bitget":
+                from_account = self._map_bitget_account_type(from_market_type)
+                to_account = self._map_bitget_account_type(to_market_type)
             else:
                 raise ExchangeValidationError(f"暂不支持 {exchange_code} 的交易所内调拨。")
 
@@ -215,6 +235,7 @@ class TransferExecutionService:
     def _execute_cross_exchange_transfer(self, context: Dict[str, Any], amount: float) -> Dict[str, Any]:
         from_exchange = str(context["from_exchange_code"]).strip().lower()
         to_exchange = str(context["to_exchange_code"]).strip().lower()
+        from_market_type = str(context["from_market_type"]).strip().lower()
         to_market_type = str(context["to_market_type"]).strip().lower()
         to_network = str(context.get("to_network") or "").strip().lower()
         to_address = str(context.get("to_address_value") or "").strip()
@@ -225,12 +246,20 @@ class TransferExecutionService:
         if to_network in {"", "internal"}:
             raise ExchangeValidationError("跨交易所调拨必须配置可提现网络，不能使用 internal。")
 
-        source_client = self._create_client_from_context(context, prefix="from")
-        target_client = self._create_client_from_context(context, prefix="to")
+        source_client = self._create_client_from_context(
+            context,
+            prefix="from",
+            market_type_override=self._transfer_client_market_type(from_exchange),
+        )
+        target_client = self._create_client_from_context(
+            context,
+            prefix="to",
+            market_type_override=self._transfer_client_market_type(to_exchange),
+        )
 
         try:
             source_withdraw_account = self._withdraw_account_for_exchange(from_exchange)
-            current_source_account = self._current_account_for_exchange(from_exchange, str(context["from_market_type"]).strip().lower())
+            current_source_account = self._current_account_for_exchange(from_exchange, from_market_type)
             if current_source_account != source_withdraw_account:
                 source_client.transfer(TRANSFER_ASSET_CODE, amount, current_source_account, source_withdraw_account)
 
@@ -241,6 +270,7 @@ class TransferExecutionService:
                 fallback_address=to_address,
                 fallback_memo=to_memo,
             )
+            self._store_resolved_destination(context, destination)
 
             withdraw_params = self._build_withdraw_params(
                 exchange_code=from_exchange,
@@ -255,15 +285,16 @@ class TransferExecutionService:
             )
 
             if to_market_type == "swap":
+                target_credit_market_type = self._withdraw_account_market_type(to_exchange)
                 balance_before = self._fetch_available_amount(
                     client=target_client,
                     exchange_code=to_exchange,
-                    market_type="spot",
+                    market_type=target_credit_market_type,
                 )
                 self._wait_for_target_credit(
                     target_client=target_client,
                     exchange_code=to_exchange,
-                    market_type="spot",
+                    market_type=target_credit_market_type,
                     balance_before=balance_before,
                     amount=amount,
                 )
@@ -287,26 +318,18 @@ class TransferExecutionService:
         fallback_memo: str,
     ) -> Dict[str, str | None]:
         normalized_network = self._normalize_network_code(fallback_network)
-        if exchange_code == "okx":
-            deposit = self._safe_fetch_deposit_address(target_client, normalized_network)
-            if deposit is not None:
+        deposit = self._safe_fetch_deposit_address(target_client, normalized_network)
+        if deposit is not None:
+            if exchange_code == "okx":
                 info = deposit.get("info") if isinstance(deposit, dict) else None
                 to_account = str(info.get("to") or "") if isinstance(info, dict) else ""
                 if to_account and to_account not in {"6", "18"}:
                     raise ExchangeValidationError(f"OKX 充值地址目标账户类型异常: {to_account}")
-                return {
-                    "address": str(deposit.get("address") or fallback_address).strip(),
-                    "tag": str(deposit.get("tag") or fallback_memo or "").strip() or None,
-                    "network_code": str(deposit.get("network") or normalized_network).strip() or normalized_network,
-                }
-        if exchange_code == "binance":
-            deposit = self._safe_fetch_deposit_address(target_client, normalized_network)
-            if deposit is not None:
-                return {
-                    "address": str(deposit.get("address") or fallback_address).strip(),
-                    "tag": str(deposit.get("tag") or fallback_memo or "").strip() or None,
-                    "network_code": str(deposit.get("network") or normalized_network).strip() or normalized_network,
-                }
+            return {
+                "address": str(deposit.get("address") or fallback_address).strip(),
+                "tag": str(deposit.get("tag") or fallback_memo or "").strip() or None,
+                "network_code": str(deposit.get("network") or normalized_network).strip() or normalized_network,
+            }
         return {
             "address": fallback_address,
             "tag": fallback_memo or None,
@@ -345,6 +368,10 @@ class TransferExecutionService:
     def _fetch_available_amount(self, *, client: Any, exchange_code: str, market_type: str) -> float:
         if exchange_code == "binance":
             balance = client.fetch_balance({"type": "spot" if market_type == "spot" else "swap"})
+        elif exchange_code == "gate":
+            balance = client.fetch_balance({"type": "funding" if market_type == "spot" else "swap"})
+        elif exchange_code == "bitget":
+            balance = client.fetch_balance({"type": "spot" if market_type == "spot" else "swap"})
         elif exchange_code == "okx":
             balance = client.fetch_balance({"type": "funding" if market_type == "spot" else "trading"})
         else:
@@ -360,16 +387,22 @@ class TransferExecutionService:
     def _build_withdraw_params(self, *, exchange_code: str, network_code: str) -> Dict[str, Any]:
         normalized = self._normalize_network_code(network_code)
         if exchange_code == "binance":
-            return {"network": normalized, "walletType": "FUNDING"}
+            return {"network": normalized}
         if exchange_code == "okx":
             fee = "0"
             return {"network": normalized, "fee": fee}
         return {"network": normalized}
 
-    def _create_client_from_context(self, context: Dict[str, Any], *, prefix: str) -> Any:
+    def _create_client_from_context(
+        self,
+        context: Dict[str, Any],
+        *,
+        prefix: str,
+        market_type_override: str | None = None,
+    ) -> Any:
         payload = ExchangeConnectionTestRequest(
             account_id=int(context.get(f"{prefix}_id") or 0),
-            market_type=str(context.get(f"{prefix}_market_type") or ""),
+            market_type=str(market_type_override or context.get(f"{prefix}_market_type") or ""),
             exchange_code=str(context.get(f"{prefix}_exchange_code") or ""),
             api_key=str(context.get(f"{prefix}_api_key") or ""),
             api_secret=str(context.get(f"{prefix}_api_secret") or ""),
@@ -379,9 +412,16 @@ class TransferExecutionService:
 
     def _close_client(self, client: Any) -> None:
         try:
-            client.close()
+            close = getattr(client, "close", None)
+            if callable(close):
+                close()
         except Exception:
             pass
+
+    def _store_resolved_destination(self, context: Dict[str, Any], destination: Dict[str, str | None]) -> None:
+        context["_resolved_to_network"] = str(destination.get("network_code") or "").strip()
+        context["_resolved_to_address_value"] = str(destination.get("address") or "").strip()
+        context["_resolved_to_memo_tag"] = str(destination.get("tag") or "").strip()
 
     def _map_binance_account_type(self, market_type: str) -> str:
         account_type = BINANCE_INTERNAL_ACCOUNT_BY_MARKET.get(market_type)
@@ -395,8 +435,24 @@ class TransferExecutionService:
             raise ExchangeValidationError(f"OKX 账户类型不支持: {market_type}")
         return account_type
 
+    def _map_gate_account_type(self, market_type: str) -> str:
+        account_type = GATE_INTERNAL_ACCOUNT_BY_MARKET.get(market_type)
+        if not account_type:
+            raise ExchangeValidationError(f"Gate 账户类型不支持: {market_type}")
+        return account_type
+
+    def _map_bitget_account_type(self, market_type: str) -> str:
+        account_type = BITGET_INTERNAL_ACCOUNT_BY_MARKET.get(market_type)
+        if not account_type:
+            raise ExchangeValidationError(f"Bitget 账户类型不支持: {market_type}")
+        return account_type
+
     def _withdraw_account_for_exchange(self, exchange_code: str) -> str:
         if exchange_code == "binance":
+            return "spot"
+        if exchange_code == "gate":
+            return "funding"
+        if exchange_code == "bitget":
             return "spot"
         if exchange_code == "okx":
             return "funding"
@@ -405,9 +461,23 @@ class TransferExecutionService:
     def _current_account_for_exchange(self, exchange_code: str, market_type: str) -> str:
         if exchange_code == "binance":
             return self._map_binance_account_type(market_type)
+        if exchange_code == "gate":
+            return self._map_gate_account_type(market_type)
+        if exchange_code == "bitget":
+            return self._map_bitget_account_type(market_type)
         if exchange_code == "okx":
             return self._map_okx_account_type(market_type)
         raise ExchangeValidationError(f"暂不支持 {exchange_code} 的账户类型映射。")
+
+    def _withdraw_account_market_type(self, exchange_code: str) -> str:
+        if exchange_code in {"binance", "gate", "bitget", "okx"}:
+            return "spot"
+        return "spot"
+
+    def _transfer_client_market_type(self, exchange_code: str) -> str:
+        if exchange_code in {"binance", "gate", "bitget", "okx"}:
+            return "spot"
+        return "spot"
 
     def _normalize_network_code(self, network_code: str) -> str:
         normalized = str(network_code or "").strip().lower()

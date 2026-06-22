@@ -98,6 +98,7 @@ class TransferExecutionMonitorService:
 
         try:
             outcome = transfer_execution_service.execute(context)
+            self._persist_resolved_destination(record_id, context)
             if str(context.get("reason") or "").strip() == AUTO_REAL_TRANSFER_REASON:
                 auto_transfer_account_guard_service.clear_accounts(
                     int(context.get("user_id") or 0),
@@ -119,6 +120,7 @@ class TransferExecutionMonitorService:
                 f"调拨记录 #{record_id} 执行成功: {outcome.result}",
             )
         except ExchangeError as exc:
+            self._persist_resolved_destination(record_id, context)
             failure_type = (
                 "config"
                 if transfer_execution_service.is_user_account_failure(exc)
@@ -142,6 +144,7 @@ class TransferExecutionMonitorService:
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Transfer record execution failed: record_id=%s", record_id)
+            self._persist_resolved_destination(record_id, context)
             if str(context.get("reason") or "").strip() == AUTO_REAL_TRANSFER_REASON:
                 self._record_auto_transfer_account_failure(context, exc)
             account_repository.update_transfer_record_status(
@@ -158,6 +161,18 @@ class TransferExecutionMonitorService:
                 "error",
                 f"调拨记录 #{record_id} 执行异常: {exc}",
             )
+
+    def _persist_resolved_destination(self, record_id: int, context) -> None:
+        to_address_value = str(context.get("_resolved_to_address_value") or "").strip()
+        if not to_address_value:
+            return
+
+        account_repository.update_transfer_record_actual_destination(
+            record_id,
+            to_network=str(context.get("_resolved_to_network") or "").strip(),
+            to_address_value=to_address_value,
+            to_memo_tag=str(context.get("_resolved_to_memo_tag") or "").strip(),
+        )
 
     def _record_auto_transfer_account_failure(self, context, error: Exception) -> None:
         user_id = int(context.get("user_id") or 0)

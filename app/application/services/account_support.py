@@ -50,7 +50,7 @@ MANUAL_TRANSFER_EXECUTION_MODE = "worker_enabled"
 MANUAL_TRANSFER_EXECUTION_RESULT_HINT = "手动调拨任务已创建，后台将立即进入真实执行流程。"
 MANUAL_TRANSFER_UI_NOTICE = "手动调拨可直接提交，后台会按记录尝试执行，成功或失败以执行结果为准。"
 
-REAL_TRANSFER_EXECUTION_SUPPORTED_EXCHANGES = {"binance", "okx"}
+REAL_TRANSFER_EXECUTION_SUPPORTED_EXCHANGES = {"binance", "okx", "gate", "bitget"}
 
 
 @dataclass(frozen=True)

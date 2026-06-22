@@ -744,6 +744,36 @@ class MySQLAccountRepository:
             connection.commit()
             return cursor.rowcount > 0
 
+    def update_transfer_record_actual_destination(
+        self,
+        record_id: int,
+        *,
+        to_network: str,
+        to_address_value: str,
+        to_memo_tag: str,
+    ) -> bool:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                UPDATE account_transfer_records
+                SET
+                    actual_to_network = %s,
+                    actual_to_address_value = %s,
+                    actual_to_memo_tag = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (
+                    to_network,
+                    to_address_value,
+                    to_memo_tag,
+                    record_id,
+                ),
+            )
+            connection.commit()
+            return cursor.rowcount > 0
+
     def get_transfer_record_execution_context(self, record_id: int) -> Dict[str, Any] | None:
         with mysql_manager.connection() as connection:
             cursor = connection.cursor(dictionary=True)
@@ -847,12 +877,17 @@ class MySQLAccountRepository:
                     fa.account_name AS from_account_name,
                     fa.exchange_code AS from_exchange_code,
                     ta.account_name AS to_account_name,
-                    ta.exchange_code AS to_exchange_code
+                    ta.exchange_code AS to_exchange_code,
+                    COALESCE(NULLIF(tr.actual_to_network, ''), taddr.network) AS to_network,
+                    COALESCE(NULLIF(tr.actual_to_address_value, ''), taddr.address_value) AS to_address_value,
+                    COALESCE(NULLIF(tr.actual_to_memo_tag, ''), taddr.memo_tag) AS to_memo_tag
                 FROM account_transfer_records AS tr
                 INNER JOIN exchange_accounts AS fa
                     ON fa.id = tr.from_account_id
                 INNER JOIN exchange_accounts AS ta
                     ON ta.id = tr.to_account_id
+                LEFT JOIN account_funding_addresses AS taddr
+                    ON taddr.account_id = ta.id
                 WHERE tr.user_id = %s
                 ORDER BY tr.id DESC
                 """,

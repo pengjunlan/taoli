@@ -222,6 +222,9 @@ class MySQLConnectionManager:
                 config_fingerprint VARCHAR(255) NOT NULL DEFAULT '',
                 is_worker_enabled TINYINT(1) NOT NULL DEFAULT 0,
                 result VARCHAR(255) NOT NULL DEFAULT '手动调拨已登记，等待后续执行。',
+                actual_to_network VARCHAR(64) NOT NULL DEFAULT '',
+                actual_to_address_value VARCHAR(255) NOT NULL DEFAULT '',
+                actual_to_memo_tag VARCHAR(120) NOT NULL DEFAULT '',
                 processed_at DATETIME NULL,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -793,6 +796,36 @@ class MySQLConnectionManager:
                     ALTER TABLE account_transfer_records
                     ADD COLUMN processed_at DATETIME NULL
                     AFTER result
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="account_transfer_records",
+                column_name="actual_to_network",
+                ddl="""
+                    ALTER TABLE account_transfer_records
+                    ADD COLUMN actual_to_network VARCHAR(64) NOT NULL DEFAULT ''
+                    AFTER result
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="account_transfer_records",
+                column_name="actual_to_address_value",
+                ddl="""
+                    ALTER TABLE account_transfer_records
+                    ADD COLUMN actual_to_address_value VARCHAR(255) NOT NULL DEFAULT ''
+                    AFTER actual_to_network
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="account_transfer_records",
+                column_name="actual_to_memo_tag",
+                ddl="""
+                    ALTER TABLE account_transfer_records
+                    ADD COLUMN actual_to_memo_tag VARCHAR(120) NOT NULL DEFAULT ''
+                    AFTER actual_to_address_value
                 """,
             )
             cursor.execute(

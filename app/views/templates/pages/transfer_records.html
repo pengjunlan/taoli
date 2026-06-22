@@ -11,13 +11,17 @@
     </section>
 
     <section class="card card--section">
+        <div class="card__header account-tabs-shell">
+            <div class="account-tabs" role="tablist" aria-label="资金与调拨记录切换">
+                <a class="tab-chip" href="/accounts" role="tab" aria-selected="false">账户资金分布</a>
+                <a class="tab-chip is-active" href="/transfer-records" role="tab" aria-selected="true">调拨记录</a>
+            </div>
+        </div>
         <div class="card__header card__header--row">
             <div>
-                <h2>调拨执行记录</h2>
                 <p>查看一键平均分配和自动失衡修复生成的任务，确认到账、失败重试和开仓限制是否生效。</p>
             </div>
             <div class="section-tools">
-                <a class="table-action" href="/accounts">返回账户页</a>
                 <div class="inline-note">共 {{ transfer_rows|length }} 条调拨任务</div>
             </div>
         </div>
@@ -41,6 +45,11 @@
                             <div class="pair-cell pair-cell--spread">
                                 <span class="pair-cell__line">{{ row.route_from }}</span>
                                 <span class="pair-cell__line is-positive">-> {{ row.route_to }}</span>
+                                <span class="pair-cell__line">接收网络：{{ row.to_network or '--' }}</span>
+                                <span class="pair-cell__line">实际接收地址：{{ row.to_address or '--' }}</span>
+                                {% if row.to_memo %}
+                                <span class="pair-cell__line">Memo / Tag：{{ row.to_memo }}</span>
+                                {% endif %}
                             </div>
                         </td>
                         <td class="spread-metric spread-metric--strong">{{ row.amount }}</td>
