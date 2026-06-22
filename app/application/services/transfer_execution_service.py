@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 TRANSFER_ASSET_CODE = "USDT"
 EXECUTION_MODE = MANUAL_TRANSFER_EXECUTION_MODE
+ROLLBACK_RESULT_PREFIX = "跨交易所提现失败，已将资金回滚至原账户。"
 
 BINANCE_INTERNAL_ACCOUNT_BY_MARKET = {
     "spot": "spot",
@@ -307,8 +308,10 @@ class TransferExecutionService:
         try:
             source_withdraw_account = self._withdraw_account_for_exchange(from_exchange)
             current_source_account = self._current_account_for_exchange(from_exchange, from_market_type)
+            moved_to_withdraw_account = False
             if current_source_account != source_withdraw_account:
                 source_client.transfer(TRANSFER_ASSET_CODE, amount, current_source_account, source_withdraw_account)
+                moved_to_withdraw_account = True
 
             destination = self._resolve_destination_address(
                 exchange_code=to_exchange,
@@ -351,6 +354,28 @@ class TransferExecutionService:
                     target_client.transfer(TRANSFER_ASSET_CODE, amount, funding_account, target_account)
 
             return withdraw
+        except Exception as exc:
+            rollback_result = None
+            if moved_to_withdraw_account:
+                rollback_result = self._rollback_source_internal_transfer(
+                    source_client=source_client,
+                    exchange_code=from_exchange,
+                    current_source_account=current_source_account,
+                    source_withdraw_account=source_withdraw_account,
+                    amount=amount,
+                )
+                if rollback_result["rolled_back"]:
+                    raise ExchangeConnectionError(
+                        self._build_rollback_success_message(exc, rollback_result["detail"])
+                    ) from exc
+                if rollback_result["attempted"]:
+                    raise ExchangeConnectionError(
+                        self._build_rollback_failed_message(
+                            original_error=exc,
+                            rollback_error_message=rollback_result["detail"],
+                        )
+                    ) from exc
+            raise
         finally:
             self._close_client(source_client)
             self._close_client(target_client)
@@ -464,6 +489,59 @@ class TransferExecutionService:
                 close()
         except Exception:
             pass
+
+    def _rollback_source_internal_transfer(
+        self,
+        *,
+        source_client: Any,
+        exchange_code: str,
+        current_source_account: str,
+        source_withdraw_account: str,
+        amount: float,
+    ) -> Dict[str, Any]:
+        if current_source_account == source_withdraw_account:
+            return {
+                "attempted": False,
+                "rolled_back": False,
+                "detail": "",
+            }
+
+        try:
+            source_client.transfer(TRANSFER_ASSET_CODE, amount, source_withdraw_account, current_source_account)
+            return {
+                "attempted": True,
+                "rolled_back": True,
+                "detail": f"{source_withdraw_account} -> {current_source_account}",
+            }
+        except Exception as rollback_exc:  # noqa: BLE001
+            logger.exception(
+                "Rollback source internal transfer failed: exchange=%s from=%s to=%s amount=%s",
+                exchange_code,
+                source_withdraw_account,
+                current_source_account,
+                amount,
+            )
+            return {
+                "attempted": True,
+                "rolled_back": False,
+                "detail": str(rollback_exc or "").strip() or "回滚失败，交易所未返回更多信息。",
+            }
+
+    def _build_rollback_success_message(self, original_error: Exception, rollback_detail: str) -> str:
+        original_message = self._translate_exchange_exception_message(original_error)
+        detail = str(rollback_detail or "").strip()
+        if detail:
+            return f"{ROLLBACK_RESULT_PREFIX} 回滚路径：{detail}。原始失败原因：{original_message}"
+        return f"{ROLLBACK_RESULT_PREFIX} 原始失败原因：{original_message}"
+
+    def _build_rollback_failed_message(self, *, original_error: Exception, rollback_error_message: str) -> str:
+        original_message = self._translate_exchange_exception_message(original_error)
+        rollback_message = str(rollback_error_message or "").strip() or "回滚失败，交易所未返回更多信息。"
+        return (
+            "跨交易所提现失败，且源交易所内部资金回滚失败，资金可能滞留在提现账户。\n"
+            f"原始失败原因：{original_message}\n"
+            f"回滚失败原因：{rollback_message}"
+        )
 
     def _store_resolved_destination(self, context: Dict[str, Any], destination: Dict[str, str | None]) -> None:
         context["_resolved_to_network"] = str(destination.get("network_code") or "").strip()
