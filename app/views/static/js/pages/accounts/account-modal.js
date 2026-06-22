@@ -143,7 +143,13 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
     accountNetworkHint.textContent = String(message || "").trim() || "选择交易所后，这里会按该交易所的 USDT 可用网络联动加载。";
   };
 
-  const loadNetworkOptions = async ({ exchangeCode, selectedValue = "", forceRefresh = false, silent = false }) => {
+  const loadNetworkOptions = async ({
+    exchangeCode,
+    selectedValue = "",
+    forceRefresh = false,
+    silent = false,
+    refreshPayload = null,
+  }) => {
     const normalizedExchangeCode = String(exchangeCode || "").trim().toLowerCase();
     if (!normalizedExchangeCode) {
       renderNetworkOptions({ options: [], exchangeCode: "", selectedValue: "" });
@@ -162,7 +168,13 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
 
     try {
       const result = forceRefresh
-        ? await refreshExchangeNetworkOptions({ exchange_code: normalizedExchangeCode })
+        ? await refreshExchangeNetworkOptions({
+            exchange_code: normalizedExchangeCode,
+            market_type: String(refreshPayload?.market_type || getAccountField("market_type")?.value || "spot").trim(),
+            api_key: String(refreshPayload?.api_key || getAccountField("api_key")?.value || "").trim(),
+            api_secret: String(refreshPayload?.api_secret || getAccountField("api_secret")?.value || "").trim(),
+            api_passphrase: String(refreshPayload?.api_passphrase || getAccountField("api_passphrase")?.value || "").trim(),
+          })
         : await fetchExchangeNetworkOptions(normalizedExchangeCode);
 
       if (token !== currentNetworkLoadToken) {
@@ -325,6 +337,7 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
           exchangeCode: selectedExchangeCode,
           selectedValue: String(getAccountField("address_network")?.value || "").trim(),
           forceRefresh: true,
+          refreshPayload: buildConnectionPayload(),
         });
       } catch (error) {
         showToast(error?.message || "更新交易所网络失败，请稍后再试。");

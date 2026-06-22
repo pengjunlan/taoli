@@ -58,8 +58,22 @@ class AccountService:
     def delete_account(self, account_id: int, current_user: AuthUser) -> None:
         self._command_service.delete_account(account_id, current_user)
 
-    def refresh_exchange_network_options(self, exchange_code: str) -> Dict[str, object]:
-        return self._command_service.refresh_exchange_network_options(exchange_code)
+    def refresh_exchange_network_options(
+        self,
+        exchange_code: str,
+        *,
+        market_type: str = "spot",
+        api_key: str = "",
+        api_secret: str = "",
+        api_passphrase: str = "",
+    ) -> Dict[str, object]:
+        return self._command_service.refresh_exchange_network_options(
+            exchange_code,
+            market_type=market_type,
+            api_key=api_key,
+            api_secret=api_secret,
+            api_passphrase=api_passphrase,
+        )
 
     def mark_connection_test_status(self, account_id: int, current_user: AuthUser, status: str) -> None:
         self._command_service.mark_connection_test_status(account_id, current_user, status)

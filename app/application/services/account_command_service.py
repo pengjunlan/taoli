@@ -383,5 +383,19 @@ class AccountCommandService(AccountServiceSupport):
         if normalized_network not in allowed_networks:
             raise AccountValidationError("当前交易所暂不支持这个网络，请先刷新网络列表后重新选择。")
 
-    def refresh_exchange_network_options(self, exchange_code: str) -> dict:
-        return exchange_asset_network_service.refresh_network_options(exchange_code)
+    def refresh_exchange_network_options(
+        self,
+        exchange_code: str,
+        *,
+        market_type: str = "spot",
+        api_key: str = "",
+        api_secret: str = "",
+        api_passphrase: str = "",
+    ) -> dict:
+        return exchange_asset_network_service.refresh_network_options(
+            exchange_code,
+            market_type=market_type,
+            api_key=api_key,
+            api_secret=api_secret,
+            api_passphrase=api_passphrase,
+        )

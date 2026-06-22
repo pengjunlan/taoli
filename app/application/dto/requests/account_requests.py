@@ -45,3 +45,7 @@ class AccountAutoTransferConfigRequest(BaseModel):
 
 class ExchangeAssetNetworksRefreshRequest(BaseModel):
     exchange_code: str
+    market_type: str = "spot"
+    api_key: str = ""
+    api_secret: str = ""
+    api_passphrase: str = ""

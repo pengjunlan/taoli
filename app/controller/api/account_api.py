@@ -302,7 +302,13 @@ async def refresh_exchange_network_options_api(
     _: AuthUser = Depends(require_api_user),
 ) -> Dict[str, object]:
     try:
-        result = account_service.refresh_exchange_network_options(payload.exchange_code)
+        result = account_service.refresh_exchange_network_options(
+            payload.exchange_code,
+            market_type=payload.market_type,
+            api_key=payload.api_key,
+            api_secret=payload.api_secret,
+            api_passphrase=payload.api_passphrase,
+        )
     except AccountValidationError as exc:
         return AccountResponse(success=False, message=str(exc)).to_dict()
     except AccountError as exc:

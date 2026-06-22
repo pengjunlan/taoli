@@ -8,6 +8,8 @@ from typing import Any, Dict, List
 import ccxt
 
 from app.application.services.account_support import EXCHANGE_LABELS, NETWORK_LABELS
+from app.application.dto.requests.exchange_requests import ExchangeConnectionTestRequest
+from app.application.services.exchange_connection_service import exchange_connection_service
 from app.infrastructure.persistence.account_repository import account_repository
 from app.shared.exceptions import AccountPersistenceError, AccountValidationError
 
@@ -77,10 +79,24 @@ class ExchangeAssetNetworkService:
             "source": "catalog" if rows and rows != self._default_rows(normalized_exchange_code) else "fallback",
         }
 
-    def refresh_network_options(self, exchange_code: str) -> Dict[str, object]:
+    def refresh_network_options(
+        self,
+        exchange_code: str,
+        *,
+        market_type: str = "spot",
+        api_key: str = "",
+        api_secret: str = "",
+        api_passphrase: str = "",
+    ) -> Dict[str, object]:
         normalized_exchange_code = self._normalize_exchange_code(exchange_code)
-        rows = self._fetch_exchange_rows(normalized_exchange_code)
-        if not rows:
+        rows = self._fetch_exchange_rows(
+            normalized_exchange_code,
+            market_type=market_type,
+            api_key=api_key,
+            api_secret=api_secret,
+            api_passphrase=api_passphrase,
+        )
+        if not self._has_external_rows(rows):
             raise AccountValidationError(f"{EXCHANGE_LABELS.get(normalized_exchange_code, normalized_exchange_code.upper())} 暂未返回可用的 USDT 网络。")
         try:
             account_repository.replace_exchange_asset_networks(
@@ -94,17 +110,43 @@ class ExchangeAssetNetworkService:
         payload["source"] = "remote"
         return payload
 
-    def _fetch_exchange_rows(self, exchange_code: str) -> List[Dict[str, object]]:
+    def _fetch_exchange_rows(
+        self,
+        exchange_code: str,
+        *,
+        market_type: str = "spot",
+        api_key: str = "",
+        api_secret: str = "",
+        api_passphrase: str = "",
+    ) -> List[Dict[str, object]]:
         exchange_class_name = EXCHANGE_CLASS_NAMES.get(exchange_code)
         if not exchange_class_name:
             raise AccountValidationError("交易所不在支持范围内。")
-        exchange_class = getattr(ccxt, exchange_class_name)
-        client = exchange_class(
-            {
-                "enableRateLimit": True,
-                "timeout": 10000,
-            }
+        normalized_market_type = str(market_type or "spot").strip().lower() or "spot"
+        use_private_client = self._should_use_private_currency_fetch(
+            exchange_code=exchange_code,
+            api_key=api_key,
+            api_secret=api_secret,
         )
+        if use_private_client:
+            client = exchange_connection_service.build_exchange_client(
+                ExchangeConnectionTestRequest(
+                    account_id=0,
+                    market_type=normalized_market_type,
+                    exchange_code=exchange_code,
+                    api_key=str(api_key or "").strip(),
+                    api_secret=str(api_secret or "").strip(),
+                    api_passphrase=str(api_passphrase or "").strip(),
+                )
+            )
+        else:
+            exchange_class = getattr(ccxt, exchange_class_name)
+            client = exchange_class(
+                {
+                    "enableRateLimit": True,
+                    "timeout": 10000,
+                }
+            )
         try:
             try:
                 client.session.trust_env = False
@@ -186,6 +228,15 @@ class ExchangeAssetNetworkService:
             if updated_at:
                 return str(updated_at)
         return ""
+
+    def _has_external_rows(self, rows: List[Dict[str, object]]) -> bool:
+        return any(str(row.get("network_code") or "").strip().lower() != "internal" for row in rows)
+
+    def _should_use_private_currency_fetch(self, *, exchange_code: str, api_key: str, api_secret: str) -> bool:
+        normalized_exchange_code = str(exchange_code or "").strip().lower()
+        if normalized_exchange_code not in {"binance", "okx"}:
+            return False
+        return bool(str(api_key or "").strip() and str(api_secret or "").strip())
 
     def _normalize_exchange_code(self, exchange_code: str) -> str:
         normalized = str(exchange_code or "").strip().lower()
