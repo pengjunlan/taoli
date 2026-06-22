@@ -35,6 +35,10 @@ from app.application.services.exchange_connection_service import (
     ExchangeConnectionService,
     exchange_connection_service,
 )
+from app.application.services.exchange_asset_network_service import (
+    ExchangeAssetNetworkService,
+    exchange_asset_network_service,
+)
 from app.application.services.local_position_service import LocalPositionService, local_position_service
 from app.application.services.monitor_center_service import (
     MonitorCenterService,
@@ -106,6 +110,8 @@ __all__ = [
     "dashboard_service",
     "ExchangeConnectionService",
     "exchange_connection_service",
+    "ExchangeAssetNetworkService",
+    "exchange_asset_network_service",
     "LocalPositionService",
     "local_position_service",
     "MonitorCenterService",

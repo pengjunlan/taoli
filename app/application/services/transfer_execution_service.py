@@ -47,9 +47,56 @@ NETWORK_ALIASES = {
     "arbitrum": "ARBITRUM",
     "optimism": "OPTIMISM",
     "polygon": "MATIC",
-    "plasma": "PLASMA",
+    "plasma": "XPL",
     "solana": "SOL",
     "omni": "OMNI",
+}
+
+EXCHANGE_WITHDRAW_NETWORK_ALIASES = {
+    "gate": {
+        "TRC20": "TRC20",
+        "ERC20": "ERC20",
+        "BEP20": "BEP20",
+        "ARBITRUM": "ARBONE",
+        "OPTIMISM": "OP",
+        "MATIC": "MATIC",
+        "XPL": "XPL",
+        "SOL": "SOL",
+        "OMNI": "OMNI",
+    },
+    "bitget": {
+        "TRC20": "TRC20",
+        "ERC20": "ERC20",
+        "BEP20": "BEP20",
+        "ARBITRUM": "ARBITRUM",
+        "OPTIMISM": "OPTIMISM",
+        "MATIC": "MATIC",
+        "XPL": "XPL",
+        "SOL": "SOL",
+        "OMNI": "OMNI",
+    },
+    "binance": {
+        "TRC20": "TRC20",
+        "ERC20": "ERC20",
+        "BEP20": "BEP20",
+        "ARBITRUM": "ARBITRUM",
+        "OPTIMISM": "OPTIMISM",
+        "MATIC": "MATIC",
+        "XPL": "XPL",
+        "SOL": "SOL",
+        "OMNI": "OMNI",
+    },
+    "okx": {
+        "TRC20": "TRC20",
+        "ERC20": "ERC20",
+        "BEP20": "BSC",
+        "ARBITRUM": "Arbitrum One",
+        "OPTIMISM": "Optimism",
+        "MATIC": "Polygon",
+        "XPL": "XPL",
+        "SOL": "Solana",
+        "OMNI": "OMNI",
+    },
 }
 
 
@@ -385,7 +432,7 @@ class TransferExecutionService:
         )
 
     def _build_withdraw_params(self, *, exchange_code: str, network_code: str) -> Dict[str, Any]:
-        normalized = self._normalize_network_code(network_code)
+        normalized = self._resolve_withdraw_network_code(exchange_code=exchange_code, network_code=network_code)
         if exchange_code == "binance":
             return {"network": normalized}
         if exchange_code == "okx":
@@ -484,6 +531,11 @@ class TransferExecutionService:
         if not normalized:
             raise ExchangeValidationError("未配置提现网络。")
         return NETWORK_ALIASES.get(normalized, normalized.upper())
+
+    def _resolve_withdraw_network_code(self, *, exchange_code: str, network_code: str) -> str:
+        normalized = self._normalize_network_code(network_code)
+        exchange_aliases = EXCHANGE_WITHDRAW_NETWORK_ALIASES.get(str(exchange_code or "").strip().lower(), {})
+        return exchange_aliases.get(normalized, normalized)
 
     def _extract_transfer_reference(self, response: Dict[str, Any] | None) -> str:
         if not isinstance(response, dict):

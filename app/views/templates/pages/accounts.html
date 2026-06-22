@@ -371,20 +371,14 @@
 
                 <div class="account-form__grid account-form__grid--address">
                     <label class="field field--full">
-                        <span class="field__label">网络类型（选填）</span>
-                        <select class="field__control" name="address_network">
-                            <option value="">暂不配置</option>
-                            <option value="trc20">TRC20</option>
-                            <option value="erc20">ERC20</option>
-                            <option value="bep20">BEP20</option>
-                            <option value="arbitrum">Arbitrum One</option>
-                            <option value="optimism">Optimism</option>
-                            <option value="polygon">Polygon</option>
-                            <option value="plasma">Plasma</option>
-                            <option value="solana">Solana</option>
-                            <option value="omni">OMNI</option>
-                            <option value="internal">交易所内部划转</option>
+                        <span class="field__label field__label--row">
+                            <span>网络类型（选填）</span>
+                            <button class="table-action" type="button" data-account-network-refresh>更新网络</button>
+                        </span>
+                        <select class="field__control" name="address_network" data-account-network-select>
+                            <option value="">请先选择交易所</option>
                         </select>
+                        <span class="account-form__hint" data-account-network-hint>选择交易所后，这里会按该交易所的 USDT 可用网络联动加载。</span>
                     </label>
 
                     <label class="field field--full">

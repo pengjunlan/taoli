@@ -8,6 +8,7 @@ from app.application.dto.requests import AccountCreateRequest, AccountTransferCr
 from app.application.dto.requests.exchange_requests import ExchangeConnectionTestRequest
 from app.application.services.auto_transfer_account_guard_service import auto_transfer_account_guard_service
 from app.application.services.account_monitor_service import account_monitor_service
+from app.application.services.exchange_asset_network_service import exchange_asset_network_service
 from app.application.services.account_support import (
     AccountCreateResult,
     AccountServiceSupport,
@@ -70,6 +71,10 @@ class AccountCommandService(AccountServiceSupport):
             api_secret=normalized["api_secret"],
             address_network=normalized["address_network"],
             address_value=normalized["address_value"],
+        )
+        self._validate_exchange_network_selection(
+            exchange_code=normalized["exchange_code"],
+            address_network=normalized["address_network"],
         )
 
         account_name = self._build_account_name(normalized["exchange_code"], normalized["market_type"])
@@ -136,6 +141,10 @@ class AccountCommandService(AccountServiceSupport):
             api_secret=normalized["api_secret"],
             address_network=normalized["address_network"],
             address_value=normalized["address_value"],
+        )
+        self._validate_exchange_network_selection(
+            exchange_code=normalized["exchange_code"],
+            address_network=normalized["address_network"],
         )
 
         account_name = self._build_account_name(normalized["exchange_code"], normalized["market_type"])
@@ -360,3 +369,19 @@ class AccountCommandService(AccountServiceSupport):
                 str(existing.get("memo_tag") or "").strip() != str(normalized.get("address_memo") or "").strip(),
             ]
         )
+
+    def _validate_exchange_network_selection(self, *, exchange_code: str, address_network: str) -> None:
+        normalized_network = str(address_network or "").strip().lower()
+        if not normalized_network:
+            return
+        options = exchange_asset_network_service.list_network_options(exchange_code).get("options") or []
+        allowed_networks = {
+            str(item.get("network_code") or "").strip().lower()
+            for item in options
+            if str(item.get("network_code") or "").strip()
+        }
+        if normalized_network not in allowed_networks:
+            raise AccountValidationError("当前交易所暂不支持这个网络，请先刷新网络列表后重新选择。")
+
+    def refresh_exchange_network_options(self, exchange_code: str) -> dict:
+        return exchange_asset_network_service.refresh_network_options(exchange_code)

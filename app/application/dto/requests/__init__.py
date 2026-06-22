@@ -6,6 +6,7 @@ from app.application.dto.requests.account_requests import (
     AccountFundingRatioUpdateRequest,
     AccountTransferCreateRequest,
     AccountUpdateRequest,
+    ExchangeAssetNetworksRefreshRequest,
 )
 from app.application.dto.requests.auth_requests import LoginRequest, RegisterRequest
 from app.application.dto.requests.exchange_requests import ExchangeConnectionTestRequest
@@ -24,6 +25,7 @@ __all__ = [
     "AccountTransferCreateRequest",
     "AccountUpdateRequest",
     "ExchangeConnectionTestRequest",
+    "ExchangeAssetNetworksRefreshRequest",
     "LoginRequest",
     "RegisterRequest",
     "StrategyRuleCreateRequest",

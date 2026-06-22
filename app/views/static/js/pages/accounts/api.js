@@ -47,6 +47,14 @@ export function fetchAccountDetail(accountId) {
   return getJson(`/api/accounts/${accountId}`);
 }
 
+export function fetchExchangeNetworkOptions(exchangeCode) {
+  return getJson(`/api/accounts/exchanges/${encodeURIComponent(String(exchangeCode || "").trim())}/networks`);
+}
+
+export function refreshExchangeNetworkOptions(payload) {
+  return postJson("/api/accounts/exchanges/networks/refresh", payload);
+}
+
 export function createTransferRecord(payload) {
   return postJson("/api/accounts/transfer", payload);
 }

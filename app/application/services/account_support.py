@@ -156,8 +156,8 @@ class AccountServiceSupport:
             raise AccountValidationError("API Secret 为必填项。")
         if address_value and not address_network:
             raise AccountValidationError("填写接收地址或 UID 时，请先选择网络类型。")
-        if address_network and address_network not in NETWORK_LABELS:
-            raise AccountValidationError("网络类型不在支持范围内。")
+        if address_network and not re.fullmatch(r"[a-z0-9_-]{1,64}", address_network):
+            raise AccountValidationError("网络类型格式不正确，请选择有效的网络选项。")
 
     def _parse_amount(self, value: str) -> int:
         normalized = str(value or "").strip().upper().replace("$", "").replace(",", "")
@@ -223,7 +223,12 @@ class AccountServiceSupport:
         return MARKET_TYPE_LABELS.get(market_type, market_type)
 
     def _network_label(self, network_code: str) -> str:
-        return NETWORK_LABELS.get(network_code, network_code)
+        if network_code in NETWORK_LABELS:
+            return NETWORK_LABELS[network_code]
+        text = str(network_code or "").strip()
+        if not text:
+            return ""
+        return text.replace("_", " ").replace("-", " ").upper()
 
     def _connection_test_status_label(self, value: str) -> str:
         return {

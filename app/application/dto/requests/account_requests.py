@@ -41,3 +41,7 @@ class AccountTransferCreateRequest(BaseModel):
 class AccountAutoTransferConfigRequest(BaseModel):
     is_enabled: bool = True
     trigger_ratio: float = 0.5
+
+
+class ExchangeAssetNetworksRefreshRequest(BaseModel):
+    exchange_code: str

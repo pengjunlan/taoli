@@ -657,6 +657,13 @@
     gap: 8px;
 }
 
+.page-accounts .field__label--row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
 .page-accounts .account-form__section-head h3 {
     font-size: 1rem;
     line-height: 1.3;

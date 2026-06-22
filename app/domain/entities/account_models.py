@@ -40,6 +40,20 @@ class AccountAddress:
 
 
 @dataclass(frozen=True)
+class ExchangeAssetNetwork:
+    id: int
+    exchange_code: str
+    asset_code: str
+    network_code: str
+    network_name: str
+    network_id: str
+    is_deposit_enabled: bool
+    is_withdraw_enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
 class TransferRecord:
     id: int
     user_id: int

@@ -3,6 +3,7 @@
 from app.domain.entities.account_models import (
     AccountAddress,
     AutoTransferConfig,
+    ExchangeAssetNetwork,
     ExchangeAccount,
     StrategyRule,
     SystemExchangeConfig,
@@ -15,6 +16,7 @@ __all__ = [
     "AutoTransferConfig",
     "AuthSession",
     "AuthUser",
+    "ExchangeAssetNetwork",
     "ExchangeAccount",
     "StrategyRule",
     "SystemExchangeConfig",

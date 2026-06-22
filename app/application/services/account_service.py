@@ -44,6 +44,9 @@ class AccountService:
     def get_account_detail(self, account_id: int, current_user: AuthUser) -> AccountDetailResult:
         return self._query_service.get_account_detail(account_id, current_user.id)
 
+    def list_exchange_network_options(self, exchange_code: str) -> Dict[str, object]:
+        return self._query_service.list_exchange_network_options(exchange_code)
+
     def update_account(
         self,
         account_id: int,
@@ -54,6 +57,9 @@ class AccountService:
 
     def delete_account(self, account_id: int, current_user: AuthUser) -> None:
         self._command_service.delete_account(account_id, current_user)
+
+    def refresh_exchange_network_options(self, exchange_code: str) -> Dict[str, object]:
+        return self._command_service.refresh_exchange_network_options(exchange_code)
 
     def mark_connection_test_status(self, account_id: int, current_user: AuthUser, status: str) -> None:
         self._command_service.mark_connection_test_status(account_id, current_user, status)

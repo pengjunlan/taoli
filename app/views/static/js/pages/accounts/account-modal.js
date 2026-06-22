@@ -3,6 +3,8 @@ import {
   createAccount,
   deleteAccount,
   fetchAccountDetail,
+  fetchExchangeNetworkOptions,
+  refreshExchangeNetworkOptions,
   testAccountConnection,
   updateAccount,
 } from "./api.js";
@@ -19,6 +21,8 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
     accountModalCloseButtons,
     accountForm,
     accountTestButton,
+    accountNetworkRefreshButton,
+    accountNetworkHint,
     accountModalTitle,
   } = elements;
 
@@ -45,6 +49,7 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
 
   const connectionFieldNames = ["market_type", "exchange_code", "api_key", "api_secret", "api_passphrase"];
   let originalConnectionSnapshot = null;
+  let currentNetworkLoadToken = 0;
 
   const readConnectionSnapshot = () =>
     Object.fromEntries(
@@ -86,6 +91,9 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
     hiddenConnectionStatus.value = "untested";
     accountModalTitle.textContent = "新增账户";
     submitButton.textContent = "保存账户";
+    if (accountNetworkHint) {
+      accountNetworkHint.textContent = "选择交易所后，这里会按该交易所的 USDT 可用网络联动加载。";
+    }
     accountForm.querySelectorAll("[data-password-toggle]").forEach((button) => {
       const wrapper = button.closest(".password-field");
       const input = wrapper?.querySelector(".password-field__control");
@@ -93,6 +101,104 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
       input.type = "password";
       button.setAttribute("aria-pressed", "false");
     });
+  };
+
+  const renderNetworkOptions = ({ options, selectedValue = "", exchangeCode = "", isLoading = false }) => {
+    const addressNetworkField = getAccountField("address_network");
+    if (!addressNetworkField) return;
+
+    const selected = String(selectedValue || "").trim().toLowerCase();
+    const rows = Array.isArray(options) ? options : [];
+    if (isLoading) {
+      addressNetworkField.innerHTML = '<option value="">网络加载中...</option>';
+      addressNetworkField.disabled = true;
+      return;
+    }
+
+    const html = ['<option value="">暂不配置</option>'];
+    rows.forEach((item) => {
+      const networkCode = String(item.network_code || "").trim();
+      if (!networkCode) return;
+      const networkName = String(item.network_name || networkCode).trim();
+      const tags = [];
+      if (item.is_deposit_enabled === false) {
+        tags.push("不可充");
+      }
+      if (item.is_withdraw_enabled === false) {
+        tags.push("不可提");
+      }
+      const labelSuffix = tags.length ? ` (${tags.join(" / ")})` : "";
+      const isSelected = networkCode.toLowerCase() === selected ? " selected" : "";
+      html.push(`<option value="${networkCode}"${isSelected}>${networkName}${labelSuffix}</option>`);
+    });
+    addressNetworkField.innerHTML = html.join("");
+    addressNetworkField.disabled = !String(exchangeCode || "").trim();
+    if (selected && !rows.some((item) => String(item.network_code || "").trim().toLowerCase() === selected)) {
+      addressNetworkField.value = "";
+    }
+  };
+
+  const updateNetworkHint = (message) => {
+    if (!accountNetworkHint) return;
+    accountNetworkHint.textContent = String(message || "").trim() || "选择交易所后，这里会按该交易所的 USDT 可用网络联动加载。";
+  };
+
+  const loadNetworkOptions = async ({ exchangeCode, selectedValue = "", forceRefresh = false, silent = false }) => {
+    const normalizedExchangeCode = String(exchangeCode || "").trim().toLowerCase();
+    if (!normalizedExchangeCode) {
+      renderNetworkOptions({ options: [], exchangeCode: "", selectedValue: "" });
+      updateNetworkHint("请先选择交易所，再选择接收网络。");
+      return;
+    }
+
+    const token = ++currentNetworkLoadToken;
+    renderNetworkOptions({
+      options: [],
+      exchangeCode: normalizedExchangeCode,
+      selectedValue,
+      isLoading: true,
+    });
+    updateNetworkHint(forceRefresh ? "正在从交易所更新网络列表..." : "正在加载当前交易所的 USDT 网络...");
+
+    try {
+      const result = forceRefresh
+        ? await refreshExchangeNetworkOptions({ exchange_code: normalizedExchangeCode })
+        : await fetchExchangeNetworkOptions(normalizedExchangeCode);
+
+      if (token !== currentNetworkLoadToken) {
+        return;
+      }
+
+      if (!result.success) {
+        renderNetworkOptions({ options: [], exchangeCode: normalizedExchangeCode, selectedValue });
+        updateNetworkHint(result.message || "读取网络失败，请稍后重试。");
+        if (!silent) {
+          showToast(result.message || "读取网络失败，请稍后重试。");
+        }
+        return;
+      }
+
+      renderNetworkOptions({
+        options: result.options || [],
+        exchangeCode: normalizedExchangeCode,
+        selectedValue,
+      });
+      const exchangeLabel = String(result.exchange_label || normalizedExchangeCode.toUpperCase()).trim();
+      const updatedAt = String(result.updated_at || "").trim();
+      updateNetworkHint(updatedAt ? `${exchangeLabel} 网络已加载，最近更新时间：${updatedAt}` : `${exchangeLabel} 网络已加载。`);
+      if (forceRefresh && !silent) {
+        showToast(result.message || "交易所网络已更新。");
+      }
+    } catch (error) {
+      if (token !== currentNetworkLoadToken) {
+        return;
+      }
+      renderNetworkOptions({ options: [], exchangeCode: normalizedExchangeCode, selectedValue });
+      updateNetworkHint("读取网络失败，请稍后重试。");
+      if (!silent) {
+        showToast(error?.message || "读取网络失败，请稍后重试。");
+      }
+    }
   };
 
   const closeModal = () => {
@@ -129,7 +235,7 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
     });
   };
 
-  const fillForm = (account) => {
+  const fillForm = (account, networkOptions = null) => {
     const marketTypeField = getAccountField("market_type");
     const exchangeCodeField = getAccountField("exchange_code");
     const apiKeyField = getAccountField("api_key");
@@ -160,12 +266,17 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
     apiKeyField.value = account.api_key || "";
     apiSecretField.value = account.api_secret || "";
     apiPassphraseField.value = account.api_passphrase || "";
-    addressNetworkField.value = account.address_network || "";
     addressValueField.value = account.address_value || "";
     addressMemoField.value = account.address_memo || "";
     originalConnectionSnapshot = readConnectionSnapshot();
     accountModalTitle.textContent = "编辑账户";
     submitButton.textContent = "保存修改";
+    renderNetworkOptions({
+      options: networkOptions?.options || [],
+      exchangeCode: account.exchange_code || "",
+      selectedValue: account.address_network || "",
+    });
+    updateNetworkHint("当前已按账户交易所加载可选网络。");
   };
 
   const buildConnectionPayload = () => {
@@ -188,6 +299,39 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
     field.addEventListener("change", syncConnectionStatusByConfig);
   });
 
+  const exchangeCodeField = getAccountField("exchange_code");
+  if (exchangeCodeField) {
+    exchangeCodeField.addEventListener("change", () => {
+      void loadNetworkOptions({
+        exchangeCode: exchangeCodeField.value,
+        selectedValue: String(getAccountField("address_network")?.value || "").trim(),
+        silent: true,
+      });
+    });
+  }
+
+  if (accountNetworkRefreshButton) {
+    accountNetworkRefreshButton.addEventListener("click", async () => {
+      const selectedExchangeCode = String(getAccountField("exchange_code")?.value || "").trim();
+      if (!selectedExchangeCode) {
+        showToast("请选择交易所。");
+        return;
+      }
+      accountNetworkRefreshButton.disabled = true;
+      try {
+        await loadNetworkOptions({
+          exchangeCode: selectedExchangeCode,
+          selectedValue: String(getAccountField("address_network")?.value || "").trim(),
+          forceRefresh: true,
+        });
+      } catch (error) {
+        showToast(error?.message || "更新交易所网络失败，请稍后再试。");
+      } finally {
+        accountNetworkRefreshButton.disabled = false;
+      }
+    });
+  }
+
   accountForm.querySelectorAll("[data-password-toggle]").forEach((button) => {
     button.addEventListener("click", () => {
       const wrapper = button.closest(".password-field");
@@ -202,6 +346,8 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
 
   accountModalOpenButton.addEventListener("click", () => {
     resetFormMode();
+    renderNetworkOptions({ options: [], exchangeCode: "", selectedValue: "" });
+    updateNetworkHint("请先选择交易所，再选择接收网络。");
     openModal();
   });
 
@@ -293,7 +439,7 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
         return;
       }
 
-      fillForm(result.account);
+      fillForm(result.account, result.network_options || null);
       openModal();
     } catch (error) {
       showToast(error?.message || "读取账户失败，请稍后再试。");

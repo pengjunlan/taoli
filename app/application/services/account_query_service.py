@@ -7,6 +7,7 @@ from typing import Dict, List
 from app.application.services.auto_transfer_account_guard_service import auto_transfer_account_guard_service
 from app.application.services.account_monitor_service import account_monitor_service
 from app.application.services.account_transfer_capability_service import AccountTransferCapabilityService
+from app.application.services.exchange_asset_network_service import exchange_asset_network_service
 from app.application.services.account_support import (
     AccountBalanceSnapshot,
     AccountDetailResult,
@@ -48,6 +49,9 @@ class AccountQueryService(AccountServiceSupport):
             address_value=str(row.get("address_value") or ""),
             address_memo=str(row.get("memo_tag") or ""),
         )
+
+    def list_exchange_network_options(self, exchange_code: str) -> Dict[str, object]:
+        return exchange_asset_network_service.list_network_options(exchange_code)
 
     def get_auto_transfer_config(self, user_id: int) -> AutoTransferConfigResult:
         row = account_repository.get_auto_transfer_config_by_user_id(user_id)

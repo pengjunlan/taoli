@@ -207,6 +207,23 @@ class MySQLConnectionManager:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """,
             """
+            CREATE TABLE IF NOT EXISTS exchange_asset_networks (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                exchange_code VARCHAR(32) NOT NULL,
+                asset_code VARCHAR(32) NOT NULL DEFAULT 'USDT',
+                network_code VARCHAR(64) NOT NULL,
+                network_name VARCHAR(128) NOT NULL DEFAULT '',
+                network_id VARCHAR(128) NOT NULL DEFAULT '',
+                is_deposit_enabled TINYINT(1) NOT NULL DEFAULT 1,
+                is_withdraw_enabled TINYINT(1) NOT NULL DEFAULT 1,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_exchange_asset_networks_exchange_asset_network (exchange_code, asset_code, network_code),
+                KEY idx_exchange_asset_networks_exchange_asset (exchange_code, asset_code)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            """
             CREATE TABLE IF NOT EXISTS account_transfer_records (
                 id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 user_id BIGINT UNSIGNED NOT NULL,

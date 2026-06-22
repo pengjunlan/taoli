@@ -14,6 +14,7 @@ from app.application.dto.requests import (
     AccountTransferCreateRequest,
     AccountUpdateRequest,
     ExchangeConnectionTestRequest,
+    ExchangeAssetNetworksRefreshRequest,
 )
 from app.application.dto.responses import AccountResponse
 from app.application.services import account_service, exchange_connection_service
@@ -271,6 +272,49 @@ async def get_account_api(
             "address_value": result.address_value,
             "address_memo": result.address_memo,
         },
+        "network_options": account_service.list_exchange_network_options(result.exchange_code),
+    }
+
+
+@router.get("/api/accounts/exchanges/{exchange_code}/networks")
+async def list_exchange_network_options_api(
+    exchange_code: str,
+    _: AuthUser = Depends(require_api_user),
+) -> Dict[str, object]:
+    try:
+        result = account_service.list_exchange_network_options(exchange_code)
+    except AccountValidationError as exc:
+        return AccountResponse(success=False, message=str(exc)).to_dict()
+    except Exception:
+        logger.exception("List exchange network options failed unexpectedly for exchange_code=%s", exchange_code)
+        return AccountResponse(success=False, message="读取交易所网络失败：服务内部异常，请查看后端日志。").to_dict()
+
+    return {
+        "success": True,
+        "message": "交易所网络读取成功。",
+        **result,
+    }
+
+
+@router.post("/api/accounts/exchanges/networks/refresh")
+async def refresh_exchange_network_options_api(
+    payload: ExchangeAssetNetworksRefreshRequest,
+    _: AuthUser = Depends(require_api_user),
+) -> Dict[str, object]:
+    try:
+        result = account_service.refresh_exchange_network_options(payload.exchange_code)
+    except AccountValidationError as exc:
+        return AccountResponse(success=False, message=str(exc)).to_dict()
+    except AccountError as exc:
+        return AccountResponse(success=False, message=str(exc)).to_dict()
+    except Exception:
+        logger.exception("Refresh exchange network options failed unexpectedly for exchange_code=%s", payload.exchange_code)
+        return AccountResponse(success=False, message="更新交易所网络失败：服务内部异常，请查看后端日志。").to_dict()
+
+    return {
+        "success": True,
+        "message": "交易所网络已更新。",
+        **result,
     }
 
 

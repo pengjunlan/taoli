@@ -4,12 +4,91 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from app.domain.entities import AccountAddress, AutoTransferConfig, ExchangeAccount, StrategyRule, TransferRecord
+from app.domain.entities import (
+    AccountAddress,
+    AutoTransferConfig,
+    ExchangeAccount,
+    ExchangeAssetNetwork,
+    StrategyRule,
+    TransferRecord,
+)
 from app.infrastructure.persistence import mysql_manager
 
 
 class MySQLAccountRepository:
     """Handles exchange account and funding address persistence."""
+
+    def list_exchange_asset_networks(self, *, exchange_code: str, asset_code: str) -> List[Dict[str, Any]]:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    exchange_code,
+                    asset_code,
+                    network_code,
+                    network_name,
+                    network_id,
+                    is_deposit_enabled,
+                    is_withdraw_enabled,
+                    created_at,
+                    updated_at
+                FROM exchange_asset_networks
+                WHERE exchange_code = %s
+                  AND asset_code = %s
+                ORDER BY CASE WHEN network_code = 'internal' THEN 1 ELSE 0 END ASC, network_name ASC, network_code ASC
+                """,
+                (exchange_code, asset_code),
+            )
+            return list(cursor.fetchall())
+
+    def replace_exchange_asset_networks(
+        self,
+        *,
+        exchange_code: str,
+        asset_code: str,
+        networks: List[Dict[str, Any]],
+    ) -> None:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                DELETE FROM exchange_asset_networks
+                WHERE exchange_code = %s
+                  AND asset_code = %s
+                """,
+                (exchange_code, asset_code),
+            )
+            if networks:
+                cursor.executemany(
+                    """
+                    INSERT INTO exchange_asset_networks (
+                        exchange_code,
+                        asset_code,
+                        network_code,
+                        network_name,
+                        network_id,
+                        is_deposit_enabled,
+                        is_withdraw_enabled
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    [
+                        (
+                            exchange_code,
+                            asset_code,
+                            str(item.get("network_code") or "").strip(),
+                            str(item.get("network_name") or "").strip(),
+                            str(item.get("network_id") or "").strip(),
+                            1 if bool(item.get("is_deposit_enabled", True)) else 0,
+                            1 if bool(item.get("is_withdraw_enabled", True)) else 0,
+                        )
+                        for item in networks
+                        if str(item.get("network_code") or "").strip()
+                    ],
+                )
+            connection.commit()
 
     def get_account_with_address_by_id(self, account_id: int, user_id: int) -> Dict[str, Any] | None:
         with mysql_manager.connection() as connection:
@@ -1377,6 +1456,20 @@ class MySQLAccountRepository:
             failure_reason=str(row.get("failure_reason") or ""),
             config_fingerprint=str(row.get("config_fingerprint") or ""),
             processed_at=row.get("processed_at"),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def _build_exchange_asset_network(self, row: Dict[str, Any]) -> ExchangeAssetNetwork:
+        return ExchangeAssetNetwork(
+            id=int(row["id"]),
+            exchange_code=str(row["exchange_code"] or ""),
+            asset_code=str(row["asset_code"] or ""),
+            network_code=str(row["network_code"] or ""),
+            network_name=str(row["network_name"] or ""),
+            network_id=str(row["network_id"] or ""),
+            is_deposit_enabled=bool(row.get("is_deposit_enabled")),
+            is_withdraw_enabled=bool(row.get("is_withdraw_enabled")),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
