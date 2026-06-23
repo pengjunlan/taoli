@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import hashlib
+import json
 import re
-from typing import Dict
+from typing import Any, Dict, Mapping
 
 from app.application.services.exchange_transfer_adapters import normalize_network_code
 
@@ -54,6 +56,58 @@ MANUAL_TRANSFER_EXECUTION_RESULT_HINT = "手动调拨任务已创建，后台将
 MANUAL_TRANSFER_UI_NOTICE = "手动调拨可直接提交，后台会按记录尝试执行，成功或失败以执行结果为准。"
 
 REAL_TRANSFER_EXECUTION_SUPPORTED_EXCHANGES = {"binance", "okx", "gate", "bitget"}
+TRANSFER_EXECUTION_SNAPSHOT_PAYLOAD_KEY = "_transfer_snapshot"
+TRANSFER_EXECUTION_SNAPSHOT_CONTEXT_FIELDS = (
+    "from_market_type",
+    "from_exchange_code",
+    "from_api_key",
+    "from_api_secret",
+    "from_api_passphrase",
+    "to_market_type",
+    "to_exchange_code",
+    "to_api_key",
+    "to_api_secret",
+    "to_api_passphrase",
+    "to_network",
+    "to_address_value",
+    "to_memo_tag",
+)
+
+
+def build_transfer_execution_snapshot(
+    from_account: Mapping[str, Any],
+    to_account: Mapping[str, Any],
+) -> Dict[str, str]:
+    return {
+        "from_market_type": str(from_account.get("market_type") or "").strip().lower(),
+        "from_exchange_code": str(from_account.get("exchange_code") or "").strip().lower(),
+        "from_api_key": str(from_account.get("api_key") or "").strip(),
+        "from_api_secret": str(from_account.get("api_secret") or "").strip(),
+        "from_api_passphrase": str(from_account.get("api_passphrase") or "").strip(),
+        "to_market_type": str(to_account.get("market_type") or "").strip().lower(),
+        "to_exchange_code": str(to_account.get("exchange_code") or "").strip().lower(),
+        "to_api_key": str(to_account.get("api_key") or "").strip(),
+        "to_api_secret": str(to_account.get("api_secret") or "").strip(),
+        "to_api_passphrase": str(to_account.get("api_passphrase") or "").strip(),
+        "to_network": normalize_network_code(str(to_account.get("network") or "").strip()),
+        "to_address_value": str(to_account.get("address_value") or "").strip(),
+        "to_memo_tag": str(to_account.get("memo_tag") or "").strip(),
+    }
+
+
+def build_transfer_execution_payload(snapshot: Mapping[str, Any]) -> str:
+    payload = {
+        TRANSFER_EXECUTION_SNAPSHOT_PAYLOAD_KEY: {
+            key: str(value or "").strip() if isinstance(value, str) else value
+            for key, value in dict(snapshot).items()
+        }
+    }
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def build_transfer_config_fingerprint(snapshot: Mapping[str, Any]) -> str:
+    serialized = json.dumps(dict(snapshot), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)

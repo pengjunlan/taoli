@@ -8,7 +8,13 @@ from typing import Dict, List, Optional
 
 from app.application.services.auto_transfer_account_guard_service import auto_transfer_account_guard_service
 from app.application.services.account_monitor_service import account_monitor_service
-from app.application.services.account_support import AutoTransferConfigResult, AutoTransferExecutionResult
+from app.application.services.account_support import (
+    AutoTransferConfigResult,
+    AutoTransferExecutionResult,
+    build_transfer_config_fingerprint,
+    build_transfer_execution_payload,
+    build_transfer_execution_snapshot,
+)
 from app.application.services.account_transfer_capability_service import AccountTransferCapabilityService
 from app.domain.entities import AuthUser
 from app.infrastructure.persistence.account_repository import account_repository
@@ -96,6 +102,17 @@ class AccountAutoTransferService:
                 f"当前目标账户已有未完成的调拨记录 #{record_id}（状态：{status}），请等待执行完成后再继续自动调拨。"
             )
 
+        execution_snapshot = build_transfer_execution_snapshot(
+            self._snapshot_to_account_row(
+                next(snapshot for snapshot in account_snapshots if snapshot.account_id == int(candidate["from_account_id"]))
+            ),
+            self._snapshot_to_account_row(
+                next(snapshot for snapshot in account_snapshots if snapshot.account_id == int(candidate["to_account_id"]))
+            ),
+        )
+        config_fingerprint = build_transfer_config_fingerprint(execution_snapshot)
+        execution_payload = build_transfer_execution_payload(execution_snapshot)
+
         try:
             transfer_record = account_repository.create_transfer_record(
                 user_id=current_user.id,
@@ -106,8 +123,9 @@ class AccountAutoTransferService:
                 status="pending",
                 execute_status="pending_execute",
                 result_status="none",
-                config_fingerprint="",
+                config_fingerprint=config_fingerprint,
                 is_worker_enabled=True,
+                execution_payload=execution_payload,
                 result=(
                     "自动调拨任务已创建，后台将按真实执行链路处理。"
                     f" 本次计划调拨 {self._query_service._format_currency(float(candidate['amount']))}。"

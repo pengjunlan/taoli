@@ -353,13 +353,19 @@ class AccountQueryService(AccountServiceSupport):
                 }
             )
 
+        notice = (
+            MANUAL_TRANSFER_UI_NOTICE
+            if supported_count > 0
+            else str(transfer_source_summary["transfer_action_hint"])
+        )
+
         return {
             "from_account_id": str(from_account["id"]),
             "from_account_name": self._sanitize_account_name(str(from_account["account_name"])),
             "options": options,
             "option_count": len(options),
             "blocked_count": blocked_count,
-            "notice": MANUAL_TRANSFER_UI_NOTICE if options else str(transfer_source_summary["transfer_action_hint"]),
+            "notice": notice,
         }
 
     def _resolve_account_balance_snapshot(self, account_row: Dict[str, str]) -> AccountBalanceSnapshot:

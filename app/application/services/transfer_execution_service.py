@@ -12,7 +12,11 @@ from typing import Any, Dict
 import ccxt
 
 from app.application.dto.requests.exchange_requests import ExchangeConnectionTestRequest
-from app.application.services.account_support import MANUAL_TRANSFER_EXECUTION_MODE
+from app.application.services.account_support import (
+    MANUAL_TRANSFER_EXECUTION_MODE,
+    TRANSFER_EXECUTION_SNAPSHOT_CONTEXT_FIELDS,
+    TRANSFER_EXECUTION_SNAPSHOT_PAYLOAD_KEY,
+)
 from app.application.services.exchange_connection_service import exchange_connection_service
 from app.application.services.exchange_transfer_adapters import (
     DepositDestination,
@@ -142,6 +146,7 @@ class TransferExecutionService:
 
     def execute(self, context: Dict[str, Any]) -> TransferExecutionOutcome:
         try:
+            self._apply_execution_snapshot(context)
             self._validate_context(context)
 
             amount = float(context["amount"] or 0)
@@ -250,6 +255,8 @@ class TransferExecutionService:
         moved_to_withdraw_account = False
         source_withdraw_account = source_adapter.withdraw_account
         current_source_account = self._map_internal_account(source_adapter, from_exchange, from_market_type)
+        target_business_account = self._map_internal_account(target_adapter, to_exchange, to_market_type)
+        requires_target_account_alignment = target_adapter.withdraw_account != target_business_account
         withdraw_network_code = source_adapter.resolve_withdraw_network_code(to_network)
         withdraw_fee = 0.0
         withdraw_reference = str(context.get("execution_reference") or "").strip()
@@ -306,7 +313,7 @@ class TransferExecutionService:
                 withdraw_reference = self._extract_transfer_reference(withdraw)
                 self._store_withdraw_submission(context, withdraw, withdraw_reference)
 
-            if to_market_type == "swap" and checkpoint not in {CHECKPOINT_TARGET_CREDIT_CONFIRMED, CHECKPOINT_TARGET_INTERNAL_TRANSFERRED}:
+            if requires_target_account_alignment and checkpoint not in {CHECKPOINT_TARGET_CREDIT_CONFIRMED, CHECKPOINT_TARGET_INTERNAL_TRANSFERRED}:
                 target_credit_market_type = target_adapter.withdraw_account_market_type
                 balance_before = self._read_target_credit_balance_before(context)
                 if balance_before is None:
@@ -343,7 +350,7 @@ class TransferExecutionService:
                     ) or "",
                 )
 
-            if to_market_type == "swap" and checkpoint != CHECKPOINT_TARGET_INTERNAL_TRANSFERRED:
+            if requires_target_account_alignment and checkpoint != CHECKPOINT_TARGET_INTERNAL_TRANSFERRED:
                 self._execute_target_internal_transfer(
                     context=context,
                     target_client=target_client,
@@ -361,11 +368,13 @@ class TransferExecutionService:
                 )
 
             return TransferExecutionOutcome(
-                status="success",
+                status="processing" if requires_target_account_alignment else "success",
                 result=f"跨交易所调拨已提交，出金记录号 {withdraw_reference}。",
+                execute_status="pending_execute" if requires_target_account_alignment else "processed",
+                result_status="none" if requires_target_account_alignment else "success",
                 execution_checkpoint=(
                     CHECKPOINT_TARGET_INTERNAL_TRANSFERRED
-                    if to_market_type == "swap"
+                    if requires_target_account_alignment
                     else CHECKPOINT_WITHDRAW_SUBMITTED
                 ),
                 execution_reference=withdraw_reference,
@@ -670,6 +679,17 @@ class TransferExecutionService:
                 execution_reference=str(context.get("execution_reference") or execution_reference),
                 execution_payload=str(context.get("execution_payload") or execution_payload),
             )
+
+    def _apply_execution_snapshot(self, context: Dict[str, Any]) -> None:
+        payload = self._read_execution_payload_meta(context)
+        snapshot = payload.get(TRANSFER_EXECUTION_SNAPSHOT_PAYLOAD_KEY)
+        if not isinstance(snapshot, dict):
+            return
+        for field in TRANSFER_EXECUTION_SNAPSHOT_CONTEXT_FIELDS:
+            value = snapshot.get(field)
+            if value is None:
+                continue
+            context[field] = str(value).strip() if isinstance(value, str) else value
 
     def _serialize_execution_payload_meta(
         self,

@@ -1,5 +1,5 @@
 import { showToast } from "../../core/utils.js";
-import { createTransferRecord } from "./api.js";
+import { createTransferRecord, fetchTransferOptions } from "./api.js";
 import { escapeHtml, formatMoney, parseMoney } from "./formatters.js";
 import { getFormField } from "./form-fields.js";
 import { findBalanceRowById, resolveBalanceAccountId } from "./render.js";
@@ -18,6 +18,7 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
     transferNotice,
     transferOptionSummary,
   } = elements;
+  let latestTransferOptions = null;
 
   const getBalanceRows = () => {
     const rows = getLatestAccountsResult()?.balance_rows;
@@ -42,6 +43,14 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
     if (transferNotice) {
       transferNotice.textContent = text;
     }
+  };
+
+  const getSupportedTargetOptions = () => {
+    const options = latestTransferOptions?.options;
+    if (!Array.isArray(options)) {
+      return [];
+    }
+    return options.filter((item) => Boolean(item?.route_supported) && String(item?.id || "").trim());
   };
 
   const getTransferField = (name) => getFormField(transferForm, name);
@@ -71,10 +80,11 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
     const fromAccountId = String(fromSelect?.value || "").trim();
     if (!select) return;
 
+    const supportedTargetIds = new Set(getSupportedTargetOptions().map((item) => String(item.id || "").trim()));
     const optionHtml = getBalanceRows()
       .filter((row) => {
         const id = String(row.id || "").trim();
-        return id && id !== fromAccountId;
+        return id && id !== fromAccountId && supportedTargetIds.has(id);
       })
       .map((row) => {
         const id = String(row.id || "").trim();
@@ -166,7 +176,7 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
     renderTransferPreview();
   };
 
-  const syncTransferTargets = ({ selectedTargetId = "" } = {}) => {
+  const syncTransferTargets = async ({ selectedTargetId = "" } = {}) => {
     if (!transferForm) return;
 
     const fromSelect = getTransferField("from_account_id");
@@ -175,6 +185,26 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
     }
 
     const fromAccountId = String(fromSelect.value || "").trim();
+    latestTransferOptions = null;
+
+    if (!fromAccountId) {
+      fillTargetAccountOptions({ selectedAccountId: selectedTargetId });
+      setTransferOptionSummary("请选择转出账户。");
+      if (transferDefaultHint) {
+        transferDefaultHint.textContent = "默认划转金额：-";
+      }
+      if (transferPreview) {
+        transferPreview.hidden = true;
+      }
+      setTransferNotice(DEFAULT_TRANSFER_NOTICE);
+      return;
+    }
+
+    const optionResult = await fetchTransferOptions(fromAccountId);
+    if (!optionResult.success) {
+      throw new Error(optionResult.message || "读取可执行调拨目标失败。");
+    }
+    latestTransferOptions = optionResult;
     fillTargetAccountOptions({ selectedAccountId: selectedTargetId });
 
     const targetSelect = getTransferField("to_account_id");
@@ -184,29 +214,20 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
 
     const availableTargetCount = Array.from(targetSelect.options || []).filter((option) => option.value).length;
 
-    if (!fromAccountId) {
-      setTransferOptionSummary("请选择转出账户。");
-      if (transferDefaultHint) {
-        transferDefaultHint.textContent = "默认划转金额：-";
-      }
-      if (transferPreview) {
-        transferPreview.hidden = true;
-      }
-      return;
-    }
-
     if (!availableTargetCount) {
-      setTransferOptionSummary("当前没有可选的转入账户。");
+      setTransferOptionSummary(optionResult.notice || "当前没有可选的转入账户。");
       if (transferDefaultHint) {
         transferDefaultHint.textContent = "默认划转金额：-";
       }
       if (transferPreview) {
         transferPreview.hidden = true;
       }
+      setTransferNotice(optionResult.notice || DEFAULT_TRANSFER_NOTICE);
       return;
     }
 
     setTransferOptionSummary(`当前可选转入账户 ${availableTargetCount} 个。`);
+    setTransferNotice(optionResult.notice || DEFAULT_TRANSFER_NOTICE);
     syncDefaultTransferAmount();
   };
 
@@ -215,6 +236,7 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
 
     transferModal.hidden = true;
     transferForm.reset();
+    latestTransferOptions = null;
     fillSourceAccountOptions();
     fillTargetAccountOptions();
     if (transferPreview) {
@@ -243,8 +265,12 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
   });
 
   if (transferForm) {
-    getTransferField("from_account_id")?.addEventListener("change", () => {
-      syncTransferTargets();
+    getTransferField("from_account_id")?.addEventListener("change", async () => {
+      try {
+        await syncTransferTargets();
+      } catch (error) {
+        showToast(error?.message || "读取可执行调拨目标失败。");
+      }
     });
 
     getTransferField("to_account_id")?.addEventListener("change", () => {
@@ -276,7 +302,7 @@ export function bindTransferModal({ elements, syncBodyScrollLock }) {
       syncBodyScrollLock();
       setTransferNotice(DEFAULT_TRANSFER_NOTICE);
       fillSourceAccountOptions({ selectedAccountId: accountId });
-      syncTransferTargets();
+      await syncTransferTargets();
 
       window.setTimeout(() => {
         const fromSelect = getTransferField("from_account_id");

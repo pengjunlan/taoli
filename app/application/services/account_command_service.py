@@ -15,6 +15,9 @@ from app.application.services.account_support import (
     MANUAL_TRANSFER_EXECUTION_MODE,
     MANUAL_TRANSFER_EXECUTION_RESULT_HINT,
     TransferCreateResult,
+    build_transfer_config_fingerprint,
+    build_transfer_execution_payload,
+    build_transfer_execution_snapshot,
 )
 from app.application.services.account_transfer_capability_service import AccountTransferCapabilityService
 from app.application.services.exchange_connection_service import exchange_connection_service
@@ -307,6 +310,10 @@ class AccountCommandService(AccountServiceSupport):
             raise AccountNotFoundError("转入账户不存在，或你无权操作该账户。")
 
         reason = str(payload.reason or "").strip() or "手动调拨"
+        self._transfer_capability_service.ensure_transfer_supported(from_account, to_account)
+        execution_snapshot = build_transfer_execution_snapshot(from_account, to_account)
+        config_fingerprint = build_transfer_config_fingerprint(execution_snapshot)
+        execution_payload = build_transfer_execution_payload(execution_snapshot)
 
         is_worker_enabled = MANUAL_TRANSFER_EXECUTION_MODE == "worker_enabled"
         result_hint = MANUAL_TRANSFER_EXECUTION_RESULT_HINT
@@ -366,8 +373,10 @@ class AccountCommandService(AccountServiceSupport):
                 status="pending",
                 execute_status="pending_execute",
                 result_status="none",
+                config_fingerprint=config_fingerprint,
                 is_worker_enabled=is_worker_enabled,
                 result=result_hint,
+                execution_payload=execution_payload,
             )
         except Exception as exc:
             raise AccountPersistenceError("保存调拨记录失败：数据库操作异常。") from exc

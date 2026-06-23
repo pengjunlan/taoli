@@ -134,7 +134,9 @@ export function renderBalanceTableRows(rows) {
 
   return rows
     .map((row) => {
-      const transferActionHint = "手动调拨可直接提交，后台会按记录尝试执行，成功或失败以执行结果为准。";
+      const transferActionHint = String(
+        row.transfer_action_hint || "手动调拨可直接提交，后台会按记录尝试执行，成功或失败以执行结果为准。",
+      );
       const guard = row.auto_transfer_guard || null;
       const showUnlock = Boolean(row.auto_transfer_frozen && row.id);
       const guardBadge = guard
