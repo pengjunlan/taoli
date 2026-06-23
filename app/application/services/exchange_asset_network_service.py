@@ -16,6 +16,8 @@ from app.shared.exceptions import AccountPersistenceError, AccountValidationErro
 
 logger = logging.getLogger(__name__)
 
+SUPPORTED_ADDRESS_NETWORK_CODES = {"plasma"}
+
 DEFAULT_ADDRESS_NETWORKS = (
     {"network_code": "TRC20", "network_name": "TRC20", "network_id": "TRC20"},
     {"network_code": "ERC20", "network_name": "ERC20", "network_id": "ERC20"},
@@ -69,6 +71,7 @@ class ExchangeAssetNetworkService:
         )
         if not rows:
             rows = self._default_rows(normalized_exchange_code)
+        rows = self._filter_supported_address_rows(rows)
         return {
             "exchange_code": normalized_exchange_code,
             "exchange_label": EXCHANGE_LABELS.get(normalized_exchange_code, normalized_exchange_code.upper()),
@@ -203,16 +206,41 @@ class ExchangeAssetNetworkService:
 
     def _default_rows(self, exchange_code: str) -> List[Dict[str, object]]:
         _ = exchange_code
-        return [
-            {
-                "network_code": str(item["network_code"]),
-                "network_name": str(item["network_name"]),
-                "network_id": str(item["network_id"]),
-                "is_deposit_enabled": True,
-                "is_withdraw_enabled": True,
-            }
-            for item in DEFAULT_ADDRESS_NETWORKS
-        ]
+        return self._filter_supported_address_rows(
+            [
+                {
+                    "network_code": str(item["network_code"]),
+                    "network_name": str(item["network_name"]),
+                    "network_id": str(item["network_id"]),
+                    "is_deposit_enabled": True,
+                    "is_withdraw_enabled": True,
+                }
+                for item in DEFAULT_ADDRESS_NETWORKS
+            ]
+        )
+
+    def _filter_supported_address_rows(self, rows: List[Dict[str, object]]) -> List[Dict[str, object]]:
+        filtered_rows: List[Dict[str, object]] = []
+        seen_codes: set[str] = set()
+        for row in rows:
+            normalized_code = self._normalize_network_code(str(row.get("network_code") or "").strip())
+            if normalized_code not in SUPPORTED_ADDRESS_NETWORK_CODES:
+                continue
+            if normalized_code in seen_codes:
+                continue
+            seen_codes.add(normalized_code)
+            filtered_rows.append(
+                {
+                    "network_code": normalized_code.upper(),
+                    "network_name": NETWORK_LABELS.get(normalized_code, str(row.get("network_name") or "").strip() or normalized_code.upper()),
+                    "network_id": str(row.get("network_id") or "").strip() or normalized_code.upper(),
+                    "is_deposit_enabled": bool(row.get("is_deposit_enabled", True)),
+                    "is_withdraw_enabled": bool(row.get("is_withdraw_enabled", True)),
+                    "updated_at": row.get("updated_at"),
+                    "created_at": row.get("created_at"),
+                }
+            )
+        return filtered_rows
 
     def _build_internal_row(self) -> Dict[str, object]:
         return {

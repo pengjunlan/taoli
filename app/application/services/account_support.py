@@ -7,6 +7,8 @@ from datetime import datetime
 import re
 from typing import Dict
 
+from app.application.services.exchange_transfer_adapters import normalize_network_code
+
 
 MARKET_TYPE_LABELS = {
     "spot": "现货",
@@ -127,7 +129,7 @@ class AccountServiceSupport:
             "api_secret": api_secret.strip(),
             "api_passphrase": api_passphrase.strip(),
             "connection_test_status": normalized_connection_status,
-            "address_network": address_network.strip(),
+            "address_network": self._normalize_address_network(address_network),
             "address_value": address_value.strip(),
             "address_memo": address_memo.strip(),
         }
@@ -231,6 +233,12 @@ class AccountServiceSupport:
         if normalized in NETWORK_LABELS:
             return NETWORK_LABELS[normalized]
         return text.replace("_", " ").replace("-", " ")
+
+    def _normalize_address_network(self, network_code: str) -> str:
+        text = str(network_code or "").strip()
+        if not text:
+            return ""
+        return normalize_network_code(text)
 
     def _connection_test_status_label(self, value: str) -> str:
         return {
