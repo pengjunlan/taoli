@@ -14,8 +14,15 @@ import ccxt
 from app.application.dto.requests.exchange_requests import ExchangeConnectionTestRequest
 from app.application.services.account_support import (
     MANUAL_TRANSFER_EXECUTION_MODE,
+    TRANSFER_CHECKPOINT_AWAITING_TARGET_CREDIT,
+    TRANSFER_CHECKPOINT_AWAITING_TARGET_INTERNAL_TRANSFER,
+    TRANSFER_CHECKPOINT_SAME_EXCHANGE_COMPLETED,
+    TRANSFER_CHECKPOINT_SOURCE_INTERNAL_PREPARED,
+    TRANSFER_CHECKPOINT_TARGET_CREDIT_CONFIRMED,
+    TRANSFER_CHECKPOINT_TARGET_INTERNAL_TRANSFERRED,
     TRANSFER_EXECUTION_SNAPSHOT_CONTEXT_FIELDS,
     TRANSFER_EXECUTION_SNAPSHOT_PAYLOAD_KEY,
+    TRANSFER_CHECKPOINT_WITHDRAW_SUBMITTED,
 )
 from app.application.services.exchange_connection_service import exchange_connection_service
 from app.application.services.exchange_transfer_adapters import (
@@ -32,12 +39,13 @@ logger = logging.getLogger(__name__)
 TRANSFER_ASSET_CODE = "USDT"
 EXECUTION_MODE = MANUAL_TRANSFER_EXECUTION_MODE
 ROLLBACK_RESULT_PREFIX = "跨交易所提现失败，已将资金回滚至原账户。"
-CHECKPOINT_SAME_EXCHANGE_COMPLETED = "same_exchange_completed"
-CHECKPOINT_SOURCE_INTERNAL_PREPARED = "source_internal_prepared"
-CHECKPOINT_WITHDRAW_SUBMITTED = "withdraw_submitted"
-CHECKPOINT_TARGET_CREDIT_CONFIRMED = "target_credit_confirmed"
-CHECKPOINT_TARGET_INTERNAL_TRANSFERRED = "target_internal_transferred"
-
+CHECKPOINT_SAME_EXCHANGE_COMPLETED = TRANSFER_CHECKPOINT_SAME_EXCHANGE_COMPLETED
+CHECKPOINT_SOURCE_INTERNAL_PREPARED = TRANSFER_CHECKPOINT_SOURCE_INTERNAL_PREPARED
+CHECKPOINT_WITHDRAW_SUBMITTED = TRANSFER_CHECKPOINT_WITHDRAW_SUBMITTED
+CHECKPOINT_AWAITING_TARGET_CREDIT = TRANSFER_CHECKPOINT_AWAITING_TARGET_CREDIT
+CHECKPOINT_TARGET_CREDIT_CONFIRMED = TRANSFER_CHECKPOINT_TARGET_CREDIT_CONFIRMED
+CHECKPOINT_AWAITING_TARGET_INTERNAL_TRANSFER = TRANSFER_CHECKPOINT_AWAITING_TARGET_INTERNAL_TRANSFER
+CHECKPOINT_TARGET_INTERNAL_TRANSFERRED = TRANSFER_CHECKPOINT_TARGET_INTERNAL_TRANSFERRED
 @dataclass(frozen=True)
 class TransferExecutionOutcome:
     status: str
@@ -262,7 +270,13 @@ class TransferExecutionService:
         withdraw_reference = str(context.get("execution_reference") or "").strip()
 
         try:
-            if checkpoint not in {CHECKPOINT_WITHDRAW_SUBMITTED, CHECKPOINT_TARGET_CREDIT_CONFIRMED, CHECKPOINT_TARGET_INTERNAL_TRANSFERRED}:
+            if checkpoint not in {
+                CHECKPOINT_WITHDRAW_SUBMITTED,
+                CHECKPOINT_AWAITING_TARGET_CREDIT,
+                CHECKPOINT_TARGET_CREDIT_CONFIRMED,
+                CHECKPOINT_AWAITING_TARGET_INTERNAL_TRANSFER,
+                CHECKPOINT_TARGET_INTERNAL_TRANSFERRED,
+            }:
                 withdraw_fee = self._resolve_withdraw_fee(
                     client=source_client,
                     adapter=source_adapter,
@@ -297,7 +311,13 @@ class TransferExecutionService:
             )
             self._store_resolved_destination(context, destination)
 
-            if checkpoint not in {CHECKPOINT_WITHDRAW_SUBMITTED, CHECKPOINT_TARGET_CREDIT_CONFIRMED, CHECKPOINT_TARGET_INTERNAL_TRANSFERRED}:
+            if checkpoint not in {
+                CHECKPOINT_WITHDRAW_SUBMITTED,
+                CHECKPOINT_AWAITING_TARGET_CREDIT,
+                CHECKPOINT_TARGET_CREDIT_CONFIRMED,
+                CHECKPOINT_AWAITING_TARGET_INTERNAL_TRANSFER,
+                CHECKPOINT_TARGET_INTERNAL_TRANSFERRED,
+            }:
                 withdraw_params = self._build_withdraw_params(
                     adapter=source_adapter,
                     network_code=destination.network_code,
@@ -313,7 +333,11 @@ class TransferExecutionService:
                 withdraw_reference = self._extract_transfer_reference(withdraw)
                 self._store_withdraw_submission(context, withdraw, withdraw_reference)
 
-            if requires_target_account_alignment and checkpoint not in {CHECKPOINT_TARGET_CREDIT_CONFIRMED, CHECKPOINT_TARGET_INTERNAL_TRANSFERRED}:
+            if requires_target_account_alignment and checkpoint not in {
+                CHECKPOINT_TARGET_CREDIT_CONFIRMED,
+                CHECKPOINT_AWAITING_TARGET_INTERNAL_TRANSFER,
+                CHECKPOINT_TARGET_INTERNAL_TRANSFERRED,
+            }:
                 target_credit_market_type = target_adapter.withdraw_account_market_type
                 balance_before = self._read_target_credit_balance_before(context)
                 if balance_before is None:
@@ -324,7 +348,7 @@ class TransferExecutionService:
                     )
                     self._store_execution_checkpoint(
                         context,
-                        execution_checkpoint=CHECKPOINT_WITHDRAW_SUBMITTED,
+                        execution_checkpoint=TRANSFER_CHECKPOINT_AWAITING_TARGET_CREDIT,
                         execution_reference=withdraw_reference,
                         execution_payload=self._serialize_execution_payload_meta(
                             context,
@@ -351,6 +375,12 @@ class TransferExecutionService:
                 )
 
             if requires_target_account_alignment and checkpoint != CHECKPOINT_TARGET_INTERNAL_TRANSFERRED:
+                self._store_execution_checkpoint(
+                    context,
+                    execution_checkpoint=TRANSFER_CHECKPOINT_AWAITING_TARGET_INTERNAL_TRANSFER,
+                    execution_reference=withdraw_reference,
+                    execution_payload=self._serialize_execution_payload_meta(context) or "",
+                )
                 self._execute_target_internal_transfer(
                     context=context,
                     target_client=target_client,
@@ -368,10 +398,14 @@ class TransferExecutionService:
                 )
 
             return TransferExecutionOutcome(
-                status="processing" if requires_target_account_alignment else "success",
-                result=f"跨交易所调拨已提交，出金记录号 {withdraw_reference}。",
-                execute_status="pending_execute" if requires_target_account_alignment else "processed",
-                result_status="none" if requires_target_account_alignment else "success",
+                status="success",
+                result=(
+                    f"跨交易所调拨已完成，出金记录号 {withdraw_reference}。"
+                    if requires_target_account_alignment
+                    else f"跨交易所调拨已提交，出金记录号 {withdraw_reference}。"
+                ),
+                execute_status="processed",
+                result_status="success",
                 execution_checkpoint=(
                     CHECKPOINT_TARGET_INTERNAL_TRANSFERRED
                     if requires_target_account_alignment
@@ -384,12 +418,16 @@ class TransferExecutionService:
             current_checkpoint = str(context.get("execution_checkpoint") or checkpoint or "").strip()
             if self._withdraw_submitted(context) or current_checkpoint in {
                 CHECKPOINT_WITHDRAW_SUBMITTED,
+                TRANSFER_CHECKPOINT_AWAITING_TARGET_CREDIT,
                 CHECKPOINT_TARGET_CREDIT_CONFIRMED,
+                TRANSFER_CHECKPOINT_AWAITING_TARGET_INTERNAL_TRANSFER,
                 CHECKPOINT_TARGET_INTERNAL_TRANSFERRED,
             }:
                 if current_checkpoint not in {
                     CHECKPOINT_WITHDRAW_SUBMITTED,
+                    TRANSFER_CHECKPOINT_AWAITING_TARGET_CREDIT,
                     CHECKPOINT_TARGET_CREDIT_CONFIRMED,
+                    TRANSFER_CHECKPOINT_AWAITING_TARGET_INTERNAL_TRANSFER,
                     CHECKPOINT_TARGET_INTERNAL_TRANSFERRED,
                 }:
                     self._store_execution_checkpoint(
@@ -401,7 +439,7 @@ class TransferExecutionService:
                 return TransferExecutionOutcome(
                     status="processing",
                     result=self._build_post_withdraw_pending_message(context=context, error=exc),
-                    execute_status="pending_execute",
+                    execute_status="executing",
                     result_status="none",
                     failure_type="",
                     failure_reason="",

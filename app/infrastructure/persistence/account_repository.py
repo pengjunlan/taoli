@@ -886,7 +886,13 @@ class MySQLAccountRepository:
                     status = 'processing',
                     execute_status = 'executing',
                     result_status = 'none',
-                    result = '后台线程已接单，开始执行调拨。',
+                    result = CASE
+                        WHEN execute_status = 'executing'
+                             AND result_status = 'none'
+                             AND COALESCE(NULLIF(result, ''), '') <> ''
+                        THEN result
+                        ELSE '后台线程已接单，开始执行调拨。'
+                    END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
                   AND is_worker_enabled = 1

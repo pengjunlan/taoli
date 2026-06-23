@@ -326,11 +326,7 @@ class AccountCommandService(AccountServiceSupport):
             )
             if pending_transfer is not None:
                 record_id = int(pending_transfer["id"])
-                status = str(
-                    pending_transfer.get("execute_status")
-                    or pending_transfer.get("status")
-                    or "pending_execute"
-                )
+                status = self._build_transfer_display(pending_transfer)["status"]
                 raise AccountValidationError(
                     f"当前这条调拨路线已有未完成的调拨记录 #{record_id}（状态：{status}），请等待处理完成后再提交。"
                 )
@@ -340,11 +336,7 @@ class AccountCommandService(AccountServiceSupport):
             )
             if source_pending_transfer is not None:
                 record_id = int(source_pending_transfer["id"])
-                status = str(
-                    source_pending_transfer.get("execute_status")
-                    or source_pending_transfer.get("status")
-                    or "pending_execute"
-                )
+                status = self._build_transfer_display(source_pending_transfer)["status"]
                 raise AccountValidationError(
                     f"当前转出账户已有未完成的调拨记录 #{record_id}（状态：{status}），请等待处理完成后再提交。"
                 )
@@ -354,11 +346,7 @@ class AccountCommandService(AccountServiceSupport):
             )
             if target_pending_transfer is not None:
                 record_id = int(target_pending_transfer["id"])
-                status = str(
-                    target_pending_transfer.get("execute_status")
-                    or target_pending_transfer.get("status")
-                    or "pending_execute"
-                )
+                status = self._build_transfer_display(target_pending_transfer)["status"]
                 raise AccountValidationError(
                     f"当前转入账户已有未完成的调拨记录 #{record_id}（状态：{status}），请等待处理完成后再提交。"
                 )

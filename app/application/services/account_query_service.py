@@ -280,9 +280,7 @@ class AccountQueryService(AccountServiceSupport):
         result: List[Dict[str, str]] = []
 
         for row in rows:
-            execute_status = str(row.get("execute_status") or row.get("status") or "pending_execute")
-            result_status = str(row.get("result_status") or "")
-            display_status = result_status if result_status in {"success", "failed", "ignored"} else execute_status
+            display = self._build_transfer_display(row)
             result.append(
                 {
                     "time": self._format_datetime(row.get("created_at")),
@@ -293,9 +291,9 @@ class AccountQueryService(AccountServiceSupport):
                     "to_memo": str(row.get("to_memo_tag") or "").strip() or "",
                     "amount": self._format_currency(float(row.get("amount") or 0)),
                     "reason": str(row.get("reason") or "手动调拨"),
-                    "status": self._transfer_status_label(display_status),
-                    "status_tone": self._transfer_status_tone(display_status),
-                    "result": str(row.get("result") or "--"),
+                    "status": display["status"],
+                    "status_tone": display["status_tone"],
+                    "result": display["result"],
                 }
             )
 
