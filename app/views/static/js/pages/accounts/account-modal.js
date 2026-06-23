@@ -4,7 +4,6 @@ import {
   deleteAccount,
   fetchAccountDetail,
   fetchExchangeNetworkOptions,
-  refreshExchangeNetworkOptions,
   testAccountConnection,
   updateAccount,
 } from "./api.js";
@@ -21,7 +20,6 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
     accountModalCloseButtons,
     accountForm,
     accountTestButton,
-    accountNetworkRefreshButton,
     accountNetworkHint,
     accountModalTitle,
   } = elements;
@@ -146,9 +144,7 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
   const loadNetworkOptions = async ({
     exchangeCode,
     selectedValue = "",
-    forceRefresh = false,
     silent = false,
-    refreshPayload = null,
   }) => {
     const normalizedExchangeCode = String(exchangeCode || "").trim().toLowerCase();
     if (!normalizedExchangeCode) {
@@ -164,18 +160,10 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
       selectedValue,
       isLoading: true,
     });
-    updateNetworkHint(forceRefresh ? "正在从交易所更新网络列表..." : "正在加载当前交易所的 USDT 网络...");
+    updateNetworkHint("正在加载当前交易所的 USDT 网络...");
 
     try {
-      const result = forceRefresh
-        ? await refreshExchangeNetworkOptions({
-            exchange_code: normalizedExchangeCode,
-            market_type: String(refreshPayload?.market_type || getAccountField("market_type")?.value || "spot").trim(),
-            api_key: String(refreshPayload?.api_key || getAccountField("api_key")?.value || "").trim(),
-            api_secret: String(refreshPayload?.api_secret || getAccountField("api_secret")?.value || "").trim(),
-            api_passphrase: String(refreshPayload?.api_passphrase || getAccountField("api_passphrase")?.value || "").trim(),
-          })
-        : await fetchExchangeNetworkOptions(normalizedExchangeCode);
+      const result = await fetchExchangeNetworkOptions(normalizedExchangeCode);
 
       if (token !== currentNetworkLoadToken) {
         return;
@@ -198,9 +186,6 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
       const exchangeLabel = String(result.exchange_label || normalizedExchangeCode.toUpperCase()).trim();
       const updatedAt = String(result.updated_at || "").trim();
       updateNetworkHint(updatedAt ? `${exchangeLabel} 网络已加载，最近更新时间：${updatedAt}` : `${exchangeLabel} 网络已加载。`);
-      if (forceRefresh && !silent) {
-        showToast(result.message || "交易所网络已更新。");
-      }
     } catch (error) {
       if (token !== currentNetworkLoadToken) {
         return;
@@ -319,31 +304,6 @@ export function bindAccountModal({ elements, syncBodyScrollLock, refreshAccountT
         selectedValue: String(getAccountField("address_network")?.value || "").trim(),
         silent: true,
       });
-    });
-  }
-
-  if (accountNetworkRefreshButton) {
-    accountNetworkRefreshButton.addEventListener("click", async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const selectedExchangeCode = String(getAccountField("exchange_code")?.value || "").trim();
-      if (!selectedExchangeCode) {
-        showToast("请选择交易所。");
-        return;
-      }
-      accountNetworkRefreshButton.disabled = true;
-      try {
-        await loadNetworkOptions({
-          exchangeCode: selectedExchangeCode,
-          selectedValue: String(getAccountField("address_network")?.value || "").trim(),
-          forceRefresh: true,
-          refreshPayload: buildConnectionPayload(),
-        });
-      } catch (error) {
-        showToast(error?.message || "更新交易所网络失败，请稍后再试。");
-      } finally {
-        accountNetworkRefreshButton.disabled = false;
-      }
     });
   }
 

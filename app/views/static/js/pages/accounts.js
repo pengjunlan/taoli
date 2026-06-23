@@ -20,7 +20,6 @@ function getAccountPageElements() {
     accountModalTitle: document.getElementById("account-modal-title"),
     accountForm: document.querySelector("[data-account-form]"),
     accountTestButton: document.querySelector("[data-account-test]"),
-    accountNetworkRefreshButton: document.querySelector("[data-account-network-refresh]"),
     accountNetworkHint: document.querySelector("[data-account-network-hint]"),
     confirmModal: document.querySelector("[data-account-confirm]"),
     confirmMessage: document.querySelector("[data-account-confirm-message]"),
