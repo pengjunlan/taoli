@@ -311,6 +311,51 @@ class AccountCommandService(AccountServiceSupport):
         is_worker_enabled = MANUAL_TRANSFER_EXECUTION_MODE == "worker_enabled"
         result_hint = MANUAL_TRANSFER_EXECUTION_RESULT_HINT
 
+        if is_worker_enabled:
+            pending_transfer = account_repository.get_open_worker_transfer_record_by_route(
+                user_id=current_user.id,
+                from_account_id=payload.from_account_id,
+                to_account_id=payload.to_account_id,
+            )
+            if pending_transfer is not None:
+                record_id = int(pending_transfer["id"])
+                status = str(
+                    pending_transfer.get("execute_status")
+                    or pending_transfer.get("status")
+                    or "pending_execute"
+                )
+                raise AccountValidationError(
+                    f"当前这条调拨路线已有未完成的调拨记录 #{record_id}（状态：{status}），请等待处理完成后再提交。"
+                )
+
+            source_pending_transfer = account_repository.get_open_worker_transfer_record_by_source_account_id(
+                payload.from_account_id
+            )
+            if source_pending_transfer is not None:
+                record_id = int(source_pending_transfer["id"])
+                status = str(
+                    source_pending_transfer.get("execute_status")
+                    or source_pending_transfer.get("status")
+                    or "pending_execute"
+                )
+                raise AccountValidationError(
+                    f"当前转出账户已有未完成的调拨记录 #{record_id}（状态：{status}），请等待处理完成后再提交。"
+                )
+
+            target_pending_transfer = account_repository.get_open_worker_transfer_record_by_target_account_id(
+                payload.to_account_id
+            )
+            if target_pending_transfer is not None:
+                record_id = int(target_pending_transfer["id"])
+                status = str(
+                    target_pending_transfer.get("execute_status")
+                    or target_pending_transfer.get("status")
+                    or "pending_execute"
+                )
+                raise AccountValidationError(
+                    f"当前转入账户已有未完成的调拨记录 #{record_id}（状态：{status}），请等待处理完成后再提交。"
+                )
+
         try:
             transfer_record = account_repository.create_transfer_record(
                 user_id=current_user.id,

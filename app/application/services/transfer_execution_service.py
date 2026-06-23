@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_DOWN
 import json
 import logging
 import time
@@ -44,6 +45,12 @@ class TransferExecutionOutcome:
     execution_checkpoint: str | None = None
     execution_reference: str | None = None
     execution_payload: str | None = None
+
+
+@dataclass(frozen=True)
+class TargetCreditSnapshot:
+    available_amount: float
+    credited_amount: float
 
 
 class TransferExecutionService:
@@ -317,7 +324,7 @@ class TransferExecutionService:
                             target_credit_balance_before=balance_before,
                         ),
                     )
-                self._wait_for_target_credit(
+                target_credit_snapshot = self._wait_for_target_credit(
                     target_client=target_client,
                     adapter=target_adapter,
                     market_type=target_credit_market_type,
@@ -328,17 +335,29 @@ class TransferExecutionService:
                     context,
                     execution_checkpoint=CHECKPOINT_TARGET_CREDIT_CONFIRMED,
                     execution_reference=withdraw_reference,
+                    execution_payload=self._serialize_execution_payload_meta(
+                        context,
+                        target_credit_balance_before=balance_before,
+                        target_credit_available_amount=target_credit_snapshot.available_amount,
+                        target_credit_amount=target_credit_snapshot.credited_amount,
+                    ) or "",
                 )
 
             if to_market_type == "swap" and checkpoint != CHECKPOINT_TARGET_INTERNAL_TRANSFERRED:
-                funding_account = target_adapter.withdraw_account
-                target_account = self._map_internal_account(target_adapter, to_exchange, to_market_type)
-                if funding_account != target_account:
-                    target_client.transfer(TRANSFER_ASSET_CODE, amount, funding_account, target_account)
+                self._execute_target_internal_transfer(
+                    context=context,
+                    target_client=target_client,
+                    target_adapter=target_adapter,
+                    to_exchange=to_exchange,
+                    to_market_type=to_market_type,
+                    requested_amount=amount,
+                    withdraw_reference=withdraw_reference,
+                )
                 self._store_execution_checkpoint(
                     context,
                     execution_checkpoint=CHECKPOINT_TARGET_INTERNAL_TRANSFERRED,
                     execution_reference=withdraw_reference,
+                    execution_payload=self._serialize_execution_payload_meta(context) or "",
                 )
 
             return TransferExecutionOutcome(
@@ -353,12 +372,13 @@ class TransferExecutionService:
                 execution_payload=self._serialize_execution_payload_meta(context) or None,
             )
         except ExchangeConnectionError as exc:
-            if self._withdraw_submitted(context) or checkpoint in {
+            current_checkpoint = str(context.get("execution_checkpoint") or checkpoint or "").strip()
+            if self._withdraw_submitted(context) or current_checkpoint in {
                 CHECKPOINT_WITHDRAW_SUBMITTED,
                 CHECKPOINT_TARGET_CREDIT_CONFIRMED,
                 CHECKPOINT_TARGET_INTERNAL_TRANSFERRED,
             }:
-                if checkpoint not in {
+                if current_checkpoint not in {
                     CHECKPOINT_WITHDRAW_SUBMITTED,
                     CHECKPOINT_TARGET_CREDIT_CONFIRMED,
                     CHECKPOINT_TARGET_INTERNAL_TRANSFERRED,
@@ -376,7 +396,7 @@ class TransferExecutionService:
                     result_status="none",
                     failure_type="",
                     failure_reason="",
-                    execution_checkpoint=str(context.get("execution_checkpoint") or CHECKPOINT_WITHDRAW_SUBMITTED),
+                    execution_checkpoint=current_checkpoint or CHECKPOINT_WITHDRAW_SUBMITTED,
                     execution_reference=str(context.get("execution_reference") or context.get("_withdraw_reference") or withdraw_reference),
                     execution_payload=self._serialize_execution_payload_meta(context) or None,
                 )
@@ -451,7 +471,7 @@ class TransferExecutionService:
         market_type: str,
         balance_before: float,
         amount: float,
-    ) -> None:
+    ) -> TargetCreditSnapshot:
         max_attempts = 18
         sleep_seconds = 10
         for _ in range(max_attempts):
@@ -460,8 +480,12 @@ class TransferExecutionService:
                 adapter=adapter,
                 market_type=market_type,
             )
-            if available_amount - balance_before >= amount * 0.95:
-                return
+            credited_amount = self._quantize_transfer_amount(max(available_amount - balance_before, 0.0))
+            if credited_amount >= amount * 0.95:
+                return TargetCreditSnapshot(
+                    available_amount=self._quantize_transfer_amount(available_amount),
+                    credited_amount=credited_amount,
+                )
             time.sleep(sleep_seconds)
         raise ExchangeConnectionError("目标交易所到账超时，未能继续转入目标账户。")
 
@@ -652,38 +676,153 @@ class TransferExecutionService:
         context: Dict[str, Any],
         *,
         target_credit_balance_before: float | None = None,
+        target_credit_available_amount: float | None = None,
+        target_credit_amount: float | None = None,
+        target_internal_transfer_amount: float | None = None,
     ) -> str:
-        payload: Dict[str, Any] = {}
-        raw_payload = context.get("_withdraw_payload") or context.get("execution_payload") or ""
-        if raw_payload:
-            try:
-                parsed = json.loads(str(raw_payload))
-                if isinstance(parsed, dict):
-                    payload.update(parsed)
-            except Exception:
-                payload["raw"] = str(raw_payload)
+        payload = self._read_execution_payload_meta(context)
         if target_credit_balance_before is not None:
             payload["_target_credit_balance_before"] = float(target_credit_balance_before)
+        if target_credit_available_amount is not None:
+            payload["_target_credit_available_amount"] = float(target_credit_available_amount)
+        if target_credit_amount is not None:
+            payload["_target_credit_amount"] = float(target_credit_amount)
+        if target_internal_transfer_amount is not None:
+            payload["_target_internal_transfer_amount"] = float(target_internal_transfer_amount)
         text = json.dumps(payload, ensure_ascii=False, default=str) if payload else ""
         if text:
             context["execution_payload"] = text
         return text
 
-    def _read_target_credit_balance_before(self, context: Dict[str, Any]) -> float | None:
-        raw_payload = context.get("execution_payload") or context.get("_withdraw_payload") or ""
+    def _read_execution_payload_meta(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        raw_payload = context.get("_withdraw_payload") or context.get("execution_payload") or ""
         if not raw_payload:
-            return None
+            return payload
         try:
             parsed = json.loads(str(raw_payload))
         except Exception:
-            return None
-        if not isinstance(parsed, dict):
-            return None
-        value = parsed.get("_target_credit_balance_before")
+            return {"raw": str(raw_payload)}
+        if isinstance(parsed, dict):
+            payload.update(parsed)
+        return payload
+
+    def _read_target_credit_balance_before(self, context: Dict[str, Any]) -> float | None:
+        value = self._read_execution_payload_meta(context).get("_target_credit_balance_before")
         try:
             return float(value)
         except (TypeError, ValueError):
             return None
+
+    def _read_target_credit_amount(self, context: Dict[str, Any]) -> float | None:
+        value = self._read_execution_payload_meta(context).get("_target_credit_amount")
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _read_target_internal_transfer_amount(self, context: Dict[str, Any]) -> float | None:
+        value = self._read_execution_payload_meta(context).get("_target_internal_transfer_amount")
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _resolve_target_internal_transfer_amount(
+        self,
+        *,
+        requested_amount: float,
+        current_available_amount: float,
+        credited_amount: float | None = None,
+        planned_amount: float | None = None,
+    ) -> float:
+        candidate_amounts = [
+            max(float(requested_amount or 0), 0.0),
+            max(float(current_available_amount or 0), 0.0),
+        ]
+        if credited_amount is not None:
+            candidate_amounts.append(max(float(credited_amount or 0), 0.0))
+        if planned_amount is not None:
+            candidate_amounts.append(max(float(planned_amount or 0), 0.0))
+        return self._quantize_transfer_amount(min(candidate_amounts)) if candidate_amounts else 0.0
+
+    def _execute_target_internal_transfer(
+        self,
+        *,
+        context: Dict[str, Any],
+        target_client: Any,
+        target_adapter: ExchangeTransferAdapter,
+        to_exchange: str,
+        to_market_type: str,
+        requested_amount: float,
+        withdraw_reference: str,
+    ) -> None:
+        funding_account = target_adapter.withdraw_account
+        target_account = self._map_internal_account(target_adapter, to_exchange, to_market_type)
+        if funding_account == target_account:
+            return
+
+        credited_amount = self._read_target_credit_amount(context)
+        planned_amount = self._read_target_internal_transfer_amount(context)
+        max_attempts = 6
+        sleep_seconds = 10
+        pending_message = "目标交易所现货已到账，但当前可划转额度暂不足，系统将继续重试。"
+
+        for attempt in range(max_attempts):
+            current_available_amount = self._fetch_available_amount(
+                client=target_client,
+                adapter=target_adapter,
+                market_type=target_adapter.withdraw_account_market_type,
+            )
+            transfer_amount = self._resolve_target_internal_transfer_amount(
+                requested_amount=requested_amount,
+                current_available_amount=current_available_amount,
+                credited_amount=credited_amount,
+                planned_amount=planned_amount,
+            )
+            if transfer_amount > 0:
+                try:
+                    target_client.transfer(TRANSFER_ASSET_CODE, transfer_amount, funding_account, target_account)
+                    self._serialize_execution_payload_meta(
+                        context,
+                        target_credit_available_amount=current_available_amount,
+                        target_internal_transfer_amount=transfer_amount,
+                    )
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    if not self._is_target_transferable_amount_error(exc):
+                        raise
+                    pending_message = (
+                        "目标交易所现货已到账，但当前可划转额度暂不足，系统将继续重试。"
+                        f" 当前提示：{self._translate_exchange_exception_message(exc)}"
+                    )
+            if attempt < max_attempts - 1:
+                time.sleep(sleep_seconds)
+
+        raise ExchangeConnectionError(pending_message)
+
+    def _is_target_transferable_amount_error(self, error: Exception) -> bool:
+        message = str(error or "").strip().lower()
+        if not message:
+            return False
+        return any(
+            token in message
+            for token in (
+                "43152",
+                "maximum transferable amount",
+                "max transferable amount",
+                "transferable amount",
+                "可划转",
+            )
+        )
+
+    def _quantize_transfer_amount(self, amount: float, precision: int = 8) -> float:
+        normalized = max(float(amount or 0), 0.0)
+        if normalized <= 0:
+            return 0.0
+        quantizer = Decimal("1").scaleb(-precision)
+        quantized = Decimal(str(normalized)).quantize(quantizer, rounding=ROUND_DOWN)
+        return float(quantized) if quantized > 0 else 0.0
 
     def _extract_transfer_reference(self, response: Dict[str, Any] | None) -> str:
         if not isinstance(response, dict):
