@@ -29,7 +29,7 @@ NETWORK_LABELS = {
     "arbitrum": "Arbitrum One",
     "optimism": "Optimism",
     "polygon": "Polygon",
-    "xpl": "XPL",
+    "xpl": "Plasma",
     "plasma": "Plasma",
     "solana": "Solana",
     "omni": "OMNI",

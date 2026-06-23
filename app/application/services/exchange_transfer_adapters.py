@@ -22,8 +22,8 @@ COMMON_NETWORK_ALIASES = {
     "op": "OPTIMISM",
     "polygon": "MATIC",
     "matic": "MATIC",
-    "plasma": "XPL",
-    "xpl": "XPL",
+    "plasma": "PLASMA",
+    "xpl": "PLASMA",
     "solana": "SOL",
     "sol": "SOL",
     "omni": "OMNI",
@@ -84,6 +84,9 @@ class ExchangeTransferAdapter:
         resolved_network = self.resolve_withdraw_network_code(network_code)
         return client.fetch_deposit_address(TRANSFER_ASSET_CODE, {"network": resolved_network})
 
+    def normalize_destination_network_code(self, network_code: str) -> str:
+        return normalize_network_code(network_code)
+
     def resolve_deposit_destination(
         self,
         *,
@@ -92,13 +95,16 @@ class ExchangeTransferAdapter:
         fallback_address: str,
         fallback_memo: str,
     ) -> DepositDestination:
-        target_network_code = self.resolve_withdraw_network_code(fallback_network)
+        target_network_code = self.normalize_destination_network_code(fallback_network)
         if deposit is not None:
             self.validate_deposit_payload(deposit)
             return DepositDestination(
                 address=str(deposit.get("address") or fallback_address).strip(),
                 tag=str(deposit.get("tag") or fallback_memo or "").strip() or None,
-                network_code=str(deposit.get("network") or target_network_code).strip() or target_network_code,
+                network_code=(
+                    self.normalize_destination_network_code(str(deposit.get("network") or "").strip())
+                    or target_network_code
+                ),
             )
 
         return DepositDestination(
@@ -162,7 +168,7 @@ exchange_transfer_registry.register(
             "ARBITRUM": "ARBITRUM",
             "OPTIMISM": "OPTIMISM",
             "MATIC": "MATIC",
-            "XPL": "XPL",
+            "PLASMA": "PLASMA",
             "SOL": "SOL",
             "OMNI": "OMNI",
         },
@@ -189,7 +195,7 @@ exchange_transfer_registry.register(
             "ARBITRUM": "ARBONE",
             "OPTIMISM": "OP",
             "MATIC": "MATIC",
-            "XPL": "XPL",
+            "PLASMA": "XPL",
             "SOL": "SOL",
             "OMNI": "OMNI",
         },
@@ -216,7 +222,7 @@ exchange_transfer_registry.register(
             "ARBITRUM": "ARBITRUM",
             "OPTIMISM": "OPTIMISM",
             "MATIC": "MATIC",
-            "XPL": "XPL",
+            "PLASMA": "PLASMA",
             "SOL": "SOL",
             "OMNI": "OMNI",
         },
@@ -243,7 +249,7 @@ exchange_transfer_registry.register(
             "ARBITRUM": "Arbitrum One",
             "OPTIMISM": "Optimism",
             "MATIC": "Polygon",
-            "XPL": "Plasma",
+            "PLASMA": "Plasma",
             "SOL": "Solana",
             "OMNI": "OMNI",
             "XTZ": "Tezos",

@@ -23,7 +23,7 @@ DEFAULT_ADDRESS_NETWORKS = (
     {"network_code": "ARBITRUM", "network_name": "Arbitrum One", "network_id": "ARBITRUM"},
     {"network_code": "OPTIMISM", "network_name": "Optimism", "network_id": "OPTIMISM"},
     {"network_code": "MATIC", "network_name": "Polygon", "network_id": "MATIC"},
-    {"network_code": "XPL", "network_name": "XPL", "network_id": "XPL"},
+    {"network_code": "PLASMA", "network_name": "Plasma", "network_id": "PLASMA"},
     {"network_code": "SOL", "network_name": "Solana", "network_id": "SOL"},
     {"network_code": "OMNI", "network_name": "OMNI", "network_id": "OMNI"},
     {"network_code": "internal", "network_name": "交易所内部划转", "network_id": "internal"},
@@ -37,7 +37,7 @@ DEFAULT_NETWORK_CODE_BY_CCXT = {
     "MATIC": "polygon",
     "POLYGON": "polygon",
     "PLASMA": "plasma",
-    "XPL": "xpl",
+    "XPL": "plasma",
     "SOL": "solana",
     "SOLANA": "solana",
     "OMNI": "omni",
@@ -190,10 +190,11 @@ class ExchangeAssetNetworkService:
         if not ccxt_network_code:
             return None
         normalized_label_key = self._normalize_network_code(ccxt_network_code)
+        normalized_network_code = str(normalized_label_key or ccxt_network_code).strip()
         network_name = NETWORK_LABELS.get(normalized_label_key, ccxt_network_code)
         network_id = str(raw_network.get("id") or ccxt_network_code).strip()
         return {
-            "network_code": ccxt_network_code,
+            "network_code": normalized_network_code,
             "network_name": network_name,
             "network_id": network_id,
             "is_deposit_enabled": bool(raw_network.get("deposit", True)),
