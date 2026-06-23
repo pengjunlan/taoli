@@ -94,8 +94,8 @@ class OpportunityRuntimeService:
             )
 
     def _refresh_runtime_rows(self) -> None:
-        all_accounts = account_repository.list_all_accounts_with_address()
-        user_ids = sorted({int(row["user_id"]) for row in all_accounts})
+        user_ids = account_repository.list_active_user_ids_with_accounts()
+        active_account_counts = account_repository.get_active_account_counts_by_user_id()
         enabled_exchange_codes = set(market_sync_service.list_supported_exchange_codes())
         funding_pairs = [
             row
@@ -168,6 +168,7 @@ class OpportunityRuntimeService:
                 strategy_rows=strategy_rows,
                 funding_rows=funding_live_rows,
                 spread_rows=spread_live_rows,
+                account_count=active_account_counts.get(user_id),
             )
             strategy_payload["is_ready"] = funding_ready or spread_ready
             strategy_payload["source"] = "runtime"

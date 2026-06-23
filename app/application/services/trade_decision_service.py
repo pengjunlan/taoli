@@ -20,10 +20,19 @@ class TradeDecisionService:
         strategy_rows: List[Dict[str, Any]],
         funding_rows: List[Dict[str, Any]],
         spread_rows: List[Dict[str, Any]],
+        account_count: int | None = None,
     ) -> Dict[str, object]:
         enabled_rules = [row for row in strategy_rows if bool(row.get("is_enabled"))]
         funding_rules = [row for row in enabled_rules if str(row.get("strategy_type") or "") == "funding"]
         spread_rules = [row for row in enabled_rules if str(row.get("strategy_type") or "") == "spread"]
+        funding_rule_views = {
+            int(row.get("id") or 0): strategy_rule_runtime_service.build_runtime_view(row)
+            for row in funding_rules
+        }
+        spread_rule_views = {
+            int(row.get("id") or 0): strategy_rule_runtime_service.build_runtime_view(row)
+            for row in spread_rules
+        }
         funding_execution_rows = opportunity_user_overlay_service.enrich_execution_rows(
             user_id=user_id,
             channel="funding",
@@ -36,8 +45,8 @@ class TradeDecisionService:
         )
 
         candidates: List[Dict[str, object]] = []
-        candidates.extend(self._build_funding_candidates(funding_execution_rows, funding_rules))
-        candidates.extend(self._build_spread_candidates(spread_execution_rows, spread_rules))
+        candidates.extend(self._build_funding_candidates(funding_execution_rows, funding_rules, funding_rule_views))
+        candidates.extend(self._build_spread_candidates(spread_execution_rows, spread_rules, spread_rule_views))
 
         runtime_tables = local_position_service.build_runtime_tables(
             user_id=user_id,
@@ -64,7 +73,7 @@ class TradeDecisionService:
             "user_id": user_id,
             "generated_at": datetime.now(),
             "enabled_rule_count": len(enabled_rules),
-            "account_count": len(account_repository.list_active_accounts_with_address_by_user_id(user_id)),
+            "account_count": int(account_count if account_count is not None else len(account_repository.list_active_accounts_with_address_by_user_id(user_id))),
             "candidate_rows": candidates,
             "positions_rows": positions_rows,
             "order_rows": order_rows,
@@ -79,6 +88,7 @@ class TradeDecisionService:
         self,
         opportunity_rows: List[Dict[str, Any]],
         rule_rows: List[Dict[str, Any]],
+        rule_views: Dict[int, object],
     ) -> List[Dict[str, object]]:
         if not opportunity_rows or not rule_rows:
             return []
@@ -94,10 +104,10 @@ class TradeDecisionService:
                 (
                     rule
                     for rule in rule_rows
-                    if net_rate > strategy_rule_runtime_service.build_runtime_view(rule).open_threshold
+                    if net_rate > rule_views.get(int(rule.get("id") or 0)).open_threshold
                     and (
-                        strategy_rule_runtime_service.build_runtime_view(rule).stop_loss_price_diff <= 0
-                        or price_diff <= strategy_rule_runtime_service.build_runtime_view(rule).stop_loss_price_diff
+                        rule_views.get(int(rule.get("id") or 0)).stop_loss_price_diff <= 0
+                        or price_diff <= rule_views.get(int(rule.get("id") or 0)).stop_loss_price_diff
                     )
                 ),
                 None,
@@ -105,7 +115,7 @@ class TradeDecisionService:
             if matched_rule is None:
                 continue
 
-            runtime_rule = strategy_rule_runtime_service.build_runtime_view(matched_rule)
+            runtime_rule = rule_views.get(int(matched_rule.get("id") or 0))
             order_amount = runtime_rule.order_amount_usdt
             max_position = runtime_rule.max_position_quantity
             result.append(
@@ -144,6 +154,7 @@ class TradeDecisionService:
         self,
         opportunity_rows: List[Dict[str, Any]],
         rule_rows: List[Dict[str, Any]],
+        rule_views: Dict[int, object],
     ) -> List[Dict[str, object]]:
         if not opportunity_rows or not rule_rows:
             return []
@@ -159,10 +170,10 @@ class TradeDecisionService:
                 (
                     rule
                     for rule in rule_rows
-                    if latest_spread >= strategy_rule_runtime_service.build_runtime_view(rule).open_threshold
+                    if latest_spread >= rule_views.get(int(rule.get("id") or 0)).open_threshold
                     and (
-                        strategy_rule_runtime_service.build_runtime_view(rule).stop_loss_price_diff <= 0
-                        or price_diff <= strategy_rule_runtime_service.build_runtime_view(rule).stop_loss_price_diff
+                        rule_views.get(int(rule.get("id") or 0)).stop_loss_price_diff <= 0
+                        or price_diff <= rule_views.get(int(rule.get("id") or 0)).stop_loss_price_diff
                     )
                 ),
                 None,
@@ -170,7 +181,7 @@ class TradeDecisionService:
             if matched_rule is None:
                 continue
 
-            runtime_rule = strategy_rule_runtime_service.build_runtime_view(matched_rule)
+            runtime_rule = rule_views.get(int(matched_rule.get("id") or 0))
             order_amount = runtime_rule.order_amount_usdt
             max_position = runtime_rule.max_position_quantity
             result.append(

@@ -6,8 +6,9 @@ import logging
 import threading
 import time
 
-from app.application.services.auto_transfer_account_guard_service import auto_transfer_account_guard_service
+from app.application.services.account_monitor_service import account_monitor_service
 from app.application.services.account_support import MANUAL_TRANSFER_EXECUTION_MODE
+from app.application.services.auto_transfer_account_guard_service import auto_transfer_account_guard_service
 from app.application.services.monitor_center_service import monitor_center_service
 from app.application.services.transfer_execution_service import transfer_execution_service
 from app.infrastructure.persistence.account_repository import account_repository
@@ -17,8 +18,6 @@ from app.shared.exceptions import ExchangeError
 logger = logging.getLogger(__name__)
 
 
-# Current business behavior is intentionally preserved:
-# worker-enabled manual transfer records are still executed by this background monitor.
 WORKER_EXECUTION_SCOPE = MANUAL_TRANSFER_EXECUTION_MODE
 AUTO_REAL_TRANSFER_REASON = "自动真实调拨"
 
@@ -123,6 +122,7 @@ class TransferExecutionMonitorService:
                 execution_reference=outcome.execution_reference,
                 execution_payload=outcome.execution_payload,
             )
+            self._refresh_involved_accounts(context)
             monitor_center_service.add_log(
                 self._monitor_key,
                 "info" if outcome.result_status == "success" else "warning",
@@ -130,11 +130,7 @@ class TransferExecutionMonitorService:
             )
         except ExchangeError as exc:
             self._persist_resolved_destination(record_id, context)
-            failure_type = (
-                "config"
-                if transfer_execution_service.is_user_account_failure(exc)
-                else "temporary"
-            )
+            failure_type = "config" if transfer_execution_service.is_user_account_failure(exc) else "temporary"
             account_repository.update_transfer_record_status(
                 record_id,
                 status="failed",
@@ -144,6 +140,7 @@ class TransferExecutionMonitorService:
                 failure_type=failure_type,
                 failure_reason=str(exc),
             )
+            self._refresh_involved_accounts(context)
             if str(context.get("reason") or "").strip() == AUTO_REAL_TRANSFER_REASON:
                 self._record_auto_transfer_account_failure(context, exc)
             monitor_center_service.add_log(
@@ -165,6 +162,7 @@ class TransferExecutionMonitorService:
                 failure_type="temporary",
                 failure_reason=str(exc),
             )
+            self._refresh_involved_accounts(context)
             monitor_center_service.add_log(
                 self._monitor_key,
                 "error",
@@ -201,6 +199,21 @@ class TransferExecutionMonitorService:
             error_label=str(failure["label"] or ""),
             raw_message=str(failure["raw_message"] or ""),
         )
+
+    def _refresh_involved_accounts(self, context) -> None:
+        account_ids = sorted(
+            {
+                int(context.get("from_account_id") or 0),
+                int(context.get("to_account_id") or 0),
+            }
+        )
+        account_ids = [account_id for account_id in account_ids if account_id > 0]
+        if not account_ids:
+            return
+        try:
+            account_monitor_service.refresh_accounts_by_ids(account_ids)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Refresh involved accounts failed after transfer execution: %s", exc)
 
 
 transfer_execution_monitor_service = TransferExecutionMonitorService()

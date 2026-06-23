@@ -58,16 +58,11 @@ class AutoTransferMonitorService:
             time.sleep(self._interval_seconds)
 
     def _scan_configs(self) -> None:
-        rows = account_repository.list_all_accounts_with_address()
-        user_ids = sorted({int(row["user_id"]) for row in rows})
+        user_ids = account_repository.list_enabled_auto_transfer_user_ids()
         enabled_user_ids = []
         executed_count = 0
 
         for user_id in user_ids:
-            config = account_service.get_auto_transfer_config(user_id)
-            if not config.is_enabled:
-                continue
-
             enabled_user_ids.append(user_id)
             result = account_service.maybe_execute_auto_transfer(user_id)
             if result is not None:

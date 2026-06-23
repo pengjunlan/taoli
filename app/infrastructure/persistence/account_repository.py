@@ -1075,6 +1075,25 @@ class MySQLAccountRepository:
             )
             return cursor.fetchone()
 
+    def list_enabled_auto_transfer_user_ids(self) -> List[int]:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT DISTINCT cfg.user_id
+                FROM account_auto_transfer_configs AS cfg
+                INNER JOIN users AS u
+                    ON u.id = cfg.user_id
+                INNER JOIN exchange_accounts AS a
+                    ON a.user_id = cfg.user_id
+                WHERE cfg.is_enabled = 1
+                  AND u.is_active = 1
+                  AND a.is_active = 1
+                ORDER BY cfg.user_id ASC
+                """
+            )
+            return [int(row["user_id"]) for row in cursor.fetchall()]
+
     def upsert_auto_transfer_config(
         self,
         *,
@@ -1149,6 +1168,41 @@ class MySQLAccountRepository:
                 (user_id,),
             )
             return list(cursor.fetchall())
+
+    def list_active_user_ids_with_accounts(self) -> List[int]:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT DISTINCT a.user_id
+                FROM exchange_accounts AS a
+                INNER JOIN users AS u
+                    ON u.id = a.user_id
+                WHERE a.is_active = 1
+                  AND u.is_active = 1
+                ORDER BY a.user_id ASC
+                """
+            )
+            return [int(row["user_id"]) for row in cursor.fetchall()]
+
+    def get_active_account_counts_by_user_id(self) -> Dict[int, int]:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT a.user_id, COUNT(*) AS account_count
+                FROM exchange_accounts AS a
+                INNER JOIN users AS u
+                    ON u.id = a.user_id
+                WHERE a.is_active = 1
+                  AND u.is_active = 1
+                GROUP BY a.user_id
+                """
+            )
+            return {
+                int(row["user_id"]): int(row.get("account_count") or 0)
+                for row in cursor.fetchall()
+            }
 
     def get_strategy_rule_by_id(self, rule_id: int, user_id: int) -> Dict[str, Any] | None:
         with mysql_manager.connection() as connection:
@@ -1447,6 +1501,50 @@ class MySQLAccountRepository:
             )
             return list(cursor.fetchall())
 
+    def list_accounts_with_address_by_ids(self, account_ids: List[int]) -> List[Dict[str, Any]]:
+        normalized_ids = sorted({int(account_id) for account_id in account_ids if int(account_id) > 0})
+        if not normalized_ids:
+            return []
+
+        placeholders = ", ".join(["%s"] * len(normalized_ids))
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                f"""
+                SELECT
+                    a.id,
+                    a.user_id,
+                    a.market_type,
+                    a.exchange_code,
+                    a.account_name,
+                    a.api_key,
+                    a.api_secret,
+                    a.api_passphrase,
+                    a.connection_test_status,
+                    a.funding_ratio_percent,
+                    a.current_available_amount,
+                    a.current_available_synced_at,
+                    a.maker_fee_rate,
+                    a.taker_fee_rate,
+                    a.fee_rate_synced_at,
+                    a.is_active,
+                    a.created_at,
+                    a.updated_at,
+                    fa.network,
+                    fa.address_value,
+                    fa.memo_tag,
+                    fa.created_at AS address_created_at,
+                    fa.updated_at AS address_updated_at
+                FROM exchange_accounts AS a
+                LEFT JOIN account_funding_addresses AS fa
+                    ON fa.account_id = a.id
+                WHERE a.id IN ({placeholders})
+                ORDER BY a.id DESC
+                """,
+                tuple(normalized_ids),
+            )
+            return list(cursor.fetchall())
+
     def list_all_accounts_with_address(self) -> List[Dict[str, Any]]:
         with mysql_manager.connection() as connection:
             cursor = connection.cursor(dictionary=True)
@@ -1487,6 +1585,29 @@ class MySQLAccountRepository:
                 """
             )
             return list(cursor.fetchall())
+
+    def list_open_worker_transfer_account_ids(self) -> List[int]:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT DISTINCT account_id
+                FROM (
+                    SELECT from_account_id AS account_id
+                    FROM account_transfer_records
+                    WHERE is_worker_enabled = 1
+                      AND execute_status IN ('pending_execute', 'executing')
+                    UNION
+                    SELECT to_account_id AS account_id
+                    FROM account_transfer_records
+                    WHERE is_worker_enabled = 1
+                      AND execute_status IN ('pending_execute', 'executing')
+                ) AS runtime_accounts
+                WHERE account_id > 0
+                ORDER BY account_id ASC
+                """
+            )
+            return [int(row["account_id"]) for row in cursor.fetchall()]
 
     def _build_account(self, row: Dict[str, Any]) -> ExchangeAccount:
         return ExchangeAccount(

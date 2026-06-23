@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 class AccountMonitorService:
+    _BALANCE_CHANGE_EPSILON = 1e-8
+    _COLD_REFRESH_INTERVAL_SECONDS = 120
+
     def __init__(self) -> None:
         self._thread: threading.Thread | None = None
         self._started = False
@@ -29,6 +32,7 @@ class AccountMonitorService:
         self._last_status = "idle"
         self._last_detail = "waiting for startup"
         self._monitor_key = "account_balance_sync"
+        self._last_full_refresh_started_at: datetime | None = None
 
     def start(self) -> None:
         with self._lock:
@@ -79,6 +83,11 @@ class AccountMonitorService:
 
     def remove_account(self, account_id: int, *, user_id: int | None = None) -> None:
         account_balance_cache.delete(account_id, user_id=user_id)
+
+    def refresh_accounts_by_ids(self, account_ids: List[int]) -> int:
+        rows = account_repository.list_accounts_with_address_by_ids(account_ids)
+        refreshed_count, _, _ = self._refresh_rows(rows, log_success=False)
+        return refreshed_count
 
     def seed_account(
         self,
@@ -150,8 +159,46 @@ class AccountMonitorService:
 
     def _refresh_all_accounts(self) -> None:
         rows = account_repository.list_all_accounts_with_address()
+        hot_account_ids = set(account_repository.list_open_worker_transfer_account_ids())
+        hot_user_ids = set(account_repository.list_enabled_auto_transfer_user_ids())
+        now = datetime.now()
+        should_run_cold = (
+            self._last_full_refresh_started_at is None
+            or (now - self._last_full_refresh_started_at).total_seconds() >= self._COLD_REFRESH_INTERVAL_SECONDS
+        )
+        hot_rows = []
+        cold_rows = []
+        for row in rows:
+            if int(row["id"]) in hot_account_ids or int(row.get("user_id") or 0) in hot_user_ids:
+                hot_rows.append(row)
+            else:
+                cold_rows.append(row)
+
+        refreshed_count, skipped_count, changed_count = self._refresh_rows(hot_rows, log_success=True)
+        if should_run_cold:
+            cold_refreshed_count, cold_skipped_count, cold_changed_count = self._refresh_rows(cold_rows, log_success=False)
+            self._last_full_refresh_started_at = now
+            refreshed_count += cold_refreshed_count
+            skipped_count += cold_skipped_count
+            changed_count += cold_changed_count
+
+        self._last_status = "running"
+        self._last_detail = f"refreshed {refreshed_count} accounts, skipped {skipped_count} incomplete accounts"
+        monitor_center_service.mark_success(
+            self._monitor_key,
+            f"本轮完成：更新 {refreshed_count} 个账户，跳过 {skipped_count} 个配置不完整账户",
+        )
+        if changed_count > 0:
+            monitor_center_service.add_log(
+                self._monitor_key,
+                "info",
+                f"本轮有 {changed_count} 个账户余额发生变化。",
+            )
+
+    def _refresh_rows(self, rows, *, log_success: bool) -> tuple[int, int, int]:
         refreshed_count = 0
         skipped_count = 0
+        changed_count = 0
 
         for row in rows:
             account_id = int(row["id"])
@@ -194,6 +241,13 @@ class AccountMonitorService:
             normalized_frozen_amount = round(float(snapshot.frozen_amount or 0), 8)
             normalized_total_amount = round(float(snapshot.total_amount or 0), 8)
             synced_at = datetime.now()
+            cached_balance = account_balance_cache.get(account_id, user_id=user_id)
+            amount_changed = (
+                cached_balance is None
+                or abs(float(cached_balance.amount or 0) - normalized_amount) > self._BALANCE_CHANGE_EPSILON
+                or abs(float(cached_balance.frozen_amount or 0) - normalized_frozen_amount) > self._BALANCE_CHANGE_EPSILON
+                or abs(float(cached_balance.total_amount or 0) - normalized_total_amount) > self._BALANCE_CHANGE_EPSILON
+            )
             account_balance_cache.set(
                 AccountBalanceCacheItem(
                     account_id=account_id,
@@ -206,11 +260,13 @@ class AccountMonitorService:
                     synced_at=synced_at,
                 )
             )
-            account_repository.update_current_available_amount(
-                account_id=account_id,
-                amount=normalized_amount,
-                synced_at=synced_at,
-            )
+            if amount_changed:
+                account_repository.update_current_available_amount(
+                    account_id=account_id,
+                    amount=normalized_amount,
+                    synced_at=synced_at,
+                )
+                changed_count += 1
             if str(row.get("connection_test_status") or "untested").strip().lower() != "success":
                 account_repository.update_connection_test_status(
                     account_id=account_id,
@@ -218,18 +274,14 @@ class AccountMonitorService:
                     status="success",
                 )
             refreshed_count += 1
-            monitor_center_service.add_log(
-                self._monitor_key,
-                "info",
-                f"账户 {account_id} 当前可用已更新为 {normalized_amount}",
-            )
+            if log_success and amount_changed:
+                monitor_center_service.add_log(
+                    self._monitor_key,
+                    "info",
+                    f"账户 {account_id} 当前可用已更新为 {normalized_amount}",
+                )
 
-        self._last_status = "running"
-        self._last_detail = f"refreshed {refreshed_count} accounts, skipped {skipped_count} incomplete accounts"
-        monitor_center_service.mark_success(
-            self._monitor_key,
-            f"本轮完成：更新 {refreshed_count} 个账户，跳过 {skipped_count} 个配置不完整账户",
-        )
+        return refreshed_count, skipped_count, changed_count
 
 
 account_monitor_service = AccountMonitorService()

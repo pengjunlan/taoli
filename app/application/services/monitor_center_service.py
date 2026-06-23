@@ -41,9 +41,13 @@ class WorkerState:
     last_error_message: str = ""
     logs: List[WorkerLogEntry] = field(default_factory=list)
     file_logger: Optional[logging.Logger] = None
+    last_saved_at: Optional[datetime] = None
+    last_logged_message: str = ""
 
 
 class MonitorCenterService:
+    _MIN_SAVE_INTERVAL_SECONDS = 2
+
     def register_worker(
         self,
         *,
@@ -71,7 +75,7 @@ class MonitorCenterService:
         state.status = status
         state.detail = detail
         state.last_heartbeat_at = datetime.now()
-        self._save_state(state)
+        self._save_state(state, force=False)
 
     def mark_success(self, key: str, message: str) -> None:
         state = self._require_state(key)
@@ -137,9 +141,13 @@ class MonitorCenterService:
         )
 
     def _append_log(self, state: WorkerState, entry: WorkerLogEntry) -> None:
+        if state.last_logged_message == entry.message and state.logs:
+            state.logs[0] = entry
+            return
         if state.file_logger is not None:
             state.file_logger.log(self._to_logging_level(entry.level), entry.message)
         state.logs.insert(0, entry)
+        state.last_logged_message = entry.message
         if len(state.logs) > MAX_WORKER_LOGS:
             state.logs = state.logs[:MAX_WORKER_LOGS]
 
@@ -166,7 +174,12 @@ class MonitorCenterService:
             ],
         }
 
-    def _save_state(self, state: WorkerState) -> None:
+    def _save_state(self, state: WorkerState, *, force: bool = True) -> None:
+        now = datetime.now()
+        if not force and state.last_saved_at is not None:
+            elapsed = (now - state.last_saved_at).total_seconds()
+            if elapsed < self._MIN_SAVE_INTERVAL_SECONDS:
+                return
         item = self._serialize_state(state, log_limit=REDIS_MAX_WORKER_LOGS)
         ttl_seconds = self._runtime_ttl_seconds(state.interval_seconds)
         redis_runtime_support.set_hash_field_json(
@@ -175,6 +188,7 @@ class MonitorCenterService:
             item,
             ttl_seconds=ttl_seconds,
         )
+        state.last_saved_at = now
         redis_runtime_support.set_json(self._runtime_key(state.key), item, ttl_seconds=ttl_seconds)
 
     def _runtime_ttl_seconds(self, interval_seconds: int) -> int:
@@ -244,6 +258,8 @@ class MonitorCenterService:
             last_error_message=str(payload.get("last_error_message") or ""),
             logs=logs,
             file_logger=None,
+            last_saved_at=None,
+            last_logged_message=str(logs[0].message) if logs else "",
         )
 
     def _to_logging_level(self, level: str) -> int:
