@@ -588,6 +588,9 @@ class MySQLAccountRepository:
         failure_reason: str = "",
         config_fingerprint: str = "",
         is_worker_enabled: bool = False,
+        execution_checkpoint: str = "",
+        execution_reference: str = "",
+        execution_payload: str = "",
     ) -> TransferRecord:
         with mysql_manager.connection() as connection:
             cursor = connection.cursor(dictionary=True)
@@ -606,9 +609,12 @@ class MySQLAccountRepository:
                     failure_reason,
                     config_fingerprint,
                     is_worker_enabled,
-                    result
+                    result,
+                    execution_checkpoint,
+                    execution_reference,
+                    execution_payload
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     user_id,
@@ -624,6 +630,9 @@ class MySQLAccountRepository:
                     config_fingerprint,
                     1 if is_worker_enabled else 0,
                     result,
+                    execution_checkpoint,
+                    execution_reference,
+                    execution_payload or None,
                 ),
             )
             connection.commit()
@@ -644,6 +653,9 @@ class MySQLAccountRepository:
                     failure_reason,
                     config_fingerprint,
                     result,
+                    execution_checkpoint,
+                    execution_reference,
+                    execution_payload,
                     processed_at,
                     created_at,
                     updated_at
@@ -677,12 +689,18 @@ class MySQLAccountRepository:
                     config_fingerprint,
                     is_worker_enabled,
                     result,
+                    execution_checkpoint,
+                    execution_reference,
+                    execution_payload,
                     processed_at,
                     created_at,
                     updated_at
                 FROM account_transfer_records
                 WHERE is_worker_enabled = 1
-                  AND execute_status = 'pending_execute'
+                  AND (
+                    execute_status = 'pending_execute'
+                    OR (execute_status = 'executing' AND result_status = 'none')
+                  )
                 ORDER BY id ASC
                 LIMIT %s
                 """,
@@ -710,6 +728,9 @@ class MySQLAccountRepository:
                     config_fingerprint,
                     is_worker_enabled,
                     result,
+                    execution_checkpoint,
+                    execution_reference,
+                    execution_payload,
                     processed_at,
                     created_at,
                     updated_at
@@ -744,6 +765,9 @@ class MySQLAccountRepository:
                     config_fingerprint,
                     is_worker_enabled,
                     result,
+                    execution_checkpoint,
+                    execution_reference,
+                    execution_payload,
                     processed_at,
                     created_at,
                     updated_at
@@ -758,11 +782,23 @@ class MySQLAccountRepository:
             )
             return cursor.fetchone()
 
-    def mark_transfer_record_processing(self, record_id: int) -> bool:
+    def mark_transfer_record_processing(self, record_id: int, *, allow_recovering_executing: bool = False) -> bool:
         with mysql_manager.connection() as connection:
             cursor = connection.cursor()
-            cursor.execute(
+            execute_status_condition = (
                 """
+                  AND (
+                    execute_status = 'pending_execute'
+                    OR (execute_status = 'executing' AND result_status = 'none')
+                  )
+                """
+                if allow_recovering_executing
+                else """
+                  AND execute_status = 'pending_execute'
+                """
+            )
+            cursor.execute(
+                f"""
                 UPDATE account_transfer_records
                 SET
                     status = 'processing',
@@ -772,7 +808,7 @@ class MySQLAccountRepository:
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
                   AND is_worker_enabled = 1
-                  AND execute_status = 'pending_execute'
+                  {execute_status_condition}
                 """,
                 (record_id,),
             )
@@ -789,6 +825,9 @@ class MySQLAccountRepository:
         result_status: str = "none",
         failure_type: str = "",
         failure_reason: str = "",
+        execution_checkpoint: str | None = None,
+        execution_reference: str | None = None,
+        execution_payload: str | None = None,
     ) -> bool:
         with mysql_manager.connection() as connection:
             cursor = connection.cursor()
@@ -802,6 +841,9 @@ class MySQLAccountRepository:
                     failure_type = %s,
                     failure_reason = %s,
                     result = %s,
+                    execution_checkpoint = COALESCE(%s, execution_checkpoint),
+                    execution_reference = COALESCE(%s, execution_reference),
+                    execution_payload = COALESCE(%s, execution_payload),
                     processed_at = CASE
                         WHEN %s = 'processed' THEN CURRENT_TIMESTAMP
                         ELSE processed_at
@@ -816,7 +858,40 @@ class MySQLAccountRepository:
                     failure_type,
                     failure_reason,
                     result,
+                    execution_checkpoint,
+                    execution_reference,
+                    execution_payload,
                     execute_status,
+                    record_id,
+                ),
+            )
+            connection.commit()
+            return cursor.rowcount > 0
+
+    def update_transfer_record_execution_checkpoint(
+        self,
+        record_id: int,
+        *,
+        execution_checkpoint: str,
+        execution_reference: str = "",
+        execution_payload: str = "",
+    ) -> bool:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                UPDATE account_transfer_records
+                SET
+                    execution_checkpoint = %s,
+                    execution_reference = %s,
+                    execution_payload = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (
+                    execution_checkpoint,
+                    execution_reference,
+                    execution_payload or None,
                     record_id,
                 ),
             )
@@ -874,6 +949,9 @@ class MySQLAccountRepository:
                     tr.config_fingerprint,
                     tr.is_worker_enabled,
                     tr.result,
+                    tr.execution_checkpoint,
+                    tr.execution_reference,
+                    tr.execution_payload,
                     tr.processed_at,
                     tr.created_at,
                     tr.updated_at,
@@ -950,6 +1028,9 @@ class MySQLAccountRepository:
                     tr.failure_reason,
                     tr.config_fingerprint,
                     tr.result,
+                    tr.execution_checkpoint,
+                    tr.execution_reference,
+                    tr.execution_payload,
                     tr.processed_at,
                     tr.created_at,
                     tr.updated_at,
@@ -1455,6 +1536,9 @@ class MySQLAccountRepository:
             failure_type=str(row.get("failure_type") or ""),
             failure_reason=str(row.get("failure_reason") or ""),
             config_fingerprint=str(row.get("config_fingerprint") or ""),
+            execution_checkpoint=str(row.get("execution_checkpoint") or ""),
+            execution_reference=str(row.get("execution_reference") or ""),
+            execution_payload=str(row.get("execution_payload") or ""),
             processed_at=row.get("processed_at"),
             created_at=row["created_at"],
             updated_at=row["updated_at"],

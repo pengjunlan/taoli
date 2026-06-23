@@ -71,6 +71,6 @@ class AccountTransferCapabilityService:
         )
 
     def _has_valid_cross_exchange_target(self, to_account: Dict[str, Any]) -> bool:
-        network = str(to_account.get("network") or "").strip().lower()
+        network = str(to_account.get("network") or "").strip()
         address = str(to_account.get("address_value") or "").strip()
-        return bool(address and network and network != "internal")
+        return bool(address and network and network.lower() != "internal")

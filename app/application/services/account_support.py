@@ -29,6 +29,7 @@ NETWORK_LABELS = {
     "arbitrum": "Arbitrum One",
     "optimism": "Optimism",
     "polygon": "Polygon",
+    "xpl": "XPL",
     "plasma": "Plasma",
     "solana": "Solana",
     "omni": "OMNI",
@@ -126,7 +127,7 @@ class AccountServiceSupport:
             "api_secret": api_secret.strip(),
             "api_passphrase": api_passphrase.strip(),
             "connection_test_status": normalized_connection_status,
-            "address_network": address_network.strip().lower(),
+            "address_network": address_network.strip(),
             "address_value": address_value.strip(),
             "address_memo": address_memo.strip(),
         }
@@ -156,7 +157,7 @@ class AccountServiceSupport:
             raise AccountValidationError("API Secret 为必填项。")
         if address_value and not address_network:
             raise AccountValidationError("填写接收地址或 UID 时，请先选择网络类型。")
-        if address_network and not re.fullmatch(r"[a-z0-9_-]{1,64}", address_network):
+        if address_network and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", address_network):
             raise AccountValidationError("网络类型格式不正确，请选择有效的网络选项。")
 
     def _parse_amount(self, value: str) -> int:
@@ -223,12 +224,13 @@ class AccountServiceSupport:
         return MARKET_TYPE_LABELS.get(market_type, market_type)
 
     def _network_label(self, network_code: str) -> str:
-        if network_code in NETWORK_LABELS:
-            return NETWORK_LABELS[network_code]
         text = str(network_code or "").strip()
         if not text:
             return ""
-        return text.replace("_", " ").replace("-", " ").upper()
+        normalized = text.lower()
+        if normalized in NETWORK_LABELS:
+            return NETWORK_LABELS[normalized]
+        return text.replace("_", " ").replace("-", " ")
 
     def _connection_test_status_label(self, value: str) -> str:
         return {

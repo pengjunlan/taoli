@@ -68,6 +68,9 @@ class TransferRecord:
     failure_type: str
     failure_reason: str
     config_fingerprint: str
+    execution_checkpoint: str
+    execution_reference: str
+    execution_payload: str
     processed_at: datetime | None
     created_at: datetime
     updated_at: datetime

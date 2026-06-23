@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import logging
 import time
 from typing import Any, Dict
@@ -12,6 +13,12 @@ import ccxt
 from app.application.dto.requests.exchange_requests import ExchangeConnectionTestRequest
 from app.application.services.account_support import MANUAL_TRANSFER_EXECUTION_MODE
 from app.application.services.exchange_connection_service import exchange_connection_service
+from app.application.services.exchange_transfer_adapters import (
+    DepositDestination,
+    ExchangeTransferAdapter,
+    exchange_transfer_registry,
+)
+from app.infrastructure.persistence.account_repository import account_repository
 from app.shared.exceptions import ExchangeConnectionError, ExchangeError, ExchangeValidationError
 
 
@@ -20,91 +27,23 @@ logger = logging.getLogger(__name__)
 TRANSFER_ASSET_CODE = "USDT"
 EXECUTION_MODE = MANUAL_TRANSFER_EXECUTION_MODE
 ROLLBACK_RESULT_PREFIX = "跨交易所提现失败，已将资金回滚至原账户。"
-
-BINANCE_INTERNAL_ACCOUNT_BY_MARKET = {
-    "spot": "spot",
-    "swap": "linear",
-}
-
-GATE_INTERNAL_ACCOUNT_BY_MARKET = {
-    "spot": "spot",
-    "swap": "swap",
-}
-
-BITGET_INTERNAL_ACCOUNT_BY_MARKET = {
-    "spot": "spot",
-    "swap": "swap",
-}
-
-OKX_INTERNAL_ACCOUNT_BY_MARKET = {
-    "spot": "funding",
-    "swap": "trading",
-}
-
-NETWORK_ALIASES = {
-    "trc20": "TRC20",
-    "erc20": "ERC20",
-    "bep20": "BEP20",
-    "arbitrum": "ARBITRUM",
-    "optimism": "OPTIMISM",
-    "polygon": "MATIC",
-    "plasma": "XPL",
-    "solana": "SOL",
-    "omni": "OMNI",
-}
-
-EXCHANGE_WITHDRAW_NETWORK_ALIASES = {
-    "gate": {
-        "TRC20": "TRC20",
-        "ERC20": "ERC20",
-        "BEP20": "BEP20",
-        "ARBITRUM": "ARBONE",
-        "OPTIMISM": "OP",
-        "MATIC": "MATIC",
-        "XPL": "XPL",
-        "SOL": "SOL",
-        "OMNI": "OMNI",
-    },
-    "bitget": {
-        "TRC20": "TRC20",
-        "ERC20": "ERC20",
-        "BEP20": "BEP20",
-        "ARBITRUM": "ARBITRUM",
-        "OPTIMISM": "OPTIMISM",
-        "MATIC": "MATIC",
-        "XPL": "XPL",
-        "SOL": "SOL",
-        "OMNI": "OMNI",
-    },
-    "binance": {
-        "TRC20": "TRC20",
-        "ERC20": "ERC20",
-        "BEP20": "BEP20",
-        "ARBITRUM": "ARBITRUM",
-        "OPTIMISM": "OPTIMISM",
-        "MATIC": "MATIC",
-        "XPL": "XPL",
-        "SOL": "SOL",
-        "OMNI": "OMNI",
-    },
-    "okx": {
-        "TRC20": "TRC20",
-        "ERC20": "ERC20",
-        "BEP20": "BSC",
-        "ARBITRUM": "Arbitrum One",
-        "OPTIMISM": "Optimism",
-        "MATIC": "Polygon",
-        "XPL": "XPL",
-        "SOL": "Solana",
-        "OMNI": "OMNI",
-    },
-}
-
+CHECKPOINT_SAME_EXCHANGE_COMPLETED = "same_exchange_completed"
+CHECKPOINT_SOURCE_INTERNAL_PREPARED = "source_internal_prepared"
+CHECKPOINT_WITHDRAW_SUBMITTED = "withdraw_submitted"
+CHECKPOINT_TARGET_CREDIT_CONFIRMED = "target_credit_confirmed"
+CHECKPOINT_TARGET_INTERNAL_TRANSFERRED = "target_internal_transferred"
 
 @dataclass(frozen=True)
 class TransferExecutionOutcome:
     status: str
     result: str
+    execute_status: str = "processed"
+    result_status: str = "success"
+    failure_type: str = ""
+    failure_reason: str = ""
+    execution_checkpoint: str | None = None
+    execution_reference: str | None = None
+    execution_payload: str | None = None
 
 
 class TransferExecutionService:
@@ -207,13 +146,11 @@ class TransferExecutionService:
                 return TransferExecutionOutcome(
                     status="success",
                     result=f"同交易所内部调拨成功，记录号 {self._extract_transfer_reference(transfer)}。",
+                    execution_checkpoint=CHECKPOINT_SAME_EXCHANGE_COMPLETED,
+                    execution_reference=self._extract_transfer_reference(transfer),
                 )
 
-            withdraw = self._execute_cross_exchange_transfer(context, amount)
-            return TransferExecutionOutcome(
-                status="success",
-                result=f"跨交易所调拨已提交，出金记录号 {self._extract_transfer_reference(withdraw)}。",
-            )
+            return self._execute_cross_exchange_transfer(context, amount)
         except ExchangeError:
             raise
         except ccxt.AuthenticationError as exc:
@@ -239,6 +176,12 @@ class TransferExecutionService:
         amount = float(context.get("amount") or 0)
         if amount <= 0:
             raise ExchangeValidationError("调拨金额必须大于 0。")
+        from_exchange = str(context.get("from_exchange_code") or "").strip().lower()
+        to_exchange = str(context.get("to_exchange_code") or "").strip().lower()
+        if self._get_exchange_adapter(from_exchange) is None:
+            raise ExchangeValidationError(f"暂不支持 {from_exchange or '--'} 的真实调拨执行。")
+        if self._get_exchange_adapter(to_exchange) is None:
+            raise ExchangeValidationError(f"暂不支持 {to_exchange or '--'} 的真实调拨执行。")
 
     def _is_same_exchange_master_account(self, context: Dict[str, Any]) -> bool:
         return (
@@ -251,27 +194,16 @@ class TransferExecutionService:
         exchange_code = str(context["from_exchange_code"]).strip().lower()
         from_market_type = str(context["from_market_type"]).strip().lower()
         to_market_type = str(context["to_market_type"]).strip().lower()
+        adapter = self._get_exchange_adapter_or_raise(exchange_code)
         client = self._create_client_from_context(
             context,
             prefix="from",
-            market_type_override=self._transfer_client_market_type(exchange_code),
+            market_type_override=adapter.transfer_client_market_type,
         )
 
         try:
-            if exchange_code == "binance":
-                from_account = self._map_binance_account_type(from_market_type)
-                to_account = self._map_binance_account_type(to_market_type)
-            elif exchange_code == "okx":
-                from_account = self._map_okx_account_type(from_market_type)
-                to_account = self._map_okx_account_type(to_market_type)
-            elif exchange_code == "gate":
-                from_account = self._map_gate_account_type(from_market_type)
-                to_account = self._map_gate_account_type(to_market_type)
-            elif exchange_code == "bitget":
-                from_account = self._map_bitget_account_type(from_market_type)
-                to_account = self._map_bitget_account_type(to_market_type)
-            else:
-                raise ExchangeValidationError(f"暂不支持 {exchange_code} 的交易所内调拨。")
+            from_account = self._map_internal_account(adapter, exchange_code, from_market_type)
+            to_account = self._map_internal_account(adapter, exchange_code, to_market_type)
 
             if from_account == to_account:
                 raise ExchangeValidationError("源账户与目标账户类型相同，无需执行内部调拨。")
@@ -280,41 +212,70 @@ class TransferExecutionService:
         finally:
             self._close_client(client)
 
-    def _execute_cross_exchange_transfer(self, context: Dict[str, Any], amount: float) -> Dict[str, Any]:
+    def _execute_cross_exchange_transfer(self, context: Dict[str, Any], amount: float) -> TransferExecutionOutcome:
         from_exchange = str(context["from_exchange_code"]).strip().lower()
         to_exchange = str(context["to_exchange_code"]).strip().lower()
         from_market_type = str(context["from_market_type"]).strip().lower()
         to_market_type = str(context["to_market_type"]).strip().lower()
-        to_network = str(context.get("to_network") or "").strip().lower()
+        to_network = str(context.get("to_network") or "").strip()
         to_address = str(context.get("to_address_value") or "").strip()
         to_memo = str(context.get("to_memo_tag") or "").strip()
+        source_adapter = self._get_exchange_adapter_or_raise(from_exchange)
+        target_adapter = self._get_exchange_adapter_or_raise(to_exchange)
+        checkpoint = str(context.get("execution_checkpoint") or "").strip()
 
         if not to_address:
             raise ExchangeValidationError("目标账户未配置接收地址或 UID，无法执行跨交易所调拨。")
-        if to_network in {"", "internal"}:
+        if not to_network or to_network.lower() == "internal":
             raise ExchangeValidationError("跨交易所调拨必须配置可提现网络，不能使用 internal。")
 
         source_client = self._create_client_from_context(
             context,
             prefix="from",
-            market_type_override=self._transfer_client_market_type(from_exchange),
+            market_type_override=source_adapter.transfer_client_market_type,
         )
         target_client = self._create_client_from_context(
             context,
             prefix="to",
-            market_type_override=self._transfer_client_market_type(to_exchange),
+            market_type_override=target_adapter.transfer_client_market_type,
         )
 
+        moved_to_withdraw_account = False
+        source_withdraw_account = source_adapter.withdraw_account
+        current_source_account = self._map_internal_account(source_adapter, from_exchange, from_market_type)
+        withdraw_network_code = source_adapter.resolve_withdraw_network_code(to_network)
+        withdraw_fee = 0.0
+        withdraw_reference = str(context.get("execution_reference") or "").strip()
+
         try:
-            source_withdraw_account = self._withdraw_account_for_exchange(from_exchange)
-            current_source_account = self._current_account_for_exchange(from_exchange, from_market_type)
-            moved_to_withdraw_account = False
-            if current_source_account != source_withdraw_account:
-                source_client.transfer(TRANSFER_ASSET_CODE, amount, current_source_account, source_withdraw_account)
-                moved_to_withdraw_account = True
+            if checkpoint not in {CHECKPOINT_WITHDRAW_SUBMITTED, CHECKPOINT_TARGET_CREDIT_CONFIRMED, CHECKPOINT_TARGET_INTERNAL_TRANSFERRED}:
+                withdraw_fee = self._resolve_withdraw_fee(
+                    client=source_client,
+                    adapter=source_adapter,
+                    network_code=withdraw_network_code,
+                )
+                transfer_amount_to_withdraw_account = amount + withdraw_fee
+                if current_source_account != source_withdraw_account:
+                    source_client.transfer(
+                        TRANSFER_ASSET_CODE,
+                        transfer_amount_to_withdraw_account,
+                        current_source_account,
+                        source_withdraw_account,
+                    )
+                    moved_to_withdraw_account = True
+                self._store_execution_checkpoint(
+                    context,
+                    execution_checkpoint=CHECKPOINT_SOURCE_INTERNAL_PREPARED,
+                )
+            else:
+                withdraw_fee = self._resolve_withdraw_fee(
+                    client=source_client,
+                    adapter=source_adapter,
+                    network_code=withdraw_network_code,
+                )
 
             destination = self._resolve_destination_address(
-                exchange_code=to_exchange,
+                adapter=target_adapter,
                 target_client=target_client,
                 fallback_network=to_network,
                 fallback_address=to_address,
@@ -322,41 +283,107 @@ class TransferExecutionService:
             )
             self._store_resolved_destination(context, destination)
 
-            withdraw_params = self._build_withdraw_params(
-                exchange_code=from_exchange,
-                network_code=destination["network_code"],
-            )
-            withdraw = source_client.withdraw(
-                TRANSFER_ASSET_CODE,
-                amount,
-                destination["address"],
-                destination["tag"],
-                withdraw_params,
-            )
-
-            if to_market_type == "swap":
-                target_credit_market_type = self._withdraw_account_market_type(to_exchange)
-                balance_before = self._fetch_available_amount(
-                    client=target_client,
-                    exchange_code=to_exchange,
-                    market_type=target_credit_market_type,
+            if checkpoint not in {CHECKPOINT_WITHDRAW_SUBMITTED, CHECKPOINT_TARGET_CREDIT_CONFIRMED, CHECKPOINT_TARGET_INTERNAL_TRANSFERRED}:
+                withdraw_params = self._build_withdraw_params(
+                    adapter=source_adapter,
+                    network_code=destination.network_code,
+                    fee=withdraw_fee,
                 )
+                withdraw = source_client.withdraw(
+                    TRANSFER_ASSET_CODE,
+                    amount,
+                    destination.address,
+                    destination.tag,
+                    withdraw_params,
+                )
+                withdraw_reference = self._extract_transfer_reference(withdraw)
+                self._store_withdraw_submission(context, withdraw, withdraw_reference)
+
+            if to_market_type == "swap" and checkpoint not in {CHECKPOINT_TARGET_CREDIT_CONFIRMED, CHECKPOINT_TARGET_INTERNAL_TRANSFERRED}:
+                target_credit_market_type = target_adapter.withdraw_account_market_type
+                balance_before = self._read_target_credit_balance_before(context)
+                if balance_before is None:
+                    balance_before = self._fetch_available_amount(
+                        client=target_client,
+                        adapter=target_adapter,
+                        market_type=target_credit_market_type,
+                    )
+                    self._store_execution_checkpoint(
+                        context,
+                        execution_checkpoint=CHECKPOINT_WITHDRAW_SUBMITTED,
+                        execution_reference=withdraw_reference,
+                        execution_payload=self._serialize_execution_payload_meta(
+                            context,
+                            target_credit_balance_before=balance_before,
+                        ),
+                    )
                 self._wait_for_target_credit(
                     target_client=target_client,
-                    exchange_code=to_exchange,
+                    adapter=target_adapter,
                     market_type=target_credit_market_type,
                     balance_before=balance_before,
                     amount=amount,
                 )
-                funding_account = self._withdraw_account_for_exchange(to_exchange)
-                target_account = self._current_account_for_exchange(to_exchange, to_market_type)
+                self._store_execution_checkpoint(
+                    context,
+                    execution_checkpoint=CHECKPOINT_TARGET_CREDIT_CONFIRMED,
+                    execution_reference=withdraw_reference,
+                )
+
+            if to_market_type == "swap" and checkpoint != CHECKPOINT_TARGET_INTERNAL_TRANSFERRED:
+                funding_account = target_adapter.withdraw_account
+                target_account = self._map_internal_account(target_adapter, to_exchange, to_market_type)
                 if funding_account != target_account:
                     target_client.transfer(TRANSFER_ASSET_CODE, amount, funding_account, target_account)
+                self._store_execution_checkpoint(
+                    context,
+                    execution_checkpoint=CHECKPOINT_TARGET_INTERNAL_TRANSFERRED,
+                    execution_reference=withdraw_reference,
+                )
 
-            return withdraw
+            return TransferExecutionOutcome(
+                status="success",
+                result=f"跨交易所调拨已提交，出金记录号 {withdraw_reference}。",
+                execution_checkpoint=(
+                    CHECKPOINT_TARGET_INTERNAL_TRANSFERRED
+                    if to_market_type == "swap"
+                    else CHECKPOINT_WITHDRAW_SUBMITTED
+                ),
+                execution_reference=withdraw_reference,
+                execution_payload=self._serialize_execution_payload_meta(context) or None,
+            )
+        except ExchangeConnectionError as exc:
+            if self._withdraw_submitted(context) or checkpoint in {
+                CHECKPOINT_WITHDRAW_SUBMITTED,
+                CHECKPOINT_TARGET_CREDIT_CONFIRMED,
+                CHECKPOINT_TARGET_INTERNAL_TRANSFERRED,
+            }:
+                if checkpoint not in {
+                    CHECKPOINT_WITHDRAW_SUBMITTED,
+                    CHECKPOINT_TARGET_CREDIT_CONFIRMED,
+                    CHECKPOINT_TARGET_INTERNAL_TRANSFERRED,
+                }:
+                    self._store_execution_checkpoint(
+                        context,
+                        execution_checkpoint=CHECKPOINT_WITHDRAW_SUBMITTED,
+                        execution_reference=str(context.get("_withdraw_reference") or withdraw_reference),
+                        execution_payload=str(context.get("_withdraw_payload") or ""),
+                    )
+                return TransferExecutionOutcome(
+                    status="processing",
+                    result=self._build_post_withdraw_pending_message(context=context, error=exc),
+                    execute_status="pending_execute",
+                    result_status="none",
+                    failure_type="",
+                    failure_reason="",
+                    execution_checkpoint=str(context.get("execution_checkpoint") or CHECKPOINT_WITHDRAW_SUBMITTED),
+                    execution_reference=str(context.get("execution_reference") or context.get("_withdraw_reference") or withdraw_reference),
+                    execution_payload=self._serialize_execution_payload_meta(context) or None,
+                )
+            raise
         except Exception as exc:
             rollback_result = None
-            if moved_to_withdraw_account:
+            if moved_to_withdraw_account and not self._withdraw_submitted(context):
                 rollback_result = self._rollback_source_internal_transfer(
                     source_client=source_client,
                     exchange_code=from_exchange,
@@ -383,34 +410,35 @@ class TransferExecutionService:
     def _resolve_destination_address(
         self,
         *,
-        exchange_code: str,
+        adapter: ExchangeTransferAdapter,
         target_client: Any,
         fallback_network: str,
         fallback_address: str,
         fallback_memo: str,
-    ) -> Dict[str, str | None]:
-        normalized_network = self._normalize_network_code(fallback_network)
-        deposit = self._safe_fetch_deposit_address(target_client, normalized_network)
-        if deposit is not None:
-            if exchange_code == "okx":
-                info = deposit.get("info") if isinstance(deposit, dict) else None
-                to_account = str(info.get("to") or "") if isinstance(info, dict) else ""
-                if to_account and to_account not in {"6", "18"}:
-                    raise ExchangeValidationError(f"OKX 充值地址目标账户类型异常: {to_account}")
-            return {
-                "address": str(deposit.get("address") or fallback_address).strip(),
-                "tag": str(deposit.get("tag") or fallback_memo or "").strip() or None,
-                "network_code": str(deposit.get("network") or normalized_network).strip() or normalized_network,
-            }
-        return {
-            "address": fallback_address,
-            "tag": fallback_memo or None,
-            "network_code": normalized_network,
-        }
-
-    def _safe_fetch_deposit_address(self, client: Any, network_code: str) -> Dict[str, Any] | None:
+    ) -> DepositDestination:
+        requested_network = str(fallback_network or "").strip()
+        if not requested_network:
+            raise ExchangeValidationError("未配置提现网络。")
+        deposit = self._safe_fetch_deposit_address(adapter=adapter, client=target_client, network_code=requested_network)
         try:
-            return client.fetch_deposit_address(TRANSFER_ASSET_CODE, {"network": network_code})
+            return adapter.resolve_deposit_destination(
+                deposit=deposit,
+                fallback_network=fallback_network,
+                fallback_address=fallback_address,
+                fallback_memo=fallback_memo,
+            )
+        except ValueError as exc:
+            raise ExchangeValidationError(str(exc)) from exc
+
+    def _safe_fetch_deposit_address(
+        self,
+        *,
+        adapter: ExchangeTransferAdapter,
+        client: Any,
+        network_code: str,
+    ) -> Dict[str, Any] | None:
+        try:
+            return adapter.fetch_deposit_address(client, network_code)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Fetch deposit address failed, fallback to saved address: %s", exc)
             return None
@@ -419,7 +447,7 @@ class TransferExecutionService:
         self,
         *,
         target_client: Any,
-        exchange_code: str,
+        adapter: ExchangeTransferAdapter,
         market_type: str,
         balance_before: float,
         amount: float,
@@ -429,7 +457,7 @@ class TransferExecutionService:
         for _ in range(max_attempts):
             available_amount = self._fetch_available_amount(
                 client=target_client,
-                exchange_code=exchange_code,
+                adapter=adapter,
                 market_type=market_type,
             )
             if available_amount - balance_before >= amount * 0.95:
@@ -437,33 +465,42 @@ class TransferExecutionService:
             time.sleep(sleep_seconds)
         raise ExchangeConnectionError("目标交易所到账超时，未能继续转入目标账户。")
 
-    def _fetch_available_amount(self, *, client: Any, exchange_code: str, market_type: str) -> float:
-        if exchange_code == "binance":
-            balance = client.fetch_balance({"type": "spot" if market_type == "spot" else "swap"})
-        elif exchange_code == "gate":
-            balance = client.fetch_balance({"type": "funding" if market_type == "spot" else "swap"})
-        elif exchange_code == "bitget":
-            balance = client.fetch_balance({"type": "spot" if market_type == "spot" else "swap"})
-        elif exchange_code == "okx":
-            balance = client.fetch_balance({"type": "funding" if market_type == "spot" else "trading"})
-        else:
-            balance = client.fetch_balance()
+    def _fetch_available_amount(self, *, client: Any, adapter: ExchangeTransferAdapter, market_type: str) -> float:
+        balance_params = adapter.build_balance_params(market_type)
+        balance = client.fetch_balance(balance_params) if balance_params is not None else client.fetch_balance()
         return float(
             exchange_connection_service._extract_available_balance(  # noqa: SLF001
                 balance,
                 market_type,
-                exchange_code,
+                adapter.code,
             )
         )
 
-    def _build_withdraw_params(self, *, exchange_code: str, network_code: str) -> Dict[str, Any]:
-        normalized = self._resolve_withdraw_network_code(exchange_code=exchange_code, network_code=network_code)
-        if exchange_code == "binance":
-            return {"network": normalized}
-        if exchange_code == "okx":
-            fee = "0"
-            return {"network": normalized, "fee": fee}
-        return {"network": normalized}
+    def _resolve_withdraw_fee(self, *, client: Any, adapter: ExchangeTransferAdapter, network_code: str) -> float:
+        resolved_network = adapter.resolve_withdraw_network_code(network_code)
+        try:
+            currencies = client.fetch_currencies()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Fetch currencies failed when resolving withdraw fee: exchange=%s detail=%s", adapter.code, exc)
+            return 0.0
+
+        currency = currencies.get(TRANSFER_ASSET_CODE) or {}
+        networks = currency.get("networks") or {}
+        network = networks.get(resolved_network) or {}
+        fee = network.get("fee")
+        try:
+            return max(float(fee or 0), 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _build_withdraw_params(
+        self,
+        *,
+        adapter: ExchangeTransferAdapter,
+        network_code: str,
+        fee: float | None = None,
+    ) -> Dict[str, Any]:
+        return adapter.build_withdraw_params(network_code, fee)
 
     def _create_client_from_context(
         self,
@@ -543,77 +580,110 @@ class TransferExecutionService:
             f"回滚失败原因：{rollback_message}"
         )
 
-    def _store_resolved_destination(self, context: Dict[str, Any], destination: Dict[str, str | None]) -> None:
-        context["_resolved_to_network"] = str(destination.get("network_code") or "").strip()
-        context["_resolved_to_address_value"] = str(destination.get("address") or "").strip()
-        context["_resolved_to_memo_tag"] = str(destination.get("tag") or "").strip()
+    def _store_resolved_destination(self, context: Dict[str, Any], destination: DepositDestination) -> None:
+        context["_resolved_to_network"] = str(destination.network_code or "").strip()
+        context["_resolved_to_address_value"] = str(destination.address or "").strip()
+        context["_resolved_to_memo_tag"] = str(destination.tag or "").strip()
 
-    def _map_binance_account_type(self, market_type: str) -> str:
-        account_type = BINANCE_INTERNAL_ACCOUNT_BY_MARKET.get(market_type)
+    def _store_withdraw_submission(self, context: Dict[str, Any], withdraw: Dict[str, Any] | None, reference: str) -> None:
+        context["_withdraw_submitted"] = True
+        context["_withdraw_reference"] = str(reference or "").strip()
+        if isinstance(withdraw, dict):
+            try:
+                context["_withdraw_payload"] = json.dumps(withdraw, ensure_ascii=False, default=str)
+            except Exception:
+                context["_withdraw_payload"] = ""
+        self._store_execution_checkpoint(
+            context,
+            execution_checkpoint=CHECKPOINT_WITHDRAW_SUBMITTED,
+            execution_reference=str(context.get("_withdraw_reference") or "").strip(),
+            execution_payload=str(context.get("_withdraw_payload") or ""),
+        )
+
+    def _withdraw_submitted(self, context: Dict[str, Any]) -> bool:
+        return bool(context.get("_withdraw_submitted"))
+
+    def _build_post_withdraw_pending_message(self, *, context: Dict[str, Any], error: Exception) -> str:
+        withdraw_reference = str(context.get("_withdraw_reference") or "").strip() or "--"
+        return (
+            f"跨交易所提现已提交，出金记录号 {withdraw_reference}。"
+            f"目标交易所到账或自动划转仍在处理中，请稍后刷新确认。当前提示：{self._translate_exchange_exception_message(error)}"
+        )
+
+    def _get_exchange_adapter(self, exchange_code: str) -> ExchangeTransferAdapter | None:
+        return exchange_transfer_registry.get(exchange_code)
+
+    def _get_exchange_adapter_or_raise(self, exchange_code: str) -> ExchangeTransferAdapter:
+        adapter = self._get_exchange_adapter(exchange_code)
+        if adapter is None:
+            raise ExchangeValidationError(f"暂不支持 {exchange_code} 的真实调拨执行。")
+        return adapter
+
+    def _map_internal_account(self, adapter: ExchangeTransferAdapter, exchange_code: str, market_type: str) -> str:
+        account_type = adapter.map_internal_account(market_type)
         if not account_type:
-            raise ExchangeValidationError(f"Binance 账户类型不支持: {market_type}")
+            raise ExchangeValidationError(f"{exchange_code.upper()} 账户类型不支持: {market_type}")
         return account_type
 
-    def _map_okx_account_type(self, market_type: str) -> str:
-        account_type = OKX_INTERNAL_ACCOUNT_BY_MARKET.get(market_type)
-        if not account_type:
-            raise ExchangeValidationError(f"OKX 账户类型不支持: {market_type}")
-        return account_type
+    def _store_execution_checkpoint(
+        self,
+        context: Dict[str, Any],
+        *,
+        execution_checkpoint: str,
+        execution_reference: str = "",
+        execution_payload: str = "",
+    ) -> None:
+        context["execution_checkpoint"] = execution_checkpoint
+        if execution_reference:
+            context["execution_reference"] = execution_reference
+        if execution_payload:
+            context["execution_payload"] = execution_payload
+        record_id = int(context.get("id") or 0)
+        if record_id > 0:
+            account_repository.update_transfer_record_execution_checkpoint(
+                record_id,
+                execution_checkpoint=execution_checkpoint,
+                execution_reference=str(context.get("execution_reference") or execution_reference),
+                execution_payload=str(context.get("execution_payload") or execution_payload),
+            )
 
-    def _map_gate_account_type(self, market_type: str) -> str:
-        account_type = GATE_INTERNAL_ACCOUNT_BY_MARKET.get(market_type)
-        if not account_type:
-            raise ExchangeValidationError(f"Gate 账户类型不支持: {market_type}")
-        return account_type
+    def _serialize_execution_payload_meta(
+        self,
+        context: Dict[str, Any],
+        *,
+        target_credit_balance_before: float | None = None,
+    ) -> str:
+        payload: Dict[str, Any] = {}
+        raw_payload = context.get("_withdraw_payload") or context.get("execution_payload") or ""
+        if raw_payload:
+            try:
+                parsed = json.loads(str(raw_payload))
+                if isinstance(parsed, dict):
+                    payload.update(parsed)
+            except Exception:
+                payload["raw"] = str(raw_payload)
+        if target_credit_balance_before is not None:
+            payload["_target_credit_balance_before"] = float(target_credit_balance_before)
+        text = json.dumps(payload, ensure_ascii=False, default=str) if payload else ""
+        if text:
+            context["execution_payload"] = text
+        return text
 
-    def _map_bitget_account_type(self, market_type: str) -> str:
-        account_type = BITGET_INTERNAL_ACCOUNT_BY_MARKET.get(market_type)
-        if not account_type:
-            raise ExchangeValidationError(f"Bitget 账户类型不支持: {market_type}")
-        return account_type
-
-    def _withdraw_account_for_exchange(self, exchange_code: str) -> str:
-        if exchange_code == "binance":
-            return "spot"
-        if exchange_code == "gate":
-            return "funding"
-        if exchange_code == "bitget":
-            return "spot"
-        if exchange_code == "okx":
-            return "funding"
-        raise ExchangeValidationError(f"暂不支持 {exchange_code} 的提现账户映射。")
-
-    def _current_account_for_exchange(self, exchange_code: str, market_type: str) -> str:
-        if exchange_code == "binance":
-            return self._map_binance_account_type(market_type)
-        if exchange_code == "gate":
-            return self._map_gate_account_type(market_type)
-        if exchange_code == "bitget":
-            return self._map_bitget_account_type(market_type)
-        if exchange_code == "okx":
-            return self._map_okx_account_type(market_type)
-        raise ExchangeValidationError(f"暂不支持 {exchange_code} 的账户类型映射。")
-
-    def _withdraw_account_market_type(self, exchange_code: str) -> str:
-        if exchange_code in {"binance", "gate", "bitget", "okx"}:
-            return "spot"
-        return "spot"
-
-    def _transfer_client_market_type(self, exchange_code: str) -> str:
-        if exchange_code in {"binance", "gate", "bitget", "okx"}:
-            return "spot"
-        return "spot"
-
-    def _normalize_network_code(self, network_code: str) -> str:
-        normalized = str(network_code or "").strip().lower()
-        if not normalized:
-            raise ExchangeValidationError("未配置提现网络。")
-        return NETWORK_ALIASES.get(normalized, normalized.upper())
-
-    def _resolve_withdraw_network_code(self, *, exchange_code: str, network_code: str) -> str:
-        normalized = self._normalize_network_code(network_code)
-        exchange_aliases = EXCHANGE_WITHDRAW_NETWORK_ALIASES.get(str(exchange_code or "").strip().lower(), {})
-        return exchange_aliases.get(normalized, normalized)
+    def _read_target_credit_balance_before(self, context: Dict[str, Any]) -> float | None:
+        raw_payload = context.get("execution_payload") or context.get("_withdraw_payload") or ""
+        if not raw_payload:
+            return None
+        try:
+            parsed = json.loads(str(raw_payload))
+        except Exception:
+            return None
+        if not isinstance(parsed, dict):
+            return None
+        value = parsed.get("_target_credit_balance_before")
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     def _extract_transfer_reference(self, response: Dict[str, Any] | None) -> str:
         if not isinstance(response, dict):

@@ -76,7 +76,11 @@ class TransferExecutionMonitorService:
         handled_count = 0
         for row in rows:
             record_id = int(row["id"])
-            if not account_repository.mark_transfer_record_processing(record_id):
+            allow_recovering_executing = str(row.get("execute_status") or "").strip() == "executing"
+            if not account_repository.mark_transfer_record_processing(
+                record_id,
+                allow_recovering_executing=allow_recovering_executing,
+            ):
                 continue
             handled_count += 1
             self._execute_record(record_id)
@@ -111,13 +115,18 @@ class TransferExecutionMonitorService:
                 record_id,
                 status=outcome.status,
                 result=outcome.result,
-                execute_status="processed",
-                result_status="success",
+                execute_status=outcome.execute_status,
+                result_status=outcome.result_status,
+                failure_type=outcome.failure_type,
+                failure_reason=outcome.failure_reason,
+                execution_checkpoint=outcome.execution_checkpoint,
+                execution_reference=outcome.execution_reference,
+                execution_payload=outcome.execution_payload,
             )
             monitor_center_service.add_log(
                 self._monitor_key,
-                "info",
-                f"调拨记录 #{record_id} 执行成功: {outcome.result}",
+                "info" if outcome.result_status == "success" else "warning",
+                f"调拨记录 #{record_id} 执行结果: {outcome.result}",
             )
         except ExchangeError as exc:
             self._persist_resolved_destination(record_id, context)

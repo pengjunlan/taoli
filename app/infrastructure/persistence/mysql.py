@@ -242,6 +242,9 @@ class MySQLConnectionManager:
                 actual_to_network VARCHAR(64) NOT NULL DEFAULT '',
                 actual_to_address_value VARCHAR(255) NOT NULL DEFAULT '',
                 actual_to_memo_tag VARCHAR(120) NOT NULL DEFAULT '',
+                execution_checkpoint VARCHAR(64) NOT NULL DEFAULT '',
+                execution_reference VARCHAR(255) NOT NULL DEFAULT '',
+                execution_payload LONGTEXT NULL,
                 processed_at DATETIME NULL,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -843,6 +846,36 @@ class MySQLConnectionManager:
                     ALTER TABLE account_transfer_records
                     ADD COLUMN actual_to_memo_tag VARCHAR(120) NOT NULL DEFAULT ''
                     AFTER actual_to_address_value
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="account_transfer_records",
+                column_name="execution_checkpoint",
+                ddl="""
+                    ALTER TABLE account_transfer_records
+                    ADD COLUMN execution_checkpoint VARCHAR(64) NOT NULL DEFAULT ''
+                    AFTER actual_to_memo_tag
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="account_transfer_records",
+                column_name="execution_reference",
+                ddl="""
+                    ALTER TABLE account_transfer_records
+                    ADD COLUMN execution_reference VARCHAR(255) NOT NULL DEFAULT ''
+                    AFTER execution_checkpoint
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="account_transfer_records",
+                column_name="execution_payload",
+                ddl="""
+                    ALTER TABLE account_transfer_records
+                    ADD COLUMN execution_payload LONGTEXT NULL
+                    AFTER execution_reference
                 """,
             )
             cursor.execute(

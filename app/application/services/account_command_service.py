@@ -371,12 +371,12 @@ class AccountCommandService(AccountServiceSupport):
         )
 
     def _validate_exchange_network_selection(self, *, exchange_code: str, address_network: str) -> None:
-        normalized_network = str(address_network or "").strip().lower()
+        normalized_network = str(address_network or "").strip()
         if not normalized_network:
             return
         options = exchange_asset_network_service.list_network_options(exchange_code).get("options") or []
         allowed_networks = {
-            str(item.get("network_code") or "").strip().lower()
+            str(item.get("network_code") or "").strip()
             for item in options
             if str(item.get("network_code") or "").strip()
         }

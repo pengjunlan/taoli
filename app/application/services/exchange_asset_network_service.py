@@ -17,15 +17,15 @@ from app.shared.exceptions import AccountPersistenceError, AccountValidationErro
 logger = logging.getLogger(__name__)
 
 DEFAULT_ADDRESS_NETWORKS = (
-    {"network_code": "trc20", "network_name": "TRC20", "network_id": "TRC20"},
-    {"network_code": "erc20", "network_name": "ERC20", "network_id": "ERC20"},
-    {"network_code": "bep20", "network_name": "BEP20", "network_id": "BEP20"},
-    {"network_code": "arbitrum", "network_name": "Arbitrum One", "network_id": "ARBITRUM"},
-    {"network_code": "optimism", "network_name": "Optimism", "network_id": "OPTIMISM"},
-    {"network_code": "polygon", "network_name": "Polygon", "network_id": "MATIC"},
-    {"network_code": "plasma", "network_name": "Plasma", "network_id": "XPL"},
-    {"network_code": "solana", "network_name": "Solana", "network_id": "SOL"},
-    {"network_code": "omni", "network_name": "OMNI", "network_id": "OMNI"},
+    {"network_code": "TRC20", "network_name": "TRC20", "network_id": "TRC20"},
+    {"network_code": "ERC20", "network_name": "ERC20", "network_id": "ERC20"},
+    {"network_code": "BEP20", "network_name": "BEP20", "network_id": "BEP20"},
+    {"network_code": "ARBITRUM", "network_name": "Arbitrum One", "network_id": "ARBITRUM"},
+    {"network_code": "OPTIMISM", "network_name": "Optimism", "network_id": "OPTIMISM"},
+    {"network_code": "MATIC", "network_name": "Polygon", "network_id": "MATIC"},
+    {"network_code": "XPL", "network_name": "XPL", "network_id": "XPL"},
+    {"network_code": "SOL", "network_name": "Solana", "network_id": "SOL"},
+    {"network_code": "OMNI", "network_name": "OMNI", "network_id": "OMNI"},
     {"network_code": "internal", "network_name": "交易所内部划转", "network_id": "internal"},
 )
 
@@ -37,7 +37,7 @@ DEFAULT_NETWORK_CODE_BY_CCXT = {
     "MATIC": "polygon",
     "POLYGON": "polygon",
     "PLASMA": "plasma",
-    "XPL": "plasma",
+    "XPL": "xpl",
     "SOL": "solana",
     "SOLANA": "solana",
     "OMNI": "omni",
@@ -187,13 +187,13 @@ class ExchangeAssetNetworkService:
         if not isinstance(raw_network, dict):
             return None
         ccxt_network_code = str(raw_network.get("network") or raw_network_code or "").strip()
-        normalized_code = self._normalize_network_code(ccxt_network_code)
-        if not normalized_code:
+        if not ccxt_network_code:
             return None
-        network_name = NETWORK_LABELS.get(normalized_code, ccxt_network_code or normalized_code.upper())
-        network_id = str(raw_network.get("id") or ccxt_network_code or normalized_code).strip()
+        normalized_label_key = self._normalize_network_code(ccxt_network_code)
+        network_name = NETWORK_LABELS.get(normalized_label_key, ccxt_network_code)
+        network_id = str(raw_network.get("id") or ccxt_network_code).strip()
         return {
-            "network_code": normalized_code,
+            "network_code": ccxt_network_code,
             "network_name": network_name,
             "network_id": network_id,
             "is_deposit_enabled": bool(raw_network.get("deposit", True)),
