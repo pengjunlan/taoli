@@ -37,21 +37,27 @@
     table-layout: fixed;
 }
 
+.page-accounts .balance-table thead th,
+.page-accounts .balance-table tbody td {
+    padding-left: 10px;
+    padding-right: 10px;
+}
+
 .page-accounts .balance-table thead th:nth-child(1),
 .page-accounts .balance-table tbody td:nth-child(1) {
-    width: 14%;
+    width: 17%;
 }
 
 .page-accounts .balance-table thead th:nth-child(2),
 .page-accounts .balance-table tbody td:nth-child(2) {
-    width: 6%;
+    width: 7%;
 }
 
 .page-accounts .balance-table thead th:nth-child(3),
 .page-accounts .balance-table tbody td:nth-child(3),
 .page-accounts .balance-table thead th:nth-child(4),
 .page-accounts .balance-table tbody td:nth-child(4) {
-    width: 6%;
+    width: 9%;
 }
 
 .page-accounts .balance-table thead th:nth-child(5),
@@ -77,28 +83,45 @@
 
 .page-accounts .balance-table thead th:nth-child(11),
 .page-accounts .balance-table tbody td:nth-child(11) {
-    width: 7%;
+    width: 6%;
 }
 
 .page-accounts .balance-table thead th:nth-child(12),
 .page-accounts .balance-table tbody td:nth-child(12) {
-    width: 7%;
+    width: 6%;
 }
 
 .page-accounts .balance-table thead th:nth-child(13),
 .page-accounts .balance-table tbody td:nth-child(13) {
-    width: 10%;
+    width: 11%;
 }
 
 .page-accounts .balance-table thead th:nth-child(14),
 .page-accounts .balance-table tbody td:nth-child(14) {
-    width: 13%;
+    width: 11%;
 }
 
 .page-accounts .balance-table tbody td {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.page-accounts .balance-table thead th:nth-child(3),
+.page-accounts .balance-table tbody td:nth-child(3),
+.page-accounts .balance-table thead th:nth-child(4),
+.page-accounts .balance-table tbody td:nth-child(4),
+.page-accounts .balance-table thead th:nth-child(14),
+.page-accounts .balance-table tbody td:nth-child(14) {
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+.page-accounts .balance-table tbody td:nth-child(3),
+.page-accounts .balance-table tbody td:nth-child(4) {
+    overflow: visible;
+    text-overflow: clip;
+    font-size: 0.95rem;
 }
 
 .page-accounts .balance-table thead th:nth-child(14),
@@ -116,15 +139,15 @@
 
 .page-accounts .balance-table .account-actions {
     justify-content: flex-start;
-    gap: 6px;
+    gap: 4px;
     flex-wrap: nowrap;
     min-width: 0;
 }
 
 .page-accounts .balance-table .account-actions .table-action {
-    min-height: 32px;
-    padding: 0 8px;
-    font-size: 0.84rem;
+    min-height: 30px;
+    padding: 0 6px;
+    font-size: 0.82rem;
     white-space: nowrap;
     flex: 0 0 auto;
 }

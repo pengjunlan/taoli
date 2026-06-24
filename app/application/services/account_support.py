@@ -318,15 +318,15 @@ class AccountServiceSupport:
     def _transfer_status_label(self, value: str) -> str:
         return {
             "pending": "待执行",
-            "created": "已创建",
-            "processing": "处理中",
+            "created": "待执行",
+            "processing": "执行中",
             "pending_execute": "待执行",
-            "executing": "处理中",
-            "source_internal_prepared": "源账户内部划转完成",
-            "withdraw_submitted": "已提交出金",
-            "awaiting_target_credit": "等待目标到账",
-            "awaiting_target_internal_transfer": "等待转入目标业务账户",
-            "processed": "已处理",
+            "executing": "执行中",
+            "source_internal_prepared": "执行中",
+            "withdraw_submitted": "执行中",
+            "awaiting_target_credit": "执行中",
+            "awaiting_target_internal_transfer": "执行中",
+            "processed": "执行中",
             "success": "已完成",
             "failed": "失败",
             "ignored": "已忽略",
@@ -363,6 +363,10 @@ class AccountServiceSupport:
         result_status = str(row.get("result_status") or "").strip().lower()
         checkpoint = str(row.get("execution_checkpoint") or "").strip().lower()
         payload = self._load_transfer_execution_payload(row.get("execution_payload"))
+        requires_target_account_alignment = self._read_transfer_payload_bool(
+            payload,
+            "_requires_target_account_alignment",
+        )
 
         if result_status == "ignored" or status == "ignored":
             return "ignored"
@@ -377,6 +381,11 @@ class AccountServiceSupport:
             TRANSFER_CHECKPOINT_TARGET_CREDIT_CONFIRMED,
             TRANSFER_CHECKPOINT_AWAITING_TARGET_INTERNAL_TRANSFER,
         }:
+            if (
+                checkpoint == TRANSFER_CHECKPOINT_TARGET_CREDIT_CONFIRMED
+                and requires_target_account_alignment is False
+            ):
+                return "success"
             return "awaiting_target_internal_transfer"
         if checkpoint == TRANSFER_CHECKPOINT_AWAITING_TARGET_CREDIT:
             return "awaiting_target_credit"
@@ -413,6 +422,10 @@ class AccountServiceSupport:
         payload = self._load_transfer_execution_payload(row.get("execution_payload"))
         credited_amount = self._read_transfer_payload_amount(payload, "_target_credit_amount")
         transferred_amount = self._read_transfer_payload_amount(payload, "_target_internal_transfer_amount")
+        requires_target_account_alignment = self._read_transfer_payload_bool(
+            payload,
+            "_requires_target_account_alignment",
+        )
         hint = self._extract_transfer_runtime_hint(raw_result)
 
         if resolved_status == "ignored":
@@ -427,7 +440,9 @@ class AccountServiceSupport:
         ):
             return self._compose_transfer_result(
                 [
-                    "同交易所内部划转已完成",
+                    "任务已创建",
+                    "已转入目标业务账户",
+                    "已完成",
                     self._build_transfer_reference_segment(reference, label="内部划转记录号"),
                 ],
                 hint="",
@@ -435,21 +450,19 @@ class AccountServiceSupport:
 
         if resolved_status == "source_internal_prepared":
             return self._compose_transfer_result(
-                ["源账户内部划转已完成，准备提交出金"],
+                [
+                    "任务已创建",
+                    "源账户资金已归集到提现账户",
+                ],
                 hint=hint,
             )
 
         if resolved_status == "withdraw_submitted":
             return self._compose_transfer_result(
                 [
+                    "任务已创建",
+                    "已提交出金申请",
                     self._build_transfer_reference_segment(reference),
-                    "已提交出金",
-                    (
-                        "目标业务账户：按目标地址直接接收，无需二次内部划转"
-                        if str(row.get("result_status") or "").strip().lower() == "success"
-                        or str(row.get("status") or "").strip().lower() == "success"
-                        else ""
-                    ),
                 ],
                 hint=hint,
             )
@@ -457,9 +470,10 @@ class AccountServiceSupport:
         if resolved_status == "awaiting_target_credit":
             return self._compose_transfer_result(
                 [
+                    "任务已创建",
+                    "已提交出金申请",
                     self._build_transfer_reference_segment(reference),
-                    "目标到账：等待中",
-                    "目标业务账户入账：未完成",
+                    "等待目标到账",
                 ],
                 hint=hint,
             )
@@ -467,9 +481,11 @@ class AccountServiceSupport:
         if resolved_status == "awaiting_target_internal_transfer":
             return self._compose_transfer_result(
                 [
+                    "任务已创建",
+                    "已提交出金申请",
                     self._build_transfer_reference_segment(reference),
-                    self._build_transfer_progress_segment("目标到账", "已到账", credited_amount),
-                    "目标业务账户入账：等待中",
+                    self._build_transfer_progress_segment("目标已到账", "已确认", credited_amount),
+                    "已转入目标业务账户：处理中",
                 ],
                 hint=hint,
             )
@@ -478,29 +494,50 @@ class AccountServiceSupport:
             if checkpoint == TRANSFER_CHECKPOINT_TARGET_INTERNAL_TRANSFERRED or transferred_amount is not None:
                 return self._compose_transfer_result(
                     [
+                        "任务已创建",
+                        "已提交出金申请",
                         self._build_transfer_reference_segment(reference),
-                        self._build_transfer_progress_segment("目标到账", "已到账", credited_amount),
-                        self._build_transfer_progress_segment("目标业务账户入账", "已完成", transferred_amount),
+                        self._build_transfer_progress_segment("目标已到账", "已确认", credited_amount),
+                        self._build_transfer_progress_segment("已转入目标业务账户", "已完成", transferred_amount),
+                        "已完成",
+                    ],
+                    hint="",
+                )
+            if (
+                checkpoint == TRANSFER_CHECKPOINT_TARGET_CREDIT_CONFIRMED
+                and requires_target_account_alignment is False
+            ):
+                return self._compose_transfer_result(
+                    [
+                        "任务已创建",
+                        "已提交出金申请",
+                        self._build_transfer_reference_segment(reference),
+                        self._build_transfer_progress_segment("目标已到账", "已确认", credited_amount),
+                        "已完成",
                     ],
                     hint="",
                 )
 
             return self._compose_transfer_result(
                 [
+                    "任务已创建",
+                    "已完成",
                     self._build_transfer_reference_segment(reference),
-                    "目标业务账户：按目标地址直接接收，无需二次内部划转",
                 ],
                 hint=hint,
             )
 
         if resolved_status == "executing":
             return self._compose_transfer_result(
-                ["后台正在处理调拨，请稍后刷新确认"],
+                [
+                    "任务已创建",
+                    "后台正在执行调拨",
+                ],
                 hint=hint,
             )
 
         if resolved_status in {"pending", "created"}:
-            return raw_result or "手动调拨任务已创建，等待后台执行。"
+            return "任务已创建"
 
         return raw_result or "--"
 
@@ -530,6 +567,20 @@ class AccountServiceSupport:
         except (TypeError, ValueError):
             return None
         return amount if amount > 0 else None
+
+    def _read_transfer_payload_bool(self, payload: Mapping[str, Any], key: str) -> bool | None:
+        value = payload.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "y", "on"}:
+                return True
+            if normalized in {"false", "0", "no", "n", "off"}:
+                return False
+        if isinstance(value, (int, float)):
+            return bool(value)
+        return None
 
     def _format_asset_amount(self, value: float) -> str:
         text = f"{float(value):,.8f}".rstrip("0").rstrip(".")

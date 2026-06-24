@@ -88,6 +88,12 @@ class AccountAutoTransferService:
         if candidate is None:
             raise AccountValidationError("当前没有同时满足自动调拨条件的账户组合。")
 
+        self._ensure_no_open_transfer_conflicts(
+            current_user.id,
+            from_account_id=int(candidate["from_account_id"]),
+            to_account_id=int(candidate["to_account_id"]),
+        )
+
         pending_transfer = account_repository.get_open_worker_transfer_record_by_target_account_id(
             int(candidate["to_account_id"])
         )
@@ -205,6 +211,45 @@ class AccountAutoTransferService:
         if account is None:
             raise AccountNotFoundError("账户不存在，或你无权解冻该账户。")
         auto_transfer_account_guard_service.unlock_account(user_id, account_id)
+
+    def _ensure_no_open_transfer_conflicts(
+        self,
+        user_id: int,
+        *,
+        from_account_id: int,
+        to_account_id: int,
+    ) -> None:
+        conflict_checks = (
+            (
+                account_repository.get_open_worker_transfer_record_by_route(
+                    user_id=user_id,
+                    from_account_id=from_account_id,
+                    to_account_id=to_account_id,
+                ),
+                "当前这条调拨路线已有未完成的调拨记录",
+            ),
+            (
+                account_repository.get_open_worker_transfer_record_by_source_account_id(from_account_id),
+                "当前转出账户已有未完成的调拨记录",
+            ),
+            (
+                account_repository.get_open_worker_transfer_record_by_target_account_id(to_account_id),
+                "当前转入账户已有未完成的调拨记录",
+            ),
+        )
+
+        for pending_transfer, prefix in conflict_checks:
+            if pending_transfer is None:
+                continue
+            record_id = int(pending_transfer["id"])
+            status = str(
+                pending_transfer.get("execute_status")
+                or pending_transfer.get("status")
+                or "pending_execute"
+            )
+            raise AccountValidationError(
+                f"{prefix} #{record_id}（状态：{status}），请等待处理完成后再继续自动调拨。"
+            )
 
     def _build_account_snapshots(self, rows: List[Dict[str, object]]) -> List[AutoTransferAccountSnapshot]:
         result: List[AutoTransferAccountSnapshot] = []

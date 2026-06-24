@@ -81,7 +81,7 @@ function Read-EnvSettings {
         return $settings
     }
 
-    foreach ($rawLine in Get-Content -LiteralPath $envFilePath) {
+    foreach ($rawLine in Get-Content -LiteralPath $envFilePath -Encoding UTF8) {
         $line = $rawLine.Trim()
         if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) {
             continue
@@ -96,6 +96,83 @@ function Read-EnvSettings {
     }
 
     return $settings
+}
+
+function ConvertTo-AbsolutePath {
+    param(
+        [AllowNull()]
+        [string]$PathValue
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return $null
+    }
+
+    if ([System.IO.Path]::IsPathRooted($PathValue)) {
+        return [System.IO.Path]::GetFullPath($PathValue)
+    }
+
+    return [System.IO.Path]::GetFullPath((Join-Path $projectRoot $PathValue))
+}
+
+function Get-RedisServerPathCandidates {
+    param(
+        [AllowNull()]
+        [string]$ConfiguredPath
+    )
+
+    $candidates = New-Object "System.Collections.Generic.List[string]"
+    $bundledRedisRoot = Join-Path $projectRoot "redis"
+
+    if (-not [string]::IsNullOrWhiteSpace($ConfiguredPath)) {
+        [void]$candidates.Add($ConfiguredPath)
+    }
+
+    [void]$candidates.Add((Join-Path $projectRoot "redis-server.exe"))
+    [void]$candidates.Add((Join-Path $bundledRedisRoot "redis-server.exe"))
+
+    if (Test-Path -LiteralPath $bundledRedisRoot) {
+        foreach ($directory in Get-ChildItem -LiteralPath $bundledRedisRoot -Directory -ErrorAction SilentlyContinue) {
+            [void]$candidates.Add((Join-Path $directory.FullName "redis-server.exe"))
+        }
+    }
+
+    foreach ($candidate in @(
+        "C:\Redis\redis-server.exe",
+        "C:\Program Files\Redis\redis-server.exe",
+        "C:\Program Files\Memurai\redis-server.exe"
+    )) {
+        [void]$candidates.Add($candidate)
+    }
+
+    foreach ($commandName in @("redis-server.exe", "redis-server")) {
+        $command = Get-Command $commandName -ErrorAction SilentlyContinue
+        if ($command -and $command.Path) {
+            [void]$candidates.Add([string]$command.Path)
+        }
+    }
+
+    return $candidates
+}
+
+function Resolve-RedisServerPath {
+    param(
+        [AllowNull()]
+        [string]$ConfiguredPath
+    )
+
+    foreach ($candidate in Get-RedisServerPathCandidates -ConfiguredPath $ConfiguredPath) {
+        try {
+            $absoluteCandidate = ConvertTo-AbsolutePath -PathValue $candidate
+            if (-not [string]::IsNullOrWhiteSpace($absoluteCandidate) -and (Test-Path -LiteralPath $absoluteCandidate)) {
+                return $absoluteCandidate
+            }
+        } catch {
+            continue
+        }
+    }
+
+    return $null
 }
 
 function Get-RedisStartupConfig {
@@ -121,13 +198,14 @@ function Get-RedisStartupConfig {
         }
     }
 
-    $serverPath = $null
+    $configuredServerPath = $null
     if ($settings.ContainsKey("ARBI_REDIS_SERVER_PATH")) {
         $rawPath = [string]$settings["ARBI_REDIS_SERVER_PATH"]
         if (-not [string]::IsNullOrWhiteSpace($rawPath)) {
-            $serverPath = [System.IO.Path]::GetFullPath($rawPath)
+            $configuredServerPath = ConvertTo-AbsolutePath -PathValue $rawPath
         }
     }
+    $serverPath = Resolve-RedisServerPath -ConfiguredPath $configuredServerPath
 
     return @{
         Needed = $redisNeeded
@@ -135,6 +213,7 @@ function Get-RedisStartupConfig {
         SessionEnabled = $sessionEnabled
         Host = $redisHost
         Port = $port
+        ConfiguredServerPath = $configuredServerPath
         ServerPath = $serverPath
     }
 }
@@ -178,20 +257,27 @@ function Start-RedisIfNeeded {
     }
 
     if ([string]::IsNullOrWhiteSpace([string]$redisConfig.ServerPath)) {
-        throw "Redis is required, but ARBI_REDIS_SERVER_PATH is not configured."
-    }
-
-    if (-not (Test-Path -LiteralPath $redisConfig.ServerPath)) {
-        throw ("Redis is required, but redis-server.exe was not found: " + $redisConfig.ServerPath)
+        if ([string]::IsNullOrWhiteSpace([string]$redisConfig.ConfiguredServerPath)) {
+            Write-Host "[WARN] Redis is enabled, but no local redis-server.exe was found."
+        } else {
+            Write-Host ("[WARN] Redis is enabled, but redis-server.exe was not found at the configured path: " + $redisConfig.ConfiguredServerPath)
+        }
+        Write-Host "[WARN] Continuing startup without Redis bootstrap. The web app will still start, and Redis-backed cache features will remain degraded until Redis is available."
+        return
     }
 
     Write-Host ("[INFO] Redis is not listening on {0}:{1}. Starting local redis-server.exe..." -f $redisConfig.Host, $redisConfig.Port)
-    Start-Process -FilePath $redisConfig.ServerPath -WorkingDirectory (Split-Path -Parent $redisConfig.ServerPath) -WindowStyle Hidden -ArgumentList @(
-        "--bind", $redisConfig.Host,
-        "--port", [string]$redisConfig.Port,
-        "--save", "",
-        "--appendonly", "no"
-    ) | Out-Null
+    try {
+        Start-Process -FilePath $redisConfig.ServerPath -WorkingDirectory (Split-Path -Parent $redisConfig.ServerPath) -WindowStyle Hidden -ArgumentList @(
+            "--bind", $redisConfig.Host,
+            "--port", [string]$redisConfig.Port,
+            "--appendonly", "no"
+        ) | Out-Null
+    } catch {
+        Write-Host ("[WARN] Failed to start redis-server.exe: " + $_.Exception.Message)
+        Write-Host "[WARN] Continuing startup without Redis bootstrap. The web app will still start, and Redis-backed cache features will remain degraded until Redis is available."
+        return
+    }
 
     for ($i = 0; $i -lt 10; $i++) {
         Start-Sleep -Milliseconds 500
@@ -201,7 +287,8 @@ function Start-RedisIfNeeded {
         }
     }
 
-    throw ("Redis start command was executed, but {0}:{1} is still unavailable." -f $redisConfig.Host, $redisConfig.Port)
+    Write-Host ("[WARN] Redis start command was executed, but {0}:{1} is still unavailable." -f $redisConfig.Host, $redisConfig.Port)
+    Write-Host "[WARN] Continuing startup without Redis bootstrap. The web app will still start, and Redis-backed cache features will remain degraded until Redis is available."
 }
 
 function Get-ListenerPids {

@@ -16,8 +16,11 @@ logger = logging.getLogger(__name__)
 
 SOCKET_PROBE_TIMEOUT_SECONDS = 0.5
 STARTUP_WAIT_SECONDS = 10.0
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 WINDOWS_REDIS_CANDIDATES = (
+    PROJECT_ROOT / "redis-server.exe",
     Path.cwd() / "redis-server.exe",
+    PROJECT_ROOT / "redis" / "redis-server.exe",
     Path("C:/Redis/redis-server.exe"),
     Path("C:/Program Files/Redis/redis-server.exe"),
     Path("C:/Program Files/Memurai/redis-server.exe"),
@@ -100,8 +103,6 @@ class RedisServerControlService:
                 "127.0.0.1",
                 "--port",
                 str(redis_config.port),
-                "--save",
-                "",
                 "--appendonly",
                 "no",
             ],
@@ -120,6 +121,12 @@ class RedisServerControlService:
         for candidate in WINDOWS_REDIS_CANDIDATES:
             if candidate.exists():
                 return candidate
+
+        bundled_root = PROJECT_ROOT / "redis"
+        if bundled_root.exists():
+            for candidate in bundled_root.glob("*/redis-server.exe"):
+                if candidate.exists():
+                    return candidate
 
         which_result = shutil.which("redis-server.exe") or shutil.which("redis-server")
         if which_result:

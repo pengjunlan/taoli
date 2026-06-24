@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 from collections import defaultdict, deque
-from dataclasses import dataclass
 from datetime import datetime
 import json
 import logging
@@ -19,60 +18,27 @@ import aiohttp
 from aiohttp.resolver import ThreadedResolver
 import ccxt
 
+from app.application.services.market_data_monitor_models import (
+    BackfillTaskSpec,
+    BackfillTaskState,
+    ExchangeWsTarget,
+    WatchTarget,
+)
+from app.application.services.market_data_monitor_support import (
+    build_backfill_task_specs,
+    chunk_symbols,
+    collect_backfill_targets,
+    collect_watch_targets,
+    sort_symbols_by_backfill_priority,
+    summarize_watch_targets,
+)
 from app.application.services.market_sync_service import market_sync_service
 from app.application.services.monitor_center_service import monitor_center_service
-from app.application.services.swap_market_rules import is_u_margin_linear_swap_market
 from app.domain.entities.monitor_models import MarketOpportunity, ServiceHeartbeat
 from app.infrastructure.cache import FundingRateCacheItem, TickerCacheItem, market_runtime_cache
-from app.infrastructure.persistence.market_repository import market_repository
 
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class WatchTarget:
-    exchange_code: str
-    market_type: str
-    symbol: str
-
-
-@dataclass(frozen=True)
-class ExchangeWsTarget:
-    exchange_code: str
-    market_type: str
-    symbol: str
-    ws_symbol: str
-
-
-@dataclass(frozen=True)
-class BackfillTaskSpec:
-    task_key: str
-    exchange_code: str
-    market_type: str
-    task_type: str
-    symbols: Tuple[str, ...]
-    chunk_index: int = 1
-    chunk_total: int = 1
-
-
-@dataclass
-class BackfillTaskState:
-    task_key: str
-    exchange_code: str
-    market_type: str
-    task_type: str
-    symbol_count: int = 0
-    is_running: bool = False
-    last_started_at: datetime | None = None
-    last_finished_at: datetime | None = None
-    last_success_at: datetime | None = None
-    last_error_at: datetime | None = None
-    last_duration_ms: int = 0
-    last_success_count: int = 0
-    last_missing_count: int = 0
-    last_error_message: str = ""
-    last_round_id: int = 0
 
 
 class MarketDataMonitorService:
@@ -88,6 +54,8 @@ class MarketDataMonitorService:
         self._backfill_schedule_interval_seconds = 15
         self._backfill_heartbeat_interval_seconds = 3
         self._backfill_request_timeout_seconds = 8
+        self._ticker_batch_size = 120
+        self._funding_batch_size = 80
         self._backfill_ticker_chunk_size = 120
         self._backfill_funding_chunk_size = 80
         self._backfill_bitget_ticker_chunk_size = 40
@@ -291,93 +259,16 @@ class MarketDataMonitorService:
 
     def _collect_watch_targets(self) -> List[WatchTarget]:
         enabled_exchange_codes = sorted(set(market_sync_service.list_supported_exchange_codes()))
-        if not enabled_exchange_codes:
-            return []
-
-        watch_targets: Dict[Tuple[str, str, str], WatchTarget] = {}
-        market_rows = market_repository.list_active_markets(
-            exchange_codes=enabled_exchange_codes,
-            market_type="swap",
-        )
-        synced_exchange_codes = set()
-        for row in market_rows:
-            exchange_code = str(row.get("exchange_code") or "")
-            market_type = str(row.get("market_type") or "")
-            symbol = str(row.get("symbol") or "")
-            if not exchange_code or market_type != "swap" or not symbol:
-                continue
-            if not is_u_margin_linear_swap_market(row):
-                continue
-            if not bool(row.get("supports_ws", True)):
-                continue
-            synced_exchange_codes.add(exchange_code)
-            watch_targets[(exchange_code, market_type, symbol)] = WatchTarget(
-                exchange_code=exchange_code,
-                market_type=market_type,
-                symbol=symbol,
-            )
-
+        watch_targets, synced_exchange_codes = collect_watch_targets(enabled_exchange_codes)
         self._emit_missing_market_notice(
             enabled_exchange_codes=enabled_exchange_codes,
             synced_exchange_codes=synced_exchange_codes,
         )
-
-        return sorted(
-            watch_targets.values(),
-            key=lambda item: (item.exchange_code, item.market_type, item.symbol),
-        )
+        return watch_targets
 
     def _collect_backfill_targets(self) -> List[WatchTarget]:
         enabled_exchange_codes = sorted(set(market_sync_service.list_supported_exchange_codes()))
-        if not enabled_exchange_codes:
-            return []
-
-        backfill_targets: Dict[Tuple[str, str, str], WatchTarget] = {}
-        for row in market_repository.list_active_pairs():
-            legs = (
-                (
-                    str(row.get("left_exchange_code") or "").strip(),
-                    str(row.get("left_market_type") or "").strip(),
-                    str(row.get("left_symbol") or "").strip(),
-                ),
-                (
-                    str(row.get("right_exchange_code") or "").strip(),
-                    str(row.get("right_market_type") or "").strip(),
-                    str(row.get("right_symbol") or "").strip(),
-                ),
-            )
-            for exchange_code, market_type, symbol in legs:
-                if exchange_code not in enabled_exchange_codes or market_type != "swap" or not symbol:
-                    continue
-                backfill_targets[(exchange_code, market_type, symbol)] = WatchTarget(
-                    exchange_code=exchange_code,
-                    market_type=market_type,
-                    symbol=symbol,
-                )
-
-        if not backfill_targets:
-            market_rows = market_repository.list_active_markets(
-                exchange_codes=enabled_exchange_codes,
-                market_type="swap",
-            )
-            for row in market_rows:
-                exchange_code = str(row.get("exchange_code") or "")
-                market_type = str(row.get("market_type") or "")
-                symbol = str(row.get("symbol") or "")
-                if not exchange_code or market_type != "swap" or not symbol:
-                    continue
-                if not is_u_margin_linear_swap_market(row):
-                    continue
-                backfill_targets[(exchange_code, market_type, symbol)] = WatchTarget(
-                    exchange_code=exchange_code,
-                    market_type=market_type,
-                    symbol=symbol,
-                )
-
-        return sorted(
-            backfill_targets.values(),
-            key=lambda item: (item.exchange_code, item.market_type, item.symbol),
-        )
+        return collect_backfill_targets(enabled_exchange_codes)
 
     def _emit_runtime_mode_notice_once(self, watch_targets: List[WatchTarget]) -> None:
         if self._runtime_mode_notice_emitted:
@@ -414,10 +305,7 @@ class MarketDataMonitorService:
         )
 
     def _emit_watch_target_summary(self, watch_targets: List[WatchTarget]) -> None:
-        summary: Dict[str, int] = defaultdict(int)
-        for item in watch_targets:
-            summary[item.exchange_code] += 1
-        signature = tuple(sorted(summary.items()))
+        signature = summarize_watch_targets(watch_targets)
         if signature == self._last_watch_target_summary_signature:
             return
         self._last_watch_target_summary_signature = signature
@@ -1184,9 +1072,7 @@ class MarketDataMonitorService:
         return refreshed_count
 
     def _chunk_symbols(self, symbols: List[str], chunk_size: int) -> List[List[str]]:
-        if chunk_size <= 0:
-            return [list(symbols)]
-        return [symbols[index:index + chunk_size] for index in range(0, len(symbols), chunk_size)]
+        return chunk_symbols(symbols, chunk_size)
 
     def _fetch_public_tickers(
         self,
@@ -1945,66 +1831,13 @@ class MarketDataMonitorService:
         )
 
     def _build_backfill_task_specs(self, targets: List[WatchTarget]) -> List[BackfillTaskSpec]:
-        ticker_groups: Dict[tuple[str, str], List[str]] = {}
-        funding_groups: Dict[str, List[str]] = {}
-
-        for item in targets:
-            ticker_groups.setdefault((item.exchange_code, item.market_type), []).append(str(item.symbol))
-            if item.market_type == "swap":
-                funding_groups.setdefault(item.exchange_code, []).append(str(item.symbol))
-
-        specs: List[BackfillTaskSpec] = []
-        if self._enable_http_ticker_backfill:
-            for (exchange_code, market_type), symbols in sorted(ticker_groups.items()):
-                ordered_symbols = self._sort_symbols_by_backfill_priority(
-                    exchange_code=exchange_code,
-                    market_type=market_type,
-                    task_type="ticker",
-                    symbols=symbols,
-                )
-                chunk_size = self._resolve_backfill_chunk_size(
-                    exchange_code=exchange_code,
-                    task_type="ticker",
-                )
-                chunks = self._chunk_symbols(ordered_symbols, chunk_size)
-                for chunk_index, symbol_chunk in enumerate(chunks, start=1):
-                    specs.append(
-                        BackfillTaskSpec(
-                            task_key=f"{exchange_code}:{market_type}:ticker:{chunk_index}",
-                            exchange_code=exchange_code,
-                            market_type=market_type,
-                            task_type="ticker",
-                            symbols=tuple(symbol_chunk),
-                            chunk_index=chunk_index,
-                            chunk_total=len(chunks),
-                        )
-                    )
-        if self._enable_http_funding_backfill:
-            for exchange_code, symbols in sorted(funding_groups.items()):
-                ordered_symbols = self._sort_symbols_by_backfill_priority(
-                    exchange_code=exchange_code,
-                    market_type="swap",
-                    task_type="funding",
-                    symbols=symbols,
-                )
-                chunk_size = self._resolve_backfill_chunk_size(
-                    exchange_code=exchange_code,
-                    task_type="funding",
-                )
-                chunks = self._chunk_symbols(ordered_symbols, chunk_size)
-                for chunk_index, symbol_chunk in enumerate(chunks, start=1):
-                    specs.append(
-                        BackfillTaskSpec(
-                            task_key=f"{exchange_code}:swap:funding:{chunk_index}",
-                            exchange_code=exchange_code,
-                            market_type="swap",
-                            task_type="funding",
-                            symbols=tuple(symbol_chunk),
-                            chunk_index=chunk_index,
-                            chunk_total=len(chunks),
-                        )
-                    )
-        return specs
+        return build_backfill_task_specs(
+            targets,
+            enable_http_ticker_backfill=self._enable_http_ticker_backfill,
+            enable_http_funding_backfill=self._enable_http_funding_backfill,
+            ticker_chunk_size_resolver=self._resolve_backfill_chunk_size,
+            symbol_priority_sorter=self._sort_symbols_by_backfill_priority,
+        )
 
     def _run_backfill_task(self, spec: BackfillTaskSpec) -> Dict[str, int | str]:
         started_monotonic = time.monotonic()
@@ -2049,27 +1882,12 @@ class MarketDataMonitorService:
         task_type: str,
         symbols: Iterable[str],
     ) -> List[str]:
-        unique_symbols = sorted({str(item).strip() for item in symbols if str(item).strip()})
-        if not unique_symbols:
-            return []
-
-        def sort_key(symbol: str) -> tuple[int, float, str]:
-            if task_type == "ticker":
-                item = market_runtime_cache.get_ticker(exchange_code, market_type, symbol)
-                if item is None or item.synced_at is None:
-                    return (0, 0.0, symbol)
-                if float(item.last_price or 0) <= 0 or float(item.bid_price or 0) <= 0 or float(item.ask_price or 0) <= 0:
-                    return (1, item.synced_at.timestamp(), symbol)
-                return (2, item.synced_at.timestamp(), symbol)
-
-            item = market_runtime_cache.get_funding_rate(exchange_code, symbol)
-            if item is None or item.synced_at is None:
-                return (0, 0.0, symbol)
-            if float(item.funding_rate_percent or 0) == 0 and item.next_funding_at is None:
-                return (1, item.synced_at.timestamp(), symbol)
-            return (2, item.synced_at.timestamp(), symbol)
-
-        return sorted(unique_symbols, key=sort_key)
+        return sort_symbols_by_backfill_priority(
+            exchange_code=exchange_code,
+            market_type=market_type,
+            task_type=task_type,
+            symbols=symbols,
+        )
 
     def _collect_completed_backfill_tasks(self) -> None:
         completed: List[tuple[str, concurrent.futures.Future]] = []

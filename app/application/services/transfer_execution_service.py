@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_DOWN
 import json
 import logging
 import time
@@ -20,8 +19,6 @@ from app.application.services.account_support import (
     TRANSFER_CHECKPOINT_SOURCE_INTERNAL_PREPARED,
     TRANSFER_CHECKPOINT_TARGET_CREDIT_CONFIRMED,
     TRANSFER_CHECKPOINT_TARGET_INTERNAL_TRANSFERRED,
-    TRANSFER_EXECUTION_SNAPSHOT_CONTEXT_FIELDS,
-    TRANSFER_EXECUTION_SNAPSHOT_PAYLOAD_KEY,
     TRANSFER_CHECKPOINT_WITHDRAW_SUBMITTED,
 )
 from app.application.services.exchange_connection_service import exchange_connection_service
@@ -30,7 +27,9 @@ from app.application.services.exchange_transfer_adapters import (
     ExchangeTransferAdapter,
     exchange_transfer_registry,
 )
-from app.infrastructure.persistence.account_repository import account_repository
+from app.application.services.transfer_execution_amount_support import TransferExecutionAmountSupportMixin
+from app.application.services.transfer_execution_checkpoint_support import TransferExecutionCheckpointSupportMixin
+from app.application.services.transfer_execution_failure_support import TransferExecutionFailureSupportMixin
 from app.shared.exceptions import ExchangeConnectionError, ExchangeError, ExchangeValidationError
 
 
@@ -46,6 +45,8 @@ CHECKPOINT_AWAITING_TARGET_CREDIT = TRANSFER_CHECKPOINT_AWAITING_TARGET_CREDIT
 CHECKPOINT_TARGET_CREDIT_CONFIRMED = TRANSFER_CHECKPOINT_TARGET_CREDIT_CONFIRMED
 CHECKPOINT_AWAITING_TARGET_INTERNAL_TRANSFER = TRANSFER_CHECKPOINT_AWAITING_TARGET_INTERNAL_TRANSFER
 CHECKPOINT_TARGET_INTERNAL_TRANSFERRED = TRANSFER_CHECKPOINT_TARGET_INTERNAL_TRANSFERRED
+
+
 @dataclass(frozen=True)
 class TransferExecutionOutcome:
     status: str
@@ -65,93 +66,11 @@ class TargetCreditSnapshot:
     credited_amount: float
 
 
-class TransferExecutionService:
-    AUTO_TRANSFER_FAILURE_META = {
-        "permission_denied": {
-            "label": "权限不足",
-            "freeze_worthy": True,
-            "responsible_side": "from",
-        },
-        "api_auth_failed": {
-            "label": "API 认证失败",
-            "freeze_worthy": True,
-            "responsible_side": "from",
-        },
-        "ip_whitelist_blocked": {
-            "label": "IP 白名单限制",
-            "freeze_worthy": True,
-            "responsible_side": "from",
-        },
-        "withdraw_disabled": {
-            "label": "提现权限异常",
-            "freeze_worthy": True,
-            "responsible_side": "from",
-        },
-        "address_invalid": {
-            "label": "接收地址或 UID 异常",
-            "freeze_worthy": True,
-            "responsible_side": "to",
-        },
-        "network_invalid": {
-            "label": "网络或 Memo 配置异常",
-            "freeze_worthy": True,
-            "responsible_side": "to",
-        },
-        "deposit_info_invalid": {
-            "label": "充值信息异常",
-            "freeze_worthy": True,
-            "responsible_side": "to",
-        },
-        "account_mapping_invalid": {
-            "label": "账户类型映射异常",
-            "freeze_worthy": True,
-            "responsible_side": "from",
-        },
-        "route_unsupported": {
-            "label": "调拨路径不支持",
-            "freeze_worthy": False,
-            "responsible_side": "from",
-        },
-        "temporary_network": {
-            "label": "网络临时异常",
-            "freeze_worthy": False,
-            "responsible_side": "from",
-        },
-        "temporary_exchange": {
-            "label": "交易所临时异常",
-            "freeze_worthy": False,
-            "responsible_side": "from",
-        },
-        "unknown": {
-            "label": "未知异常",
-            "freeze_worthy": False,
-            "responsible_side": "from",
-        },
-    }
-
-    USER_ACCOUNT_FAILURE_HINTS = (
-        "api key",
-        "api secret",
-        "passphrase",
-        "签名",
-        "密钥",
-        "权限",
-        "白名单",
-        "ip",
-        "restricted ip",
-        "地址",
-        "uid",
-        "网络",
-        "账户类型",
-        "账户映射",
-        "提现",
-        "充值",
-        "未配置",
-        "不支持",
-        "unsupported",
-        "停用",
-    )
-
+class TransferExecutionService(
+    TransferExecutionFailureSupportMixin,
+    TransferExecutionCheckpointSupportMixin,
+    TransferExecutionAmountSupportMixin,
+):
     def execute(self, context: Dict[str, Any]) -> TransferExecutionOutcome:
         try:
             self._apply_execution_snapshot(context)
@@ -268,9 +187,19 @@ class TransferExecutionService:
         withdraw_network_code = source_adapter.resolve_withdraw_network_code(to_network)
         withdraw_fee = 0.0
         withdraw_reference = str(context.get("execution_reference") or "").strip()
+        prepared_withdraw_amount = 0.0
+        source_funds_prepared = (
+            checkpoint == CHECKPOINT_SOURCE_INTERNAL_PREPARED and current_source_account != source_withdraw_account
+        )
+
+        self._serialize_execution_payload_meta(
+            context,
+            requires_target_account_alignment=requires_target_account_alignment,
+        )
 
         try:
             if checkpoint not in {
+                CHECKPOINT_SOURCE_INTERNAL_PREPARED,
                 CHECKPOINT_WITHDRAW_SUBMITTED,
                 CHECKPOINT_AWAITING_TARGET_CREDIT,
                 CHECKPOINT_TARGET_CREDIT_CONFIRMED,
@@ -283,6 +212,7 @@ class TransferExecutionService:
                     network_code=withdraw_network_code,
                 )
                 transfer_amount_to_withdraw_account = amount + withdraw_fee
+                prepared_withdraw_amount = transfer_amount_to_withdraw_account
                 if current_source_account != source_withdraw_account:
                     source_client.transfer(
                         TRANSFER_ASSET_CODE,
@@ -291,6 +221,7 @@ class TransferExecutionService:
                         source_withdraw_account,
                     )
                     moved_to_withdraw_account = True
+                    source_funds_prepared = True
                 self._store_execution_checkpoint(
                     context,
                     execution_checkpoint=CHECKPOINT_SOURCE_INTERNAL_PREPARED,
@@ -301,6 +232,8 @@ class TransferExecutionService:
                     adapter=source_adapter,
                     network_code=withdraw_network_code,
                 )
+                if current_source_account != source_withdraw_account:
+                    prepared_withdraw_amount = amount + withdraw_fee
 
             destination = self._resolve_destination_address(
                 adapter=target_adapter,
@@ -333,7 +266,7 @@ class TransferExecutionService:
                 withdraw_reference = self._extract_transfer_reference(withdraw)
                 self._store_withdraw_submission(context, withdraw, withdraw_reference)
 
-            if requires_target_account_alignment and checkpoint not in {
+            if checkpoint not in {
                 CHECKPOINT_TARGET_CREDIT_CONFIRMED,
                 CHECKPOINT_AWAITING_TARGET_INTERNAL_TRANSFER,
                 CHECKPOINT_TARGET_INTERNAL_TRANSFERRED,
@@ -372,6 +305,17 @@ class TransferExecutionService:
                         target_credit_available_amount=target_credit_snapshot.available_amount,
                         target_credit_amount=target_credit_snapshot.credited_amount,
                     ) or "",
+                )
+
+            if not requires_target_account_alignment:
+                return TransferExecutionOutcome(
+                    status="success",
+                    result=f"跨交易所调拨已到账，出金记录号 {withdraw_reference}。",
+                    execute_status="processed",
+                    result_status="success",
+                    execution_checkpoint=CHECKPOINT_TARGET_CREDIT_CONFIRMED,
+                    execution_reference=withdraw_reference,
+                    execution_payload=self._serialize_execution_payload_meta(context) or None,
                 )
 
             if requires_target_account_alignment and checkpoint != CHECKPOINT_TARGET_INTERNAL_TRANSFERRED:
@@ -450,13 +394,13 @@ class TransferExecutionService:
             raise
         except Exception as exc:
             rollback_result = None
-            if moved_to_withdraw_account and not self._withdraw_submitted(context):
+            if source_funds_prepared and not self._withdraw_submitted(context):
                 rollback_result = self._rollback_source_internal_transfer(
                     source_client=source_client,
                     exchange_code=from_exchange,
                     current_source_account=current_source_account,
                     source_withdraw_account=source_withdraw_account,
-                    amount=amount,
+                    amount=prepared_withdraw_amount or amount,
                 )
                 if rollback_result["rolled_back"]:
                     raise ExchangeConnectionError(
@@ -696,114 +640,6 @@ class TransferExecutionService:
             raise ExchangeValidationError(f"{exchange_code.upper()} 账户类型不支持: {market_type}")
         return account_type
 
-    def _store_execution_checkpoint(
-        self,
-        context: Dict[str, Any],
-        *,
-        execution_checkpoint: str,
-        execution_reference: str = "",
-        execution_payload: str = "",
-    ) -> None:
-        context["execution_checkpoint"] = execution_checkpoint
-        if execution_reference:
-            context["execution_reference"] = execution_reference
-        if execution_payload:
-            context["execution_payload"] = execution_payload
-        record_id = int(context.get("id") or 0)
-        if record_id > 0:
-            account_repository.update_transfer_record_execution_checkpoint(
-                record_id,
-                execution_checkpoint=execution_checkpoint,
-                execution_reference=str(context.get("execution_reference") or execution_reference),
-                execution_payload=str(context.get("execution_payload") or execution_payload),
-            )
-
-    def _apply_execution_snapshot(self, context: Dict[str, Any]) -> None:
-        payload = self._read_execution_payload_meta(context)
-        snapshot = payload.get(TRANSFER_EXECUTION_SNAPSHOT_PAYLOAD_KEY)
-        if not isinstance(snapshot, dict):
-            return
-        for field in TRANSFER_EXECUTION_SNAPSHOT_CONTEXT_FIELDS:
-            value = snapshot.get(field)
-            if value is None:
-                continue
-            context[field] = str(value).strip() if isinstance(value, str) else value
-
-    def _serialize_execution_payload_meta(
-        self,
-        context: Dict[str, Any],
-        *,
-        target_credit_balance_before: float | None = None,
-        target_credit_available_amount: float | None = None,
-        target_credit_amount: float | None = None,
-        target_internal_transfer_amount: float | None = None,
-    ) -> str:
-        payload = self._read_execution_payload_meta(context)
-        if target_credit_balance_before is not None:
-            payload["_target_credit_balance_before"] = float(target_credit_balance_before)
-        if target_credit_available_amount is not None:
-            payload["_target_credit_available_amount"] = float(target_credit_available_amount)
-        if target_credit_amount is not None:
-            payload["_target_credit_amount"] = float(target_credit_amount)
-        if target_internal_transfer_amount is not None:
-            payload["_target_internal_transfer_amount"] = float(target_internal_transfer_amount)
-        text = json.dumps(payload, ensure_ascii=False, default=str) if payload else ""
-        if text:
-            context["execution_payload"] = text
-        return text
-
-    def _read_execution_payload_meta(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {}
-        raw_payload = context.get("_withdraw_payload") or context.get("execution_payload") or ""
-        if not raw_payload:
-            return payload
-        try:
-            parsed = json.loads(str(raw_payload))
-        except Exception:
-            return {"raw": str(raw_payload)}
-        if isinstance(parsed, dict):
-            payload.update(parsed)
-        return payload
-
-    def _read_target_credit_balance_before(self, context: Dict[str, Any]) -> float | None:
-        value = self._read_execution_payload_meta(context).get("_target_credit_balance_before")
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
-    def _read_target_credit_amount(self, context: Dict[str, Any]) -> float | None:
-        value = self._read_execution_payload_meta(context).get("_target_credit_amount")
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
-    def _read_target_internal_transfer_amount(self, context: Dict[str, Any]) -> float | None:
-        value = self._read_execution_payload_meta(context).get("_target_internal_transfer_amount")
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
-    def _resolve_target_internal_transfer_amount(
-        self,
-        *,
-        requested_amount: float,
-        current_available_amount: float,
-        credited_amount: float | None = None,
-        planned_amount: float | None = None,
-    ) -> float:
-        candidate_amounts = [
-            max(float(requested_amount or 0), 0.0),
-            max(float(current_available_amount or 0), 0.0),
-        ]
-        if credited_amount is not None:
-            candidate_amounts.append(max(float(credited_amount or 0), 0.0))
-        if planned_amount is not None:
-            candidate_amounts.append(max(float(planned_amount or 0), 0.0))
-        return self._quantize_transfer_amount(min(candidate_amounts)) if candidate_amounts else 0.0
-
     def _execute_target_internal_transfer(
         self,
         *,
@@ -873,97 +709,5 @@ class TransferExecutionService:
                 "可划转",
             )
         )
-
-    def _quantize_transfer_amount(self, amount: float, precision: int = 8) -> float:
-        normalized = max(float(amount or 0), 0.0)
-        if normalized <= 0:
-            return 0.0
-        quantizer = Decimal("1").scaleb(-precision)
-        quantized = Decimal(str(normalized)).quantize(quantizer, rounding=ROUND_DOWN)
-        return float(quantized) if quantized > 0 else 0.0
-
-    def _extract_transfer_reference(self, response: Dict[str, Any] | None) -> str:
-        if not isinstance(response, dict):
-            return "--"
-        for key in ("id", "txid", "txId", "wdId", "transId", "tranId"):
-            value = response.get(key)
-            if value:
-                return str(value)
-        info = response.get("info")
-        if isinstance(info, dict):
-            for key in ("id", "txId", "wdId", "transId", "tranId"):
-                value = info.get(key)
-                if value:
-                    return str(value)
-        return "--"
-
-    def is_user_account_failure(self, error: Exception) -> bool:
-        if isinstance(error, ExchangeValidationError):
-            return True
-        if not isinstance(error, ExchangeConnectionError):
-            return False
-
-        message = str(error or "").strip().lower()
-        return any(hint in message for hint in self.USER_ACCOUNT_FAILURE_HINTS)
-
-    def classify_auto_transfer_failure(self, context: Dict[str, Any], error: Exception) -> Dict[str, Any]:
-        category = self._normalize_failure_category(error)
-        meta = self.AUTO_TRANSFER_FAILURE_META.get(category, self.AUTO_TRANSFER_FAILURE_META["unknown"])
-        responsible_side = str(meta.get("responsible_side") or "from").strip().lower()
-        account_id = int(context.get(f"{responsible_side}_account_id") or context.get(f"{responsible_side}_id") or 0)
-        account_name = str(context.get(f"{responsible_side}_account_name") or "").strip()
-        exchange_code = str(context.get(f"{responsible_side}_exchange_code") or "").strip().lower()
-        return {
-            "category": category,
-            "label": str(meta.get("label") or "未知异常"),
-            "freeze_worthy": bool(meta.get("freeze_worthy")),
-            "responsible_side": responsible_side,
-            "account_id": account_id,
-            "account_name": account_name,
-            "exchange_code": exchange_code,
-            "raw_message": str(error or "").strip(),
-        }
-
-    def _normalize_failure_category(self, error: Exception) -> str:
-        message = str(error or "").strip().lower()
-        if not message:
-            return "unknown"
-
-        if any(token in message for token in ("not authorized", "permission denied", "权限不足", "无权限")):
-            return "permission_denied"
-        if any(token in message for token in ("api key", "api secret", "signature", "sign", "authentication", "passphrase", "invalid key", "invalid api", "签名", "密钥")):
-            return "api_auth_failed"
-        if any(token in message for token in ("restricted ip", "ip whitelist", "whitelist", "白名单", "invalid ip")):
-            return "ip_whitelist_blocked"
-        if any(
-            token in message
-            for token in ("timeout", "timed out", "超时", "network error", "connection reset", "econnreset")
-        ):
-            return "temporary_network"
-        if any(token in message for token in ("暂不支持", "not supported", "unsupported", "不支持")):
-            return "route_unsupported"
-        if any(token in message for token in ("账户类型", "account type", "映射", "mapping")):
-            return "account_mapping_invalid"
-        if any(
-            token in message
-            for token in ("withdraw disabled", "withdrawal disabled", "withdraw not allowed", "withdraw is disabled", "提现关闭", "提现被禁用", "提现权限")
-        ):
-            return "withdraw_disabled"
-        if any(token in message for token in ("deposit address", "deposit info", "充值", "to account")):
-            return "deposit_info_invalid"
-        if any(
-            token in message
-            for token in ("memo", "tag", "invalid network", "network invalid", "未配置提现网络", "可提现网络", "网络配置", "链路", "网络")
-        ):
-            return "network_invalid"
-        if any(token in message for token in ("address", "uid", "地址")):
-            return "address_invalid"
-        if any(token in message for token in ("temporarily", "internal error", "system busy", "server error", "exchange error")):
-            return "temporary_exchange"
-        return "temporary_exchange"
-
-    def _translate_exchange_exception_message(self, error: Exception) -> str:
-        return str(error or "").strip() or "交易所返回了未知异常。"
-
 
 transfer_execution_service = TransferExecutionService()

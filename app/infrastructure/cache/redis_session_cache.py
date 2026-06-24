@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import socket
 import time
 from datetime import datetime
 from typing import Any, Dict, Optional
@@ -25,6 +26,7 @@ class RedisSessionCache:
         self._initialized = False
         self._last_connect_attempt_monotonic: float | None = None
         self._connect_retry_interval_seconds = 5.0
+        self._socket_probe_timeout_seconds = min(max(float(redis_config.socket_timeout), 0.1), 0.25)
 
     def initialize(self) -> None:
         if self._initialized:
@@ -46,6 +48,10 @@ class RedisSessionCache:
         ):
             return
         self._last_connect_attempt_monotonic = now
+        if not self._probe_socket():
+            self._client = None
+            self._available = False
+            return
         try:
             self._client = redis.Redis(
                 host=redis_config.host,
@@ -63,6 +69,16 @@ class RedisSessionCache:
             self._client = None
             self._available = False
             logger.warning("Redis session cache is unavailable: %s", exc)
+
+    def _probe_socket(self) -> bool:
+        try:
+            with socket.create_connection(
+                (redis_config.host, int(redis_config.port)),
+                timeout=self._socket_probe_timeout_seconds,
+            ):
+                return True
+        except OSError:
+            return False
 
     @property
     def is_available(self) -> bool:

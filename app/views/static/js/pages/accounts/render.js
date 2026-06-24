@@ -153,8 +153,8 @@ export function renderBalanceTableRows(rows) {
             ${guardBadge}
           </td>
           <td>${escapeHtml(row.market_type)}</td>
-          <td class="spread-metric spread-metric--strong">${escapeHtml(row.available)}</td>
-          <td class="spread-metric">${escapeHtml(row.current_balance || row.available)}</td>
+          <td class="spread-metric spread-metric--strong">${escapeHtml(row.available_precise || row.available)}</td>
+          <td class="spread-metric">${escapeHtml(row.current_balance_precise || row.current_balance || row.available_precise || row.available)}</td>
           <td class="spread-metric">${escapeHtml(row.allocation_ratio || "0%")}</td>
           <td class="spread-metric">${escapeHtml(row.target)}</td>
           <td class="spread-metric">${escapeHtml(row.auto_trigger_value || "$0")}</td>

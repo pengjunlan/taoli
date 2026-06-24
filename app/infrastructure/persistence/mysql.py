@@ -13,6 +13,8 @@ from mysql.connector import Error as MySQLError
 from mysql.connector.pooling import MySQLConnectionPool
 
 from app.config import mysql_config
+from app.infrastructure.persistence.mysql_bootstrap import ensure_database
+from app.infrastructure.persistence.mysql_pool import create_pool
 
 
 logger = logging.getLogger(__name__)
@@ -52,39 +54,13 @@ class MySQLConnectionManager:
                 self._initializing = False
 
     def _ensure_database(self) -> None:
-        connection = mysql.connector.connect(
-            host=mysql_config.host,
-            port=mysql_config.port,
-            user=mysql_config.user,
-            password=mysql_config.password,
-            connection_timeout=mysql_config.connection_timeout,
-        )
-        try:
-            cursor = connection.cursor()
-            cursor.execute(
-                f"CREATE DATABASE IF NOT EXISTS `{mysql_config.database}` "
-                f"CHARACTER SET {mysql_config.charset} COLLATE utf8mb4_unicode_ci"
-            )
-            connection.commit()
-        finally:
-            connection.close()
+        ensure_database()
 
     def _ensure_pool(self) -> None:
         if self._pool is not None:
             return
 
-        self._pool = MySQLConnectionPool(
-            pool_name=mysql_config.pool_name,
-            pool_size=mysql_config.pool_size,
-            host=mysql_config.host,
-            port=mysql_config.port,
-            user=mysql_config.user,
-            password=mysql_config.password,
-            database=mysql_config.database,
-            charset=mysql_config.charset,
-            autocommit=False,
-            connection_timeout=mysql_config.connection_timeout,
-        )
+        self._pool = create_pool()
 
     def _ensure_schema(self) -> None:
         connection = mysql.connector.connect(
