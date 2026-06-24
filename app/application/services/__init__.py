@@ -1,143 +1,46 @@
 """Business services used by controllers and use cases."""
 
-from app.application.services.account_service import AccountService, account_service
-from app.application.services.arbitrage_execution_monitor_service import (
-    ArbitrageExecutionMonitorService,
-    arbitrage_execution_monitor_service,
-)
-from app.application.services.arbitrage_execution_plan_service import (
-    ArbitrageExecutionPlanService,
-    arbitrage_execution_plan_service,
-)
-from app.application.services.arbitrage_execution_service import (
-    ArbitrageExecutionService,
-    arbitrage_execution_service,
-)
-from app.application.services.arbitrage_opportunity_monitor_service import (
-    ArbitrageOpportunityMonitorService,
-    arbitrage_opportunity_monitor_service,
-)
-from app.application.services.arbitrage_position_monitor_service import (
-    ArbitragePositionMonitorService,
-    arbitrage_position_monitor_service,
-)
-from app.application.services.arbitrage_runtime_support_service import (
-    ArbitrageRuntimeSupportService,
-    arbitrage_runtime_support_service,
-)
-from app.application.services.auto_transfer_monitor_service import (
-    AutoTransferMonitorService,
-    auto_transfer_monitor_service,
-)
-from app.application.services.auth_service import AuthService, auth_service
-from app.application.services.dashboard_service import DashboardService, dashboard_service
-from app.application.services.exchange_connection_service import (
-    ExchangeConnectionService,
-    exchange_connection_service,
-)
-from app.application.services.exchange_asset_network_service import (
-    ExchangeAssetNetworkService,
-    exchange_asset_network_service,
-)
-from app.application.services.local_position_service import LocalPositionService, local_position_service
-from app.application.services.monitor_center_service import (
-    MonitorCenterService,
-    monitor_center_service,
-)
-from app.application.services.market_sync_service import MarketSyncService, market_sync_service
-from app.application.services.opportunity_runtime_service import (
-    OpportunityRuntimeService,
-    opportunity_runtime_service,
-)
-from app.application.services.opportunity_user_overlay_service import (
-    OpportunityUserOverlayService,
-    opportunity_user_overlay_service,
-)
-from app.application.services.opportunity_snapshot_service import (
-    OpportunitySnapshotService,
-    opportunity_snapshot_service,
-)
-from app.application.services.redis_inspector_service import (
-    RedisInspectorService,
-    redis_inspector_service,
-)
-from app.application.services.opportunity_status_service import (
-    OpportunityStatusService,
-    opportunity_status_service,
-)
-from app.application.services.strategy_rule_service import StrategyRuleService, strategy_rule_service
-from app.application.services.strategy_rule_runtime_service import (
-    StrategyRuleRuntimeService,
-    strategy_rule_runtime_service,
-)
-from app.application.services.strategy_runtime_service import StrategyRuntimeService, strategy_runtime_service
-from app.application.services.system_exchange_config_service import (
-    SystemExchangeConfigService,
-    system_exchange_config_service,
-)
-from app.application.services.transfer_execution_monitor_service import (
-    TransferExecutionMonitorService,
-    transfer_execution_monitor_service,
-)
-from app.application.services.transfer_execution_service import (
-    TransferExecutionService,
-    transfer_execution_service,
-)
-from app.application.services.trade_decision_service import *  # noqa: F401,F403
-from app.application.services.market_data_monitor_service import *  # noqa: F401,F403
-from app.application.services.account_monitor_service import *  # noqa: F401,F403
+from __future__ import annotations
+
+from importlib import import_module
+
+from app.application.services import registry as _registry
+from app.application.services.registry import __all__ as _registry_exports
+
+
+_MODULE_EXPORT_MAP = {
+    "TradeDecisionService": "app.application.services.trade_decision_service",
+    "trade_decision_service": "app.application.services.trade_decision_service",
+    "MarketDataMonitorService": "app.application.services.market_data_monitor_service",
+    "market_data_monitor_service": "app.application.services.market_data_monitor_service",
+    "AccountMonitorService": "app.application.services.account_monitor_service",
+    "account_monitor_service": "app.application.services.account_monitor_service",
+}
 
 __all__ = [
-    "AccountService",
-    "account_service",
-    "ArbitrageExecutionMonitorService",
-    "arbitrage_execution_monitor_service",
-    "ArbitrageExecutionPlanService",
-    "arbitrage_execution_plan_service",
-    "ArbitrageExecutionService",
-    "arbitrage_execution_service",
-    "ArbitrageOpportunityMonitorService",
-    "arbitrage_opportunity_monitor_service",
-    "ArbitragePositionMonitorService",
-    "arbitrage_position_monitor_service",
-    "ArbitrageRuntimeSupportService",
-    "arbitrage_runtime_support_service",
-    "AutoTransferMonitorService",
-    "auto_transfer_monitor_service",
-    "AuthService",
-    "auth_service",
-    "DashboardService",
-    "dashboard_service",
-    "ExchangeConnectionService",
-    "exchange_connection_service",
-    "ExchangeAssetNetworkService",
-    "exchange_asset_network_service",
-    "LocalPositionService",
-    "local_position_service",
-    "MonitorCenterService",
-    "monitor_center_service",
-    "MarketSyncService",
-    "market_sync_service",
-    "OpportunityRuntimeService",
-    "opportunity_runtime_service",
-    "OpportunityUserOverlayService",
-    "opportunity_user_overlay_service",
-    "OpportunitySnapshotService",
-    "opportunity_snapshot_service",
-    "RedisInspectorService",
-    "redis_inspector_service",
-    "OpportunityStatusService",
-    "opportunity_status_service",
-    "StrategyRuleService",
-    "strategy_rule_service",
-    "StrategyRuleRuntimeService",
-    "strategy_rule_runtime_service",
-    "StrategyRuntimeService",
-    "strategy_runtime_service",
-    "SystemExchangeConfigService",
-    "system_exchange_config_service",
-    "TransferExecutionMonitorService",
-    "transfer_execution_monitor_service",
-    "TransferExecutionService",
-    "transfer_execution_service",
+    *_registry_exports,
+    "TradeDecisionService",
+    "trade_decision_service",
+    "MarketDataMonitorService",
+    "market_data_monitor_service",
+    "AccountMonitorService",
+    "account_monitor_service",
 ]
+
+
+# Re-export registry symbols eagerly so names like `auth_service` resolve to
+# the service singleton instead of the same-named submodule.
+for _name in _registry_exports:
+    globals()[_name] = getattr(_registry, _name)
+
+
+def __getattr__(name: str):
+    if name in _registry_exports:
+        return getattr(_registry, name)
+
+    module_name = _MODULE_EXPORT_MAP.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    module = import_module(module_name)
+    return getattr(module, name)
