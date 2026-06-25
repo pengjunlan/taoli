@@ -28,6 +28,15 @@
     white-space: nowrap;
 }
 
+.page-spread_arbitrage .data-table tbody tr.opportunity-row--open-candidate {
+    background: linear-gradient(90deg, rgba(25, 103, 210, 0.09), rgba(234, 242, 255, 0.34) 44%, rgba(255, 255, 255, 0));
+    box-shadow: inset 3px 0 0 rgba(25, 103, 210, 0.46);
+}
+
+.page-spread_arbitrage .data-table tbody tr.opportunity-row--open-candidate:hover {
+    background: linear-gradient(90deg, rgba(25, 103, 210, 0.12), rgba(234, 242, 255, 0.42) 44%, rgba(255, 255, 255, 0.02));
+}
+
 .page-spread_arbitrage .status-cell {
     display: grid;
     justify-items: center;

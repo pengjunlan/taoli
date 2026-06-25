@@ -9,6 +9,7 @@ from typing import Any, Dict
 from app.application.services.local_position_service import local_position_service
 from app.application.services.monitor_center_service import monitor_center_service
 from app.application.services.opportunity_exchange_filter_service import opportunity_exchange_filter_service
+from app.application.services.strategy_open_candidate_service import strategy_open_candidate_service
 from app.application.services.opportunity_user_overlay_service import opportunity_user_overlay_service
 from app.infrastructure.cache import market_runtime_cache, strategy_runtime_cache
 from app.infrastructure.persistence import opportunity_snapshot_repository
@@ -75,6 +76,11 @@ class OpportunityStatusService:
             end_index = start_index + safe_page_size
             page_rows = rows[start_index:end_index]
         page_rows = opportunity_user_overlay_service.enrich_display_rows(
+            user_id=user_id,
+            channel=channel,
+            rows=page_rows,
+        )
+        page_rows = strategy_open_candidate_service.enrich_rows(
             user_id=user_id,
             channel=channel,
             rows=page_rows,

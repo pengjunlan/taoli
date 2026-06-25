@@ -340,6 +340,31 @@ class ArbitrageExecutionRepositoryExecutionQueriesMixin:
             )
             return cursor.fetchone()
 
+    def get_latest_open_execution_by_user_pair_suffix(
+        self,
+        *,
+        user_id: int,
+        pair_suffix: str,
+    ) -> Dict[str, object] | None:
+        normalized_suffix = str(pair_suffix or "").strip()
+        if not normalized_suffix:
+            return None
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT *
+                FROM arbitrage_executions
+                WHERE user_id = %s
+                  AND action = 'open'
+                  AND RIGHT(pair_key, CHAR_LENGTH(%s) + 1) = CONCAT(':', %s)
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (user_id, normalized_suffix, normalized_suffix),
+            )
+            return cursor.fetchone()
+
     def get_latest_open_execution_by_rule_pair_status(
         self,
         *,
@@ -403,6 +428,31 @@ class ArbitrageExecutionRepositoryExecutionQueriesMixin:
                   AND status IN ('pending', 'created', 'processing', 'opening', 'open', 'closing')
                 """,
                 (user_id, strategy_rule_id, pair_key),
+            )
+            row = cursor.fetchone()
+            return int(row[0] if row else 0) > 0
+
+    def has_open_close_execution_by_user_pair_suffix(
+        self,
+        *,
+        user_id: int,
+        pair_suffix: str,
+    ) -> bool:
+        normalized_suffix = str(pair_suffix or "").strip()
+        if not normalized_suffix:
+            return False
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM arbitrage_executions
+                WHERE user_id = %s
+                  AND action = 'close'
+                  AND status IN ('pending', 'created', 'processing', 'opening', 'open', 'closing')
+                  AND RIGHT(pair_key, CHAR_LENGTH(%s) + 1) = CONCAT(':', %s)
+                """,
+                (user_id, normalized_suffix, normalized_suffix),
             )
             row = cursor.fetchone()
             return int(row[0] if row else 0) > 0

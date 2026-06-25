@@ -145,6 +145,16 @@ function ensureSettlementClock() {
   settlementClockHandle = window.setInterval(refreshSettlementCountdowns, 1000);
 }
 
+function getOpenCandidateClass(row) {
+  return row.open_candidate ? "opportunity-row--open-candidate" : "";
+}
+
+function getOpenCandidateTitle(row) {
+  if (!row.open_candidate) return "";
+  const title = row.open_candidate_reason || row.open_candidate_rule_name || "满足当前用户策略开仓条件";
+  return ` title="${escapeHtml(title)}"`;
+}
+
 function renderFundingRows(rows) {
   if (!Array.isArray(rows) || !rows.length) {
     return `
@@ -157,7 +167,7 @@ function renderFundingRows(rows) {
   return rows
     .map(
       (row) => `
-        <tr data-row-key="${escapeHtml(row.market_pair_key || "")}">
+        <tr class="${getOpenCandidateClass(row)}" data-row-key="${escapeHtml(row.market_pair_key || "")}"${getOpenCandidateTitle(row)}>
           <td>${escapeHtml(row.rank)}</td>
           <td>
             <div class="status-cell">
