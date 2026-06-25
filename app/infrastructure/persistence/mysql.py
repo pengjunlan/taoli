@@ -270,6 +270,18 @@ class MySQLConnectionManager:
                 order_amount_usdt DECIMAL(18,2) NOT NULL DEFAULT 0.00,
                 max_position_usdt DECIMAL(18,2) NOT NULL DEFAULT 0.00,
                 order_interval_seconds INT NOT NULL DEFAULT 0,
+                funding_open_window_start_minutes INT NOT NULL DEFAULT 0,
+                funding_open_window_end_minutes INT NOT NULL DEFAULT 0,
+                funding_spread_resonance_min DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
+                net_spread_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
+                funding_carry_min DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
+                max_funding_cost DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
+                min_net_profit_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
+                take_profit_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
+                max_hold_minutes INT NOT NULL DEFAULT 0,
+                close_interval_seconds INT NOT NULL DEFAULT 0,
+                close_batch_count INT NOT NULL DEFAULT 0,
+                single_leg_timeout_seconds INT NOT NULL DEFAULT 0,
                 is_enabled TINYINT(1) NOT NULL DEFAULT 1,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -1023,6 +1035,126 @@ class MySQLConnectionManager:
                   AND min_close_spread_rate_threshold <= 0
                   AND spread_rate_threshold > 0
                 """
+            )
+            self._ensure_column(
+                cursor,
+                table_name="strategy_rules",
+                column_name="funding_open_window_start_minutes",
+                ddl="""
+                    ALTER TABLE strategy_rules
+                    ADD COLUMN funding_open_window_start_minutes INT NOT NULL DEFAULT 0
+                    AFTER order_interval_seconds
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="strategy_rules",
+                column_name="funding_open_window_end_minutes",
+                ddl="""
+                    ALTER TABLE strategy_rules
+                    ADD COLUMN funding_open_window_end_minutes INT NOT NULL DEFAULT 0
+                    AFTER funding_open_window_start_minutes
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="strategy_rules",
+                column_name="funding_spread_resonance_min",
+                ddl="""
+                    ALTER TABLE strategy_rules
+                    ADD COLUMN funding_spread_resonance_min DECIMAL(10,4) NOT NULL DEFAULT 0.0000
+                    AFTER funding_open_window_end_minutes
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="strategy_rules",
+                column_name="net_spread_threshold",
+                ddl="""
+                    ALTER TABLE strategy_rules
+                    ADD COLUMN net_spread_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000
+                    AFTER funding_spread_resonance_min
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="strategy_rules",
+                column_name="funding_carry_min",
+                ddl="""
+                    ALTER TABLE strategy_rules
+                    ADD COLUMN funding_carry_min DECIMAL(10,4) NOT NULL DEFAULT 0.0000
+                    AFTER net_spread_threshold
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="strategy_rules",
+                column_name="max_funding_cost",
+                ddl="""
+                    ALTER TABLE strategy_rules
+                    ADD COLUMN max_funding_cost DECIMAL(10,4) NOT NULL DEFAULT 0.0000
+                    AFTER funding_carry_min
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="strategy_rules",
+                column_name="min_net_profit_threshold",
+                ddl="""
+                    ALTER TABLE strategy_rules
+                    ADD COLUMN min_net_profit_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000
+                    AFTER max_funding_cost
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="strategy_rules",
+                column_name="take_profit_threshold",
+                ddl="""
+                    ALTER TABLE strategy_rules
+                    ADD COLUMN take_profit_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000
+                    AFTER min_net_profit_threshold
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="strategy_rules",
+                column_name="max_hold_minutes",
+                ddl="""
+                    ALTER TABLE strategy_rules
+                    ADD COLUMN max_hold_minutes INT NOT NULL DEFAULT 0
+                    AFTER take_profit_threshold
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="strategy_rules",
+                column_name="close_interval_seconds",
+                ddl="""
+                    ALTER TABLE strategy_rules
+                    ADD COLUMN close_interval_seconds INT NOT NULL DEFAULT 0
+                    AFTER max_hold_minutes
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="strategy_rules",
+                column_name="close_batch_count",
+                ddl="""
+                    ALTER TABLE strategy_rules
+                    ADD COLUMN close_batch_count INT NOT NULL DEFAULT 0
+                    AFTER close_interval_seconds
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="strategy_rules",
+                column_name="single_leg_timeout_seconds",
+                ddl="""
+                    ALTER TABLE strategy_rules
+                    ADD COLUMN single_leg_timeout_seconds INT NOT NULL DEFAULT 0
+                    AFTER close_batch_count
+                """,
             )
             cursor.execute(
                 """

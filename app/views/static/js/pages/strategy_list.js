@@ -25,6 +25,124 @@ function renderTriggerConditions(triggerText) {
     .join("");
 }
 
+const STRATEGY_FIELD_HINTS = {
+  name: "给这套策略起一个容易识别的名字，只用于列表展示和后续排查。",
+  strategy_type: "选择策略模型：资金费套利看资金费率，价差套利看跨交易所价差。",
+  annualized_rate_threshold: "资金费套利开仓阈值。净资金费率达到该值后，才允许进入开仓判断。",
+  min_net_funding_rate_threshold: "资金费套利正常平仓线。净资金费率回落到该值以下，说明继续持有不划算。",
+  spread_rate_threshold: "价差套利开仓阈值。价差率达到该值后，才允许买便宜侧、空昂贵侧。",
+  min_close_spread_rate_threshold: "价差套利正常平仓线。价差回落到该值以下，说明价差收益空间基本释放。",
+  max_spread_rate_threshold: "风控边界。价差继续向不利方向扩大到该值附近时，用于停止加仓或触发止损。",
+  max_pairs: "限制同一规则最多同时运行多少个交易对，防止机会过多时占满资金。",
+  order_amount_usdt: "每一批双边开仓的名义金额，单位 U。加仓时也按这个金额分批执行。",
+  max_position_usdt: "同一交易对在这条规则下允许累计持有的最大名义金额，单位 U。",
+  order_interval_seconds: "同一交易对两次开仓/加仓之间至少间隔多少秒，避免连续追单。",
+  funding_open_window_start_minutes: "资金费结算前多少分钟开始允许开仓。填 0 表示不限制最早开仓时间。",
+  funding_open_window_end_minutes: "距离结算太近时停止新开仓，避免最后几分钟成交/滑点风险。填 0 表示不限制。",
+  funding_spread_resonance_min: "资金费方向和价差方向同向时，要求价差至少达到多少。填 0 表示只要求同向，不要求最小幅度。",
+  net_spread_threshold: "扣除手续费、滑点和预估资金费成本后的真实价差开仓门槛。",
+  funding_carry_min: "价差套利方向下，资金费 Carry 至少不能太差。填 0 表示不额外要求资金费正贡献。",
+  max_funding_cost: "价差套利持仓期间最多允许被资金费消耗多少收益，超过后停止加仓或考虑退出。",
+  min_net_profit_threshold: "最低净收益保护。预期收益必须覆盖手续费、滑点和安全垫后才允许开仓。",
+  take_profit_threshold: "整体净收益达到该值后触发止盈，建议配合分批平仓。",
+  max_hold_minutes: "单个套利持仓最多持有多久。填 0 表示不按时间强制退出。",
+  close_interval_seconds: "分批平仓时，两批之间至少间隔多少秒。填 0 表示不做间隔限制。",
+  close_batch_count: "计划分几批平仓。填 0 表示由系统按默认方式处理。",
+  single_leg_timeout_seconds: "一边成交、另一边迟迟未成交时，等待多久后进入异常处理。填 0 表示使用系统默认保护。",
+  is_enabled: "启用后该规则会参与自动筛选和执行；关闭后只保留配置，不再触发新的自动开仓。",
+};
+
+let strategyFieldTooltip = null;
+let activeStrategyFieldTooltipTrigger = null;
+
+function getStrategyFieldTooltip() {
+  if (strategyFieldTooltip) return strategyFieldTooltip;
+
+  strategyFieldTooltip = document.createElement("div");
+  strategyFieldTooltip.className = "strategy-field-tooltip";
+  strategyFieldTooltip.setAttribute("role", "tooltip");
+  strategyFieldTooltip.hidden = true;
+  document.body.appendChild(strategyFieldTooltip);
+  return strategyFieldTooltip;
+}
+
+function positionStrategyFieldTooltip(trigger, tooltip) {
+  const margin = 12;
+  const gap = 8;
+  const rect = trigger.getBoundingClientRect();
+  const tooltipRect = tooltip.getBoundingClientRect();
+
+  let left = rect.left;
+  let top = rect.bottom + gap;
+
+  if (left + tooltipRect.width + margin > window.innerWidth) {
+    left = window.innerWidth - tooltipRect.width - margin;
+  }
+  if (left < margin) {
+    left = margin;
+  }
+
+  if (top + tooltipRect.height + margin > window.innerHeight) {
+    top = rect.top - tooltipRect.height - gap;
+  }
+  if (top < margin) {
+    top = margin;
+  }
+
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
+}
+
+function showStrategyFieldTooltip(trigger) {
+  const hint = trigger.getAttribute("data-tooltip");
+  if (!hint) return;
+
+  activeStrategyFieldTooltipTrigger = trigger;
+  const tooltip = getStrategyFieldTooltip();
+  tooltip.textContent = hint;
+  tooltip.hidden = false;
+  tooltip.classList.add("is-visible");
+  positionStrategyFieldTooltip(trigger, tooltip);
+}
+
+function hideStrategyFieldTooltip() {
+  if (!strategyFieldTooltip) return;
+
+  activeStrategyFieldTooltipTrigger = null;
+  strategyFieldTooltip.classList.remove("is-visible");
+  strategyFieldTooltip.hidden = true;
+}
+
+function repositionStrategyFieldTooltip() {
+  if (!strategyFieldTooltip || strategyFieldTooltip.hidden || !activeStrategyFieldTooltipTrigger) return;
+
+  positionStrategyFieldTooltip(activeStrategyFieldTooltipTrigger, strategyFieldTooltip);
+}
+
+function injectStrategyFieldHints(form) {
+  Object.entries(STRATEGY_FIELD_HINTS).forEach(([name, hint]) => {
+    const control = form.elements[name];
+    if (!control) return;
+
+    const field = control.closest(".field");
+    const label = field ? field.querySelector(".field__label") : null;
+    if (!field || !label || label.querySelector(".strategy-field-help")) return;
+
+    const helpElement = document.createElement("span");
+    helpElement.className = "strategy-field-help";
+    helpElement.textContent = "?";
+    helpElement.setAttribute("role", "button");
+    helpElement.setAttribute("tabindex", "0");
+    helpElement.setAttribute("aria-label", hint);
+    helpElement.setAttribute("data-tooltip", hint);
+    helpElement.addEventListener("mouseenter", () => showStrategyFieldTooltip(helpElement));
+    helpElement.addEventListener("focus", () => showStrategyFieldTooltip(helpElement));
+    helpElement.addEventListener("mouseleave", hideStrategyFieldTooltip);
+    helpElement.addEventListener("blur", hideStrategyFieldTooltip);
+    label.appendChild(helpElement);
+  });
+}
+
 async function getJson(url) {
   const response = await fetch(url, {
     method: "GET",
@@ -152,6 +270,8 @@ function bindStrategyModal() {
   const minNetFundingField = document.querySelector("[data-field-min-net-funding]");
   const spreadField = document.querySelector("[data-field-spread]");
   const minCloseSpreadField = document.querySelector("[data-field-min-close-spread]");
+  const fundingAdvancedSections = document.querySelectorAll("[data-funding-advanced]");
+  const spreadAdvancedSections = document.querySelectorAll("[data-spread-advanced]");
   const confirmModal = document.querySelector("[data-strategy-confirm]");
   const confirmMessage = document.querySelector("[data-strategy-confirm-message]");
   const confirmAccept = document.querySelector("[data-strategy-confirm-accept]");
@@ -164,14 +284,65 @@ function bindStrategyModal() {
     return;
   }
 
+  injectStrategyFieldHints(form);
+
   let pendingDeleteResolver = null;
+
+  const fundingAdvancedFieldNames = [
+    "funding_open_window_start_minutes",
+    "funding_open_window_end_minutes",
+    "funding_spread_resonance_min",
+  ];
+
+  const spreadAdvancedFieldNames = [
+    "net_spread_threshold",
+    "funding_carry_min",
+    "max_funding_cost",
+  ];
+
+  const sharedAdvancedFieldNames = [
+    "min_net_profit_threshold",
+    "take_profit_threshold",
+    "max_hold_minutes",
+    "close_interval_seconds",
+    "close_batch_count",
+    "single_leg_timeout_seconds",
+  ];
+
+  const setFieldValue = (name, value) => {
+    if (!form.elements[name]) return;
+    form.elements[name].value = Number(value || 0);
+  };
+
+  const resetFieldValues = (names) => {
+    names.forEach((name) => setFieldValue(name, 0));
+  };
+
+  const buildNumericPayload = (formData, names) =>
+    names.reduce((payload, name) => {
+      payload[name] = Number(formData.get(name) || 0);
+      return payload;
+    }, {});
+
+  const syncAdvancedSection = (sections, hidden) => {
+    sections.forEach((section) => {
+      section.classList.toggle("is-hidden", hidden);
+      section.querySelectorAll("input, select, textarea").forEach((control) => {
+        control.disabled = hidden;
+      });
+    });
+  };
 
   const syncBodyScrollLock = () => {
     const hasVisibleLayer = [modal, confirmModal].some((element) => element && !element.hidden);
     document.body.style.overflow = hasVisibleLayer ? "hidden" : "";
   };
 
+  const modalDialog = modal.querySelector(".account-modal__dialog");
+
   const syncTypeFields = () => {
+    hideStrategyFieldTooltip();
+
     const strategyType = String(typeField.value || "funding").trim();
     const isFunding = strategyType === "funding";
 
@@ -179,6 +350,8 @@ function bindStrategyModal() {
     minNetFundingField.classList.toggle("is-hidden", !isFunding);
     spreadField.classList.toggle("is-hidden", isFunding);
     minCloseSpreadField.classList.toggle("is-hidden", isFunding);
+    syncAdvancedSection(fundingAdvancedSections, !isFunding);
+    syncAdvancedSection(spreadAdvancedSections, isFunding);
 
     form.elements.annualized_rate_threshold.disabled = !isFunding;
     form.elements.min_net_funding_rate_threshold.disabled = !isFunding;
@@ -188,9 +361,11 @@ function bindStrategyModal() {
     if (isFunding) {
       form.elements.spread_rate_threshold.value = 0;
       form.elements.min_close_spread_rate_threshold.value = 0;
+      resetFieldValues(spreadAdvancedFieldNames);
     } else {
       form.elements.annualized_rate_threshold.value = 0;
       form.elements.min_net_funding_rate_threshold.value = 0;
+      resetFieldValues(fundingAdvancedFieldNames);
     }
   };
 
@@ -208,6 +383,9 @@ function bindStrategyModal() {
     form.elements.order_amount_usdt.value = 0;
     form.elements.max_position_usdt.value = 0;
     form.elements.order_interval_seconds.value = 0;
+    resetFieldValues(fundingAdvancedFieldNames);
+    resetFieldValues(spreadAdvancedFieldNames);
+    resetFieldValues(sharedAdvancedFieldNames);
     form.elements.is_enabled.checked = true;
     title.textContent = "新增规则";
     submitButton.textContent = "保存规则";
@@ -215,6 +393,7 @@ function bindStrategyModal() {
   };
 
   const openModal = () => {
+    hideStrategyFieldTooltip();
     modal.hidden = false;
     syncBodyScrollLock();
     const firstInput = form.querySelector("input, select");
@@ -224,6 +403,7 @@ function bindStrategyModal() {
   };
 
   const closeModal = () => {
+    hideStrategyFieldTooltip();
     modal.hidden = true;
     syncBodyScrollLock();
     resetFormMode();
@@ -245,14 +425,19 @@ function bindStrategyModal() {
     form.elements.order_amount_usdt.value = Number(rule.order_amount_usdt || 0);
     form.elements.max_position_usdt.value = Number(rule.max_position_usdt || 0);
     form.elements.order_interval_seconds.value = Number(rule.order_interval_seconds || 0);
+    [...fundingAdvancedFieldNames, ...spreadAdvancedFieldNames, ...sharedAdvancedFieldNames].forEach((name) => {
+      setFieldValue(name, rule[name]);
+    });
     form.elements.is_enabled.checked = Boolean(rule.is_enabled);
 
     if (strategyType === "funding") {
       form.elements.spread_rate_threshold.value = 0;
       form.elements.min_close_spread_rate_threshold.value = 0;
+      resetFieldValues(spreadAdvancedFieldNames);
     } else {
       form.elements.annualized_rate_threshold.value = 0;
       form.elements.min_net_funding_rate_threshold.value = 0;
+      resetFieldValues(fundingAdvancedFieldNames);
     }
 
     title.textContent = "编辑规则";
@@ -320,6 +505,11 @@ function bindStrategyModal() {
   }
 
   typeField.addEventListener("change", syncTypeFields);
+
+  if (modalDialog) {
+    modalDialog.addEventListener("scroll", hideStrategyFieldTooltip, { passive: true });
+  }
+  window.addEventListener("resize", repositionStrategyFieldTooltip);
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !modal.hidden) {
@@ -404,16 +594,25 @@ function bindStrategyModal() {
       order_amount_usdt: Number(formData.get("order_amount_usdt") || 0),
       max_position_usdt: Number(formData.get("max_position_usdt") || 0),
       order_interval_seconds: Number(formData.get("order_interval_seconds") || 0),
+      ...buildNumericPayload(formData, fundingAdvancedFieldNames),
+      ...buildNumericPayload(formData, spreadAdvancedFieldNames),
+      ...buildNumericPayload(formData, sharedAdvancedFieldNames),
       is_enabled: form.elements.is_enabled.checked,
     };
 
     if (payload.strategy_type === "funding") {
       payload.spread_rate_threshold = 0;
       payload.min_close_spread_rate_threshold = 0;
+      spreadAdvancedFieldNames.forEach((name) => {
+        payload[name] = 0;
+      });
     }
     if (payload.strategy_type === "spread") {
       payload.annualized_rate_threshold = 0;
       payload.min_net_funding_rate_threshold = 0;
+      fundingAdvancedFieldNames.forEach((name) => {
+        payload[name] = 0;
+      });
     }
 
     const isEditMode = form.dataset.mode === "edit";

@@ -117,6 +117,13 @@ class ExchangeTransferAdapter:
         return None
 
 
+class BinanceTransferAdapter(ExchangeTransferAdapter):
+    def build_withdraw_params(self, network_code: str, fee: float | None = None) -> Dict[str, Any]:
+        params = super().build_withdraw_params(network_code, fee)
+        params["walletType"] = 0
+        return params
+
+
 class OKXTransferAdapter(ExchangeTransferAdapter):
     def build_withdraw_params(self, network_code: str, fee: float | None = None) -> Dict[str, Any]:
         normalized_fee = max(float(fee or 0), 0.0)
@@ -152,7 +159,7 @@ class ExchangeTransferRegistry:
 
 exchange_transfer_registry = ExchangeTransferRegistry()
 exchange_transfer_registry.register(
-    ExchangeTransferAdapter(
+    BinanceTransferAdapter(
         code="binance",
         internal_account_by_market={
             "spot": "spot",

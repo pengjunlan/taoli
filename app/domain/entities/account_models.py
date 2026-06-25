@@ -101,6 +101,18 @@ class StrategyRule:
     order_amount_usdt: float
     max_position_usdt: float
     order_interval_seconds: int
+    funding_open_window_start_minutes: int
+    funding_open_window_end_minutes: int
+    funding_spread_resonance_min: float
+    net_spread_threshold: float
+    funding_carry_min: float
+    max_funding_cost: float
+    min_net_profit_threshold: float
+    take_profit_threshold: float
+    max_hold_minutes: int
+    close_interval_seconds: int
+    close_batch_count: int
+    single_leg_timeout_seconds: int
     is_enabled: bool
     created_at: datetime
     updated_at: datetime

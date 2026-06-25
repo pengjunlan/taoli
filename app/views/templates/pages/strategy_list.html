@@ -126,9 +126,93 @@
                 </label>
 
                 <label class="field">
-                    <span class="field__label">下单间隔时间 (秒)</span>
+                    <span class="field__label">加单间隔时间 (秒)</span>
                     <input class="field__control" type="number" name="order_interval_seconds" min="0" step="1" value="0" placeholder="例如 30">
                 </label>
+
+                <div class="strategy-form__section field--full" data-funding-advanced>
+                    <div class="strategy-form__section-header">
+                        <h3>资金费增强</h3>
+                        <p>补充结算时间窗口、资金费与价差同向共振等配置。</p>
+                    </div>
+                    <div class="strategy-form__grid strategy-form__grid--compact">
+                        <label class="field">
+                            <span class="field__label">结算前最早开仓 (分钟)</span>
+                            <input class="field__control" type="number" name="funding_open_window_start_minutes" min="0" step="1" value="0" placeholder="例如 30">
+                        </label>
+
+                        <label class="field">
+                            <span class="field__label">结算前停止新开 (分钟)</span>
+                            <input class="field__control" type="number" name="funding_open_window_end_minutes" min="0" step="1" value="0" placeholder="例如 3">
+                        </label>
+
+                        <label class="field">
+                            <span class="field__label">最小同向价差 (%)</span>
+                            <input class="field__control" type="number" name="funding_spread_resonance_min" min="0" step="0.0001" value="0" placeholder="例如 0.0300">
+                        </label>
+                    </div>
+                </div>
+
+                <div class="strategy-form__section field--full is-hidden" data-spread-advanced>
+                    <div class="strategy-form__section-header">
+                        <h3>价差增强</h3>
+                        <p>补充净价差、资金费 Carry 与最大资金费成本保护。</p>
+                    </div>
+                    <div class="strategy-form__grid strategy-form__grid--compact">
+                        <label class="field">
+                            <span class="field__label">净价差阈值 (%)</span>
+                            <input class="field__control" type="number" name="net_spread_threshold" min="0" step="0.0001" value="0" placeholder="例如 0.2000" disabled>
+                        </label>
+
+                        <label class="field">
+                            <span class="field__label">资金费 Carry 下限 (%)</span>
+                            <input class="field__control" type="number" name="funding_carry_min" min="0" step="0.0001" value="0" placeholder="例如 0.0100" disabled>
+                        </label>
+
+                        <label class="field">
+                            <span class="field__label">最大资金费成本 (%)</span>
+                            <input class="field__control" type="number" name="max_funding_cost" min="0" step="0.0001" value="0" placeholder="例如 0.0500" disabled>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="strategy-form__section field--full">
+                    <div class="strategy-form__section-header">
+                        <h3>退出与风控</h3>
+                        <p>补充止盈、净收益保护、最大持有时间和平仓分批节奏。</p>
+                    </div>
+                    <div class="strategy-form__grid strategy-form__grid--compact">
+                        <label class="field">
+                            <span class="field__label">最低净收益保护 (%)</span>
+                            <input class="field__control" type="number" name="min_net_profit_threshold" min="0" step="0.0001" value="0" placeholder="例如 0.0500">
+                        </label>
+
+                        <label class="field">
+                            <span class="field__label">止盈收益阈值 (%)</span>
+                            <input class="field__control" type="number" name="take_profit_threshold" min="0" step="0.0001" value="0" placeholder="例如 0.3000">
+                        </label>
+
+                        <label class="field">
+                            <span class="field__label">最大持有时间 (分钟)</span>
+                            <input class="field__control" type="number" name="max_hold_minutes" min="0" step="1" value="0" placeholder="例如 240">
+                        </label>
+
+                        <label class="field">
+                            <span class="field__label">平仓间隔时间 (秒)</span>
+                            <input class="field__control" type="number" name="close_interval_seconds" min="0" step="1" value="0" placeholder="例如 30">
+                        </label>
+
+                        <label class="field">
+                            <span class="field__label">平仓批次数</span>
+                            <input class="field__control" type="number" name="close_batch_count" min="0" step="1" value="0" placeholder="例如 3">
+                        </label>
+
+                        <label class="field">
+                            <span class="field__label">单腿异常处理时间 (秒)</span>
+                            <input class="field__control" type="number" name="single_leg_timeout_seconds" min="0" step="1" value="0" placeholder="例如 10">
+                        </label>
+                    </div>
+                </div>
 
                 <label class="field field--checkbox">
                     <span class="field__label">规则状态</span>

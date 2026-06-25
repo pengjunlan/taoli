@@ -45,6 +45,10 @@ CHECKPOINT_AWAITING_TARGET_CREDIT = TRANSFER_CHECKPOINT_AWAITING_TARGET_CREDIT
 CHECKPOINT_TARGET_CREDIT_CONFIRMED = TRANSFER_CHECKPOINT_TARGET_CREDIT_CONFIRMED
 CHECKPOINT_AWAITING_TARGET_INTERNAL_TRANSFER = TRANSFER_CHECKPOINT_AWAITING_TARGET_INTERNAL_TRANSFER
 CHECKPOINT_TARGET_INTERNAL_TRANSFERRED = TRANSFER_CHECKPOINT_TARGET_INTERNAL_TRANSFERRED
+SOURCE_WITHDRAW_BALANCE_WAIT_ATTEMPTS = 8
+SOURCE_WITHDRAW_BALANCE_WAIT_SLEEP_SECONDS = 2
+SOURCE_WITHDRAW_RETRY_ATTEMPTS = 3
+SOURCE_WITHDRAW_RETRY_SLEEP_SECONDS = 2
 
 
 @dataclass(frozen=True)
@@ -251,17 +255,25 @@ class TransferExecutionService(
                 CHECKPOINT_AWAITING_TARGET_INTERNAL_TRANSFER,
                 CHECKPOINT_TARGET_INTERNAL_TRANSFERRED,
             }:
+                self._wait_for_source_withdraw_balance(
+                    client=source_client,
+                    adapter=source_adapter,
+                    market_type=source_adapter.withdraw_account_market_type,
+                    required_amount=prepared_withdraw_amount or amount,
+                )
                 withdraw_params = self._build_withdraw_params(
                     adapter=source_adapter,
                     network_code=destination.network_code,
                     fee=withdraw_fee,
                 )
-                withdraw = source_client.withdraw(
-                    TRANSFER_ASSET_CODE,
-                    amount,
-                    destination.address,
-                    destination.tag,
-                    withdraw_params,
+                withdraw = self._submit_source_withdraw_with_retries(
+                    source_client=source_client,
+                    source_adapter=source_adapter,
+                    source_withdraw_market_type=source_adapter.withdraw_account_market_type,
+                    required_amount=prepared_withdraw_amount or amount,
+                    amount=amount,
+                    destination=destination,
+                    withdraw_params=withdraw_params,
                 )
                 withdraw_reference = self._extract_transfer_reference(withdraw)
                 self._store_withdraw_submission(context, withdraw, withdraw_reference)
@@ -417,6 +429,106 @@ class TransferExecutionService(
         finally:
             self._close_client(source_client)
             self._close_client(target_client)
+
+    def _submit_source_withdraw_with_retries(
+        self,
+        *,
+        source_client: Any,
+        source_adapter: ExchangeTransferAdapter,
+        source_withdraw_market_type: str,
+        required_amount: float,
+        amount: float,
+        destination: DepositDestination,
+        withdraw_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        for attempt in range(SOURCE_WITHDRAW_RETRY_ATTEMPTS):
+            try:
+                return source_client.withdraw(
+                    TRANSFER_ASSET_CODE,
+                    amount,
+                    destination.address,
+                    destination.tag,
+                    withdraw_params,
+                )
+            except Exception as exc:  # noqa: BLE001
+                if not self._is_source_withdraw_balance_pending_error(exc) or attempt >= SOURCE_WITHDRAW_RETRY_ATTEMPTS - 1:
+                    raise
+                logger.warning(
+                    "Source withdraw balance is not ready, retrying withdraw: exchange=%s attempt=%s detail=%s",
+                    source_adapter.code,
+                    attempt + 1,
+                    exc,
+                )
+                time.sleep(SOURCE_WITHDRAW_RETRY_SLEEP_SECONDS)
+                self._wait_for_source_withdraw_balance(
+                    client=source_client,
+                    adapter=source_adapter,
+                    market_type=source_withdraw_market_type,
+                    required_amount=required_amount,
+                )
+        raise RuntimeError("Source withdraw retry loop exited unexpectedly.")
+
+    def _wait_for_source_withdraw_balance(
+        self,
+        *,
+        client: Any,
+        adapter: ExchangeTransferAdapter,
+        market_type: str,
+        required_amount: float,
+    ) -> None:
+        required = self._quantize_transfer_amount(required_amount)
+        if required <= 0:
+            return
+
+        last_available = 0.0
+        last_error: Exception | None = None
+        for attempt in range(SOURCE_WITHDRAW_BALANCE_WAIT_ATTEMPTS):
+            try:
+                last_available = self._quantize_transfer_amount(
+                    self._fetch_available_amount(
+                        client=client,
+                        adapter=adapter,
+                        market_type=market_type,
+                    )
+                )
+                last_error = None
+                if last_available + 0.00000001 >= required:
+                    return
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                logger.warning(
+                    "Fetch source withdraw balance failed while waiting: exchange=%s attempt=%s detail=%s",
+                    adapter.code,
+                    attempt + 1,
+                    exc,
+                )
+
+            if attempt < SOURCE_WITHDRAW_BALANCE_WAIT_ATTEMPTS - 1:
+                time.sleep(SOURCE_WITHDRAW_BALANCE_WAIT_SLEEP_SECONDS)
+
+        if last_error is not None:
+            raise RuntimeError(
+                f"源交易所提现账户余额确认失败，需要 {required} {TRANSFER_ASSET_CODE}。原始原因：{last_error}"
+            ) from last_error
+        raise RuntimeError(
+            f"源交易所提现账户余额尚未生效，当前可用 {last_available} {TRANSFER_ASSET_CODE}，"
+            f"本次提现至少需要 {required} {TRANSFER_ASSET_CODE}。"
+        )
+
+    def _is_source_withdraw_balance_pending_error(self, error: Exception) -> bool:
+        message = str(error or "").strip().lower()
+        if not message:
+            return False
+        return any(
+            token in message
+            for token in (
+                "-4026",
+                "031033",
+                "insufficient balance",
+                "余额不足",
+                "balance is insufficient",
+            )
+        )
 
     def _resolve_destination_address(
         self,

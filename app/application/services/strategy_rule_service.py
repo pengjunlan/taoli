@@ -52,6 +52,18 @@ class StrategyRuleService:
             order_amount_usdt=payload.order_amount_usdt,
             max_position_usdt=payload.max_position_usdt,
             order_interval_seconds=payload.order_interval_seconds,
+            funding_open_window_start_minutes=payload.funding_open_window_start_minutes,
+            funding_open_window_end_minutes=payload.funding_open_window_end_minutes,
+            funding_spread_resonance_min=payload.funding_spread_resonance_min,
+            net_spread_threshold=payload.net_spread_threshold,
+            funding_carry_min=payload.funding_carry_min,
+            max_funding_cost=payload.max_funding_cost,
+            min_net_profit_threshold=payload.min_net_profit_threshold,
+            take_profit_threshold=payload.take_profit_threshold,
+            max_hold_minutes=payload.max_hold_minutes,
+            close_interval_seconds=payload.close_interval_seconds,
+            close_batch_count=payload.close_batch_count,
+            single_leg_timeout_seconds=payload.single_leg_timeout_seconds,
             is_enabled=payload.is_enabled,
         )
         self._validate_payload(normalized)
@@ -88,6 +100,18 @@ class StrategyRuleService:
             order_amount_usdt=payload.order_amount_usdt,
             max_position_usdt=payload.max_position_usdt,
             order_interval_seconds=payload.order_interval_seconds,
+            funding_open_window_start_minutes=payload.funding_open_window_start_minutes,
+            funding_open_window_end_minutes=payload.funding_open_window_end_minutes,
+            funding_spread_resonance_min=payload.funding_spread_resonance_min,
+            net_spread_threshold=payload.net_spread_threshold,
+            funding_carry_min=payload.funding_carry_min,
+            max_funding_cost=payload.max_funding_cost,
+            min_net_profit_threshold=payload.min_net_profit_threshold,
+            take_profit_threshold=payload.take_profit_threshold,
+            max_hold_minutes=payload.max_hold_minutes,
+            close_interval_seconds=payload.close_interval_seconds,
+            close_batch_count=payload.close_batch_count,
+            single_leg_timeout_seconds=payload.single_leg_timeout_seconds,
             is_enabled=payload.is_enabled,
         )
         self._validate_payload(normalized)
@@ -173,6 +197,18 @@ class StrategyRuleService:
         order_amount_usdt: float,
         max_position_usdt: float,
         order_interval_seconds: int,
+        funding_open_window_start_minutes: int,
+        funding_open_window_end_minutes: int,
+        funding_spread_resonance_min: float,
+        net_spread_threshold: float,
+        funding_carry_min: float,
+        max_funding_cost: float,
+        min_net_profit_threshold: float,
+        take_profit_threshold: float,
+        max_hold_minutes: int,
+        close_interval_seconds: int,
+        close_batch_count: int,
+        single_leg_timeout_seconds: int,
         is_enabled: bool,
     ) -> Dict[str, object]:
         return {
@@ -187,6 +223,18 @@ class StrategyRuleService:
             "order_amount_usdt": round(float(order_amount_usdt or 0), 2),
             "max_position_usdt": round(float(max_position_usdt or 0), 2),
             "order_interval_seconds": int(order_interval_seconds or 0),
+            "funding_open_window_start_minutes": int(funding_open_window_start_minutes or 0),
+            "funding_open_window_end_minutes": int(funding_open_window_end_minutes or 0),
+            "funding_spread_resonance_min": round(float(funding_spread_resonance_min or 0), 4),
+            "net_spread_threshold": round(float(net_spread_threshold or 0), 4),
+            "funding_carry_min": round(float(funding_carry_min or 0), 4),
+            "max_funding_cost": round(float(max_funding_cost or 0), 4),
+            "min_net_profit_threshold": round(float(min_net_profit_threshold or 0), 4),
+            "take_profit_threshold": round(float(take_profit_threshold or 0), 4),
+            "max_hold_minutes": int(max_hold_minutes or 0),
+            "close_interval_seconds": int(close_interval_seconds or 0),
+            "close_batch_count": int(close_batch_count or 0),
+            "single_leg_timeout_seconds": int(single_leg_timeout_seconds or 0),
             "is_enabled": bool(is_enabled),
         }
 
@@ -205,7 +253,33 @@ class StrategyRuleService:
         if float(payload["max_spread_rate_threshold"]) <= 0:
             raise AccountValidationError("最大价差阈值必须大于 0。")
         if int(payload["order_interval_seconds"]) < 0:
-            raise AccountValidationError("下单间隔时间不能小于 0。")
+            raise AccountValidationError("加单间隔时间不能小于 0。")
+        integer_field_labels = {
+            "funding_open_window_start_minutes": "结算前最早开仓时间",
+            "funding_open_window_end_minutes": "结算前停止新开时间",
+            "max_hold_minutes": "最大持有时间",
+            "close_interval_seconds": "平仓间隔时间",
+            "close_batch_count": "平仓批次数",
+            "single_leg_timeout_seconds": "单腿异常处理时间",
+        }
+        for field_name, field_label in integer_field_labels.items():
+            if int(payload[field_name]) < 0:
+                raise AccountValidationError(f"{field_label}不能小于 0。")
+        percent_field_labels = {
+            "funding_spread_resonance_min": "最小同向价差",
+            "net_spread_threshold": "净价差阈值",
+            "funding_carry_min": "资金费 Carry 下限",
+            "max_funding_cost": "最大资金费成本",
+            "min_net_profit_threshold": "最低净收益保护",
+            "take_profit_threshold": "止盈收益阈值",
+        }
+        for field_name, field_label in percent_field_labels.items():
+            if float(payload[field_name]) < 0:
+                raise AccountValidationError(f"{field_label}不能小于 0。")
+        funding_window_start = int(payload["funding_open_window_start_minutes"])
+        funding_window_end = int(payload["funding_open_window_end_minutes"])
+        if funding_window_start > 0 and funding_window_end > 0 and funding_window_start < funding_window_end:
+            raise AccountValidationError("结算前最早开仓时间不能小于停止新开时间。")
         if strategy_type == "funding" and float(payload["annualized_rate_threshold"]) <= 0:
             raise AccountValidationError("资金费套利规则的净资金费率必须大于 0。")
         if strategy_type == "funding" and float(payload["min_net_funding_rate_threshold"]) <= 0:
@@ -277,6 +351,18 @@ class StrategyRuleService:
             "max_position_text": self._format_quantity_value(max_position_quantity),
             "order_interval_seconds": int(row.get("order_interval_seconds") or 0),
             "order_interval_text": f"{int(row.get('order_interval_seconds') or 0)} 秒",
+            "funding_open_window_start_minutes": int(row.get("funding_open_window_start_minutes") or 0),
+            "funding_open_window_end_minutes": int(row.get("funding_open_window_end_minutes") or 0),
+            "funding_spread_resonance_min": float(row.get("funding_spread_resonance_min") or 0),
+            "net_spread_threshold": float(row.get("net_spread_threshold") or 0),
+            "funding_carry_min": float(row.get("funding_carry_min") or 0),
+            "max_funding_cost": float(row.get("max_funding_cost") or 0),
+            "min_net_profit_threshold": float(row.get("min_net_profit_threshold") or 0),
+            "take_profit_threshold": float(row.get("take_profit_threshold") or 0),
+            "max_hold_minutes": int(row.get("max_hold_minutes") or 0),
+            "close_interval_seconds": int(row.get("close_interval_seconds") or 0),
+            "close_batch_count": int(row.get("close_batch_count") or 0),
+            "single_leg_timeout_seconds": int(row.get("single_leg_timeout_seconds") or 0),
             "is_enabled": is_enabled,
             "status_label": "已启用" if is_enabled else "已停用",
             "status_tone": "positive" if is_enabled else "warning",
