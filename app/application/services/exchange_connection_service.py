@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import logging
 from dataclasses import dataclass
 from threading import RLock
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import ccxt
 
@@ -38,6 +38,16 @@ class TradingFeeSnapshot:
     taker_fee_rate: float
 
 
+@dataclass(frozen=True)
+class FundingFeeEntry:
+    exchange_record_id: str
+    symbol: str
+    asset_code: str
+    amount: float
+    timestamp_ms: int
+    raw_payload: Dict[str, Any]
+
+
 class ExchangeConnectionService:
     """Calls a private exchange API to validate whether submitted credentials work."""
 
@@ -48,6 +58,20 @@ class ExchangeConnectionService:
     def build_exchange_client(self, payload: ExchangeConnectionTestRequest) -> Any:
         normalized = self._normalize_payload(payload)
         self._validate_payload(normalized)
+        return self._build_exchange(normalized)
+
+    def build_public_exchange_client(self, *, exchange_code: str, market_type: str) -> Any:
+        normalized = {
+            "market_type": str(market_type or "").strip().lower(),
+            "exchange_code": str(exchange_code or "").strip().lower(),
+            "api_key": "",
+            "api_secret": "",
+            "api_passphrase": "",
+        }
+        if normalized["market_type"] not in {"spot", "swap"}:
+            raise ExchangeValidationError("请选择市场类型。")
+        if normalized["exchange_code"] not in EXCHANGE_IDS:
+            raise ExchangeValidationError("请选择交易所。")
         return self._build_exchange(normalized)
 
     def test_connection(self, payload: ExchangeConnectionTestRequest) -> None:
@@ -206,6 +230,73 @@ class ExchangeConnectionService:
                 maker_fee_rate=max(float(maker_fee_rate or 0), 0.0),
                 taker_fee_rate=max(float(taker_fee_rate or 0), 0.0),
             )
+        finally:
+            try:
+                exchange.close()
+            except Exception:
+                pass
+
+    def fetch_order_book_snapshot(
+        self,
+        *,
+        exchange_code: str,
+        market_type: str,
+        symbol: str,
+        limit: int = 20,
+    ) -> Dict[str, Any]:
+        exchange = self.build_public_exchange_client(exchange_code=exchange_code, market_type=market_type)
+        try:
+            if hasattr(exchange, "load_markets"):
+                try:
+                    exchange.load_markets()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "Load markets before order book failed: exchange=%s market_type=%s detail=%s",
+                        exchange_code,
+                        market_type,
+                        exc,
+                    )
+            return exchange.fetch_order_book(str(symbol or ""), limit=max(1, int(limit or 20)))
+        finally:
+            try:
+                exchange.close()
+            except Exception:
+                pass
+
+    def fetch_funding_fee_entries(
+        self,
+        payload: ExchangeConnectionTestRequest,
+        *,
+        symbol: str,
+        since_ms: int,
+        limit: int = 50,
+    ) -> List[FundingFeeEntry]:
+        normalized = self._normalize_payload(payload)
+        self._validate_payload(normalized)
+
+        exchange = self._build_exchange(normalized)
+        try:
+            if hasattr(exchange, "load_markets"):
+                try:
+                    exchange.load_markets()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "Load markets before funding history failed: exchange=%s market_type=%s detail=%s",
+                        normalized["exchange_code"],
+                        normalized["market_type"],
+                        exc,
+                    )
+
+            rows: List[Any] = []
+            if hasattr(exchange, "fetch_funding_history") and exchange.has.get("fetchFundingHistory"):
+                rows = exchange.fetch_funding_history(str(symbol or ""), since=int(since_ms or 0), limit=max(1, int(limit or 50)))
+                return self._normalize_funding_fee_entries(rows, symbol=symbol, funding_history_payload=True)
+
+            if hasattr(exchange, "fetch_ledger") and exchange.has.get("fetchLedger"):
+                rows = exchange.fetch_ledger(None, since=int(since_ms or 0), limit=max(1, int(limit or 50)))
+                return self._normalize_funding_fee_entries(rows, symbol=symbol, funding_history_payload=False)
+
+            return []
         finally:
             try:
                 exchange.close()
@@ -525,6 +616,128 @@ class ExchangeConnectionService:
                 break
 
         return best
+
+    def _normalize_funding_fee_entries(
+        self,
+        payload: Any,
+        *,
+        symbol: str,
+        funding_history_payload: bool,
+    ) -> List[FundingFeeEntry]:
+        if not isinstance(payload, list):
+            return []
+
+        normalized_symbol = self._normalize_symbol_text(symbol)
+        entries: List[FundingFeeEntry] = []
+        for index, row in enumerate(payload):
+            if not isinstance(row, dict):
+                continue
+            if not self._is_funding_fee_row(row, funding_history_payload=funding_history_payload):
+                continue
+
+            row_symbol = self._normalize_symbol_text(
+                row.get("symbol")
+                or self._pick_from_info(row, ("symbol", "instId", "contract")),
+            )
+            if normalized_symbol and row_symbol and normalized_symbol not in row_symbol and row_symbol not in normalized_symbol:
+                continue
+            if normalized_symbol and not row_symbol and not funding_history_payload:
+                continue
+
+            amount = self._pick_first_numeric(
+                row,
+                ("amount", "fee", "funding", "fundingFee", "income", "change", "balanceChange"),
+            )
+            if amount is None:
+                info = row.get("info")
+                if isinstance(info, dict):
+                    amount = self._pick_first_numeric(
+                        info,
+                        ("amount", "fee", "funding", "fundingFee", "income", "change", "balanceChange", "pnl"),
+                    )
+            if amount is None or float(amount or 0) == 0:
+                continue
+            timestamp_ms = self._pick_timestamp_ms(row)
+            if timestamp_ms <= 0:
+                continue
+            entries.append(
+                FundingFeeEntry(
+                    exchange_record_id=str(row.get("id") or self._pick_from_info(row, ("id", "billId", "tranId")) or f"{timestamp_ms}:{index}"),
+                    symbol=str(row.get("symbol") or self._pick_from_info(row, ("symbol", "instId", "contract")) or symbol or ""),
+                    asset_code=str(row.get("currency") or row.get("code") or self._pick_from_info(row, ("asset", "currency", "coin")) or ""),
+                    amount=float(amount or 0),
+                    timestamp_ms=timestamp_ms,
+                    raw_payload=row,
+                )
+            )
+        return entries
+
+    def _is_funding_fee_row(self, row: Dict[str, Any], *, funding_history_payload: bool) -> bool:
+        if funding_history_payload:
+            return True
+        fields = [
+            str(row.get("type") or ""),
+            str(row.get("category") or ""),
+            str(row.get("description") or ""),
+            str(row.get("comment") or ""),
+            str(row.get("referenceAccount") or ""),
+            str(row.get("direction") or ""),
+            str(row.get("info") or ""),
+        ]
+        haystack = " ".join(fields).lower()
+        return "fund" in haystack or "settlement" in haystack or "资金费" in haystack
+
+    def _pick_from_info(self, row: Dict[str, Any], keys: tuple[str, ...]) -> Any:
+        info = row.get("info")
+        if not isinstance(info, dict):
+            return None
+        for key in keys:
+            value = info.get(key)
+            if value not in (None, ""):
+                return value
+        return None
+
+    def _pick_timestamp_ms(self, row: Dict[str, Any]) -> int:
+        for key in ("timestamp", "time", "created", "createdAt"):
+            candidate = row.get(key)
+            value = self._to_epoch_ms(candidate)
+            if value > 0:
+                return value
+        info = row.get("info")
+        if isinstance(info, dict):
+            for key in ("time", "timestamp", "uTime", "cTime", "settleTime", "fundingTime", "createdTime"):
+                value = self._to_epoch_ms(info.get(key))
+                if value > 0:
+                    return value
+        return 0
+
+    def _to_epoch_ms(self, value: Any) -> int:
+        if value in (None, ""):
+            return 0
+        if isinstance(value, datetime):
+            return int(value.timestamp() * 1000)
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            text = str(value or "").strip()
+            if not text:
+                return 0
+            try:
+                parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                return 0
+            return int(parsed.timestamp() * 1000)
+        if numeric <= 0:
+            return 0
+        if numeric < 10_000_000_000:
+            numeric *= 1000
+        return int(numeric)
+
+    def _normalize_symbol_text(self, value: Any) -> str:
+        text = str(value or "").strip().upper()
+        for token in ("/", ":", "-", "_"):
+            text = text.replace(token, "")
+        return text
 
     def _build_connection_error_message(self, error: Exception) -> str:
         return self._map_exchange_error(str(error), prefix="连接测试失败")

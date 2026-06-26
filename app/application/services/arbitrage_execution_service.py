@@ -12,6 +12,7 @@ from app.application.services.arbitrage_opportunity_monitor_service import arbit
 from app.application.services.arbitrage_runtime_support_service import arbitrage_runtime_support_service
 from app.application.services.exchange_connection_service import exchange_connection_service
 from app.application.services.monitor_center_service import monitor_center_service
+from app.application.services.strategy_risk_config import strategy_risk_config
 from app.application.services.system_exchange_config_service import system_exchange_config_service
 from app.infrastructure.persistence import arbitrage_execution_repository
 from app.infrastructure.persistence.account_repository import account_repository
@@ -21,6 +22,11 @@ logger = logging.getLogger(__name__)
 
 
 class ArbitrageExecutionService:
+    _DEFAULT_RETRY_SECONDS = strategy_risk_config.order_retry_seconds
+    _DEFAULT_MAX_RETRIES = strategy_risk_config.max_order_retries
+    _DEFAULT_SINGLE_LEG_TIMEOUT_SECONDS = strategy_risk_config.single_leg_timeout_seconds
+    _MAX_PRICE_DRIFT_PERCENT = strategy_risk_config.max_price_drift_percent
+
     def process_order_leg(self, order_leg: Dict[str, Any]) -> str:
         blocked_result = self._block_disabled_opening_flow(order_leg)
         if blocked_result is not None:
@@ -28,6 +34,13 @@ class ArbitrageExecutionService:
             if execution_id > 0:
                 self.reconcile_execution(execution_id=execution_id)
             return blocked_result
+
+        single_leg_result = self._handle_single_leg_timeout(order_leg)
+        if single_leg_result is not None:
+            execution_id = int(order_leg.get("execution_id") or 0)
+            if execution_id > 0:
+                self.reconcile_execution(execution_id=execution_id)
+            return single_leg_result
 
         status = str(order_leg.get("status") or "")
         execution_id = int(order_leg.get("execution_id") or 0)
@@ -71,6 +84,119 @@ class ArbitrageExecutionService:
             )
             return "failed"
         return None
+
+    def _handle_single_leg_timeout(self, order_leg: Dict[str, Any]) -> str | None:
+        action = str(order_leg.get("action") or "").strip().lower()
+        if action != "open":
+            return None
+
+        status = str(order_leg.get("status") or "").strip().lower()
+        if status not in {"pending", "created", "submitting", "submitted", "partial"}:
+            return None
+
+        timeout_seconds = self._resolve_single_leg_timeout_seconds(order_leg)
+        if timeout_seconds <= 0:
+            return None
+
+        execution_id = int(order_leg.get("execution_id") or 0)
+        if execution_id <= 0:
+            return None
+
+        order_legs = arbitrage_execution_repository.list_order_legs_by_execution(execution_id=execution_id)
+        if len(order_legs) < 2:
+            return None
+
+        has_any_fill = any(float(row.get("filled_quantity") or 0) > 0 for row in order_legs)
+        if not has_any_fill:
+            return None
+
+        current_leg_id = int(order_leg.get("id") or 0)
+        current_leg = next((row for row in order_legs if int(row.get("id") or 0) == current_leg_id), order_leg)
+        if float(current_leg.get("filled_quantity") or 0) > 0:
+            return None
+
+        start_at = self._leg_wait_started_at(current_leg)
+        if not isinstance(start_at, datetime):
+            return None
+        if datetime.now() - start_at < timedelta(seconds=timeout_seconds):
+            return None
+
+        exchange_order_id = str(current_leg.get("exchange_order_id") or "").strip()
+        if exchange_order_id:
+            self._cancel_order_best_effort(current_leg)
+
+        arbitrage_execution_repository.update_order_leg_status(
+            order_leg_id=current_leg_id,
+            status="failed",
+            status_message=f"single_leg_timeout:{timeout_seconds}s",
+            retry_count=int(current_leg.get("retry_count") or 0),
+            last_retry_at=datetime.now(),
+            closed_at=datetime.now(),
+        )
+        monitor_center_service.add_log(
+            "arbitrage_execution_monitor",
+            "warning",
+            f"Execution #{execution_id} hit single-leg timeout after {timeout_seconds}s",
+        )
+        return "failed"
+
+    def _resolve_single_leg_timeout_seconds(self, order_leg: Dict[str, Any]) -> int:
+        strategy_rule_id = int(order_leg.get("strategy_rule_id") or 0)
+        user_id = int(order_leg.get("user_id") or 0)
+        if strategy_rule_id <= 0 or user_id <= 0:
+            return self._DEFAULT_SINGLE_LEG_TIMEOUT_SECONDS
+        strategy_rule = account_repository.get_strategy_rule_by_id(strategy_rule_id, user_id)
+        if strategy_rule is None:
+            return self._DEFAULT_SINGLE_LEG_TIMEOUT_SECONDS
+        configured = int(strategy_rule.get("single_leg_timeout_seconds") or 0)
+        return configured if configured > 0 else self._DEFAULT_SINGLE_LEG_TIMEOUT_SECONDS
+
+    def _leg_wait_started_at(self, order_leg: Dict[str, Any]) -> datetime | None:
+        for field_name in ("acknowledged_at", "submitted_at", "created_at"):
+            value = order_leg.get(field_name)
+            if isinstance(value, datetime):
+                return value
+        return None
+
+    def _cancel_order_best_effort(self, order_leg: Dict[str, Any]) -> None:
+        account_row = account_repository.get_active_account_with_address_by_id(
+            int(order_leg.get("exchange_account_id") or 0),
+            int(order_leg.get("user_id") or 0),
+        )
+        if account_row is None:
+            return
+        client_request = ExchangeConnectionTestRequest(
+            account_id=int(account_row["id"]),
+            market_type=str(account_row.get("market_type") or ""),
+            exchange_code=str(account_row.get("exchange_code") or ""),
+            api_key=str(account_row.get("api_key") or ""),
+            api_secret=str(account_row.get("api_secret") or ""),
+            api_passphrase=str(account_row.get("api_passphrase") or ""),
+        )
+        client = exchange_connection_service.build_exchange_client(client_request)
+        try:
+            client.cancel_order(str(order_leg.get("exchange_order_id") or ""), str(order_leg.get("symbol") or ""))
+        except Exception:
+            pass
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+    def _price_drift_percent(self, order_leg: Dict[str, Any]) -> float:
+        requested_price = float(order_leg.get("requested_price") or 0)
+        if requested_price <= 0:
+            return 0.0
+        latest_price = arbitrage_runtime_support_service.get_latest_price(
+            exchange_code=str(order_leg.get("exchange_code") or ""),
+            market_type=str(order_leg.get("market_type") or ""),
+            symbol=str(order_leg.get("symbol") or ""),
+            side=str(order_leg.get("side") or ""),
+        )
+        if latest_price <= 0:
+            return 0.0
+        return abs(latest_price - requested_price) / requested_price * 100
 
     def reconcile_execution(self, *, execution_id: int) -> str:
         execution_row = arbitrage_execution_repository.get_execution_by_id(execution_id)
@@ -159,7 +285,11 @@ class ArbitrageExecutionService:
             if scheduled:
                 return
 
-        if any(int(row.get("retry_count") or 0) >= 10 for row in order_legs):
+        if any(int(row.get("retry_count") or 0) >= self._DEFAULT_MAX_RETRIES for row in order_legs):
+            self._mark_cooldown(execution_row=execution_row)
+            return
+
+        if not self._has_any_live_or_filled_position(order_legs):
             self._mark_cooldown(execution_row=execution_row)
 
     def _schedule_force_close(self, *, execution_row: Dict[str, Any]) -> bool:
@@ -205,7 +335,7 @@ class ArbitrageExecutionService:
         execution_row: Dict[str, Any],
         order_legs: list[Dict[str, Any]],
     ) -> None:
-        if any(int(row.get("retry_count") or 0) >= 10 for row in order_legs):
+        if any(int(row.get("retry_count") or 0) >= self._DEFAULT_MAX_RETRIES for row in order_legs):
             self._mark_cooldown(execution_row=execution_row)
             self._restore_source_execution_to_open(execution_row=execution_row)
             return
@@ -253,6 +383,20 @@ class ArbitrageExecutionService:
                 return True
         return False
 
+    def _has_any_live_or_filled_position(self, order_legs: Iterable[Dict[str, Any]]) -> bool:
+        for row in order_legs:
+            if float(row.get("filled_quantity") or 0) > 0:
+                return True
+            quantity = arbitrage_execution_repository.get_position_quantity(
+                exchange_account_id=int(row.get("exchange_account_id") or 0),
+                market_type=str(row.get("market_type") or ""),
+                symbol=str(row.get("symbol") or ""),
+                position_side=str(row.get("position_side") or ""),
+            )
+            if quantity is not None and float(quantity or 0) > 0:
+                return True
+        return False
+
     def _mark_cooldown(self, *, execution_row: Dict[str, Any]) -> None:
         user_id = int(execution_row.get("user_id") or 0)
         pair_key = str(execution_row.get("pair_key") or "").strip()
@@ -261,7 +405,7 @@ class ArbitrageExecutionService:
         arbitrage_opportunity_monitor_service.mark_pair_cooldown(
             user_id=user_id,
             pair_key=pair_key,
-            seconds=3600,
+            seconds=strategy_risk_config.failed_open_cooldown_seconds,
         )
         monitor_center_service.add_log(
             "arbitrage_opportunity_monitor",
@@ -278,10 +422,31 @@ class ArbitrageExecutionService:
             return
         if str(source_execution.get("status") or "") == "closed":
             return
+        if self._source_execution_has_remaining_position(source_execution):
+            arbitrage_execution_repository.update_execution_status(
+                execution_id=source_execution_id,
+                status="open",
+            )
+            return
         arbitrage_execution_repository.update_execution_status(
             execution_id=source_execution_id,
             status="closed",
         )
+
+    def _source_execution_has_remaining_position(self, source_execution: Dict[str, Any]) -> bool:
+        source_legs = arbitrage_execution_repository.list_order_legs_by_execution(
+            execution_id=int(source_execution.get("id") or 0),
+        )
+        for leg in source_legs:
+            quantity = arbitrage_execution_repository.get_position_quantity(
+                exchange_account_id=int(leg.get("exchange_account_id") or 0),
+                market_type=str(leg.get("market_type") or ""),
+                symbol=str(leg.get("symbol") or ""),
+                position_side=str(leg.get("position_side") or ""),
+            )
+            if quantity is not None and float(quantity or 0) > 0:
+                return True
+        return False
 
     def _submit_order(self, order_leg: Dict[str, Any]) -> str:
         account_row = account_repository.get_active_account_with_address_by_id(
@@ -318,6 +483,16 @@ class ArbitrageExecutionService:
                 closed_at=datetime.now(),
             )
             return "filled"
+
+        price_drift = self._price_drift_percent(order_leg)
+        if price_drift > self._MAX_PRICE_DRIFT_PERCENT:
+            arbitrage_execution_repository.update_order_leg_status(
+                order_leg_id=int(order_leg["id"]),
+                status="failed",
+                status_message=f"price_drift:{price_drift:.4f}%>{self._MAX_PRICE_DRIFT_PERCENT:.4f}%",
+                closed_at=datetime.now(),
+            )
+            return "failed"
 
         arbitrage_execution_repository.update_order_leg_status(
             order_leg_id=int(order_leg["id"]),
@@ -364,13 +539,13 @@ class ArbitrageExecutionService:
             retry_count = int(order_leg.get("retry_count") or 0) + 1
             arbitrage_execution_repository.update_order_leg_status(
                 order_leg_id=int(order_leg["id"]),
-                status="failed" if retry_count >= 10 else "pending",
+                status="failed" if retry_count >= self._DEFAULT_MAX_RETRIES else "pending",
                 status_message=f"下单失败: {exc}",
                 retry_count=retry_count,
                 last_retry_at=datetime.now(),
-                closed_at=datetime.now() if retry_count >= 10 else None,
+                closed_at=datetime.now() if retry_count >= self._DEFAULT_MAX_RETRIES else None,
             )
-            return "failed" if retry_count >= 10 else "pending"
+            return "failed" if retry_count >= self._DEFAULT_MAX_RETRIES else "pending"
         finally:
             try:
                 client.close()
@@ -441,7 +616,7 @@ class ArbitrageExecutionService:
 
             if normalized_status == "partial":
                 submitted_at = order_leg.get("submitted_at")
-                if isinstance(submitted_at, datetime) and datetime.now() - submitted_at >= timedelta(seconds=5):
+                if isinstance(submitted_at, datetime) and datetime.now() - submitted_at >= timedelta(seconds=self._DEFAULT_RETRY_SECONDS):
                     return self._retry_order(
                         client,
                         order_leg,
@@ -462,7 +637,7 @@ class ArbitrageExecutionService:
 
             if normalized_status in {"open", "submitted"}:
                 submitted_at = order_leg.get("submitted_at")
-                if isinstance(submitted_at, datetime) and datetime.now() - submitted_at >= timedelta(seconds=5):
+                if isinstance(submitted_at, datetime) and datetime.now() - submitted_at >= timedelta(seconds=self._DEFAULT_RETRY_SECONDS):
                     return self._retry_order(
                         client,
                         order_leg,
@@ -475,7 +650,7 @@ class ArbitrageExecutionService:
 
             if normalized_status == "cancelled":
                 retry_count = int(order_leg.get("retry_count") or 0)
-                if retry_count >= 10:
+                if retry_count >= self._DEFAULT_MAX_RETRIES:
                     arbitrage_execution_repository.update_order_leg_status(
                         order_leg_id=int(order_leg["id"]),
                         status="failed",
@@ -529,7 +704,7 @@ class ArbitrageExecutionService:
             base_quantity=total_filled_base_quantity,
             exchange_filled_quantity=exchange_filled_quantity,
         )
-        if retry_count >= 10:
+        if retry_count >= self._DEFAULT_MAX_RETRIES:
             arbitrage_execution_repository.update_order_leg_status(
                 order_leg_id=int(order_leg["id"]),
                 status="failed",

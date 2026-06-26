@@ -121,6 +121,7 @@ class AccountRepositoryBuildersMixin:
             max_hold_minutes=int(row.get("max_hold_minutes") or 0),
             close_interval_seconds=int(row.get("close_interval_seconds") or 0),
             close_batch_count=int(row.get("close_batch_count") or 0),
+            close_batch_ratio_percent=float(row.get("close_batch_ratio_percent") or 0),
             single_leg_timeout_seconds=int(row.get("single_leg_timeout_seconds") or 0),
             is_enabled=bool(row.get("is_enabled")),
             created_at=row["created_at"],

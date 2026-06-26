@@ -278,6 +278,46 @@ class ArbitrageExecutionRepositoryExecutionQueriesMixin:
             row = cursor.fetchone()
             return float(row[0] if row and row[0] is not None else 0.0)
 
+    def sum_opening_execution_planned_amount_without_position_by_pair(
+        self,
+        *,
+        user_id: int,
+        strategy_rule_id: int,
+        pair_key: str,
+    ) -> float:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                SELECT COALESCE(SUM(ex.planned_order_amount_usdt), 0)
+                FROM arbitrage_executions AS ex
+                WHERE ex.user_id = %s
+                  AND ex.strategy_rule_id = %s
+                  AND ex.pair_key = %s
+                  AND ex.action = 'open'
+                  AND ex.status IN ('pending', 'created', 'processing', 'opening')
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM arbitrage_positions AS p
+                      LEFT JOIN arbitrage_executions AS px
+                          ON px.id = p.opened_by_execution_id
+                      WHERE p.user_id = ex.user_id
+                        AND p.status = 'open'
+                        AND p.quantity > 0
+                        AND (
+                            p.opened_by_execution_id = ex.id
+                            OR (
+                                px.action = 'close'
+                                AND px.source_execution_id = ex.id
+                            )
+                        )
+                  )
+                """,
+                (user_id, strategy_rule_id, pair_key),
+            )
+            row = cursor.fetchone()
+            return float(row[0] if row and row[0] is not None else 0.0)
+
     def sum_committed_position_amount_by_rule(
         self,
         *,
@@ -340,6 +380,31 @@ class ArbitrageExecutionRepositoryExecutionQueriesMixin:
             )
             return cursor.fetchone()
 
+    def get_latest_active_open_execution_by_pair(
+        self,
+        *,
+        user_id: int,
+        strategy_rule_id: int,
+        pair_key: str,
+    ) -> Dict[str, object] | None:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT *
+                FROM arbitrage_executions
+                WHERE user_id = %s
+                  AND strategy_rule_id = %s
+                  AND pair_key = %s
+                  AND action = 'open'
+                  AND status IN ('pending', 'created', 'processing', 'opening', 'open', 'closing')
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (user_id, strategy_rule_id, pair_key),
+            )
+            return cursor.fetchone()
+
     def get_latest_open_execution_by_user_pair_suffix(
         self,
         *,
@@ -357,6 +422,32 @@ class ArbitrageExecutionRepositoryExecutionQueriesMixin:
                 FROM arbitrage_executions
                 WHERE user_id = %s
                   AND action = 'open'
+                  AND RIGHT(pair_key, CHAR_LENGTH(%s) + 1) = CONCAT(':', %s)
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (user_id, normalized_suffix, normalized_suffix),
+            )
+            return cursor.fetchone()
+
+    def get_latest_active_open_execution_by_user_pair_suffix(
+        self,
+        *,
+        user_id: int,
+        pair_suffix: str,
+    ) -> Dict[str, object] | None:
+        normalized_suffix = str(pair_suffix or "").strip()
+        if not normalized_suffix:
+            return None
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT *
+                FROM arbitrage_executions
+                WHERE user_id = %s
+                  AND action = 'open'
+                  AND status IN ('pending', 'created', 'processing', 'opening', 'open', 'closing')
                   AND RIGHT(pair_key, CHAR_LENGTH(%s) + 1) = CONCAT(':', %s)
                 ORDER BY id DESC
                 LIMIT 1
@@ -472,3 +563,33 @@ class ArbitrageExecutionRepositoryExecutionQueriesMixin:
                 (source_execution_id,),
             )
             return cursor.fetchone()
+
+    def count_closed_close_executions_by_source(self, *, source_execution_id: int) -> int:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM arbitrage_executions
+                WHERE source_execution_id = %s
+                  AND action = 'close'
+                  AND status = 'closed'
+                """,
+                (source_execution_id,),
+            )
+            row = cursor.fetchone()
+            return int(row[0] if row else 0)
+
+    def count_funding_fee_receipts_by_execution(self, *, execution_id: int) -> int:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM arbitrage_funding_fee_receipts
+                WHERE execution_id = %s
+                """,
+                (execution_id,),
+            )
+            row = cursor.fetchone()
+            return int(row[0] if row else 0)

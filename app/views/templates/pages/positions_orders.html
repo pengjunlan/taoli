@@ -144,9 +144,18 @@
                     type="button"
                     role="tab"
                     aria-selected="true"
-                    data-runtime-tab-trigger="orders"
+                    data-runtime-tab-trigger="pending-orders"
                 >
-                    当前挂单/实际订单
+                    当前挂单
+                </button>
+                <button
+                    class="tab-chip"
+                    type="button"
+                    role="tab"
+                    aria-selected="false"
+                    data-runtime-tab-trigger="actual-orders"
+                >
+                    实际订单
                 </button>
                 <button
                     class="tab-chip"
@@ -160,10 +169,10 @@
             </div>
         </div>
 
-        <div class="runtime-tab-panel is-active" data-runtime-tab-panel="orders">
+        <div class="runtime-tab-panel is-active" data-runtime-tab-panel="pending-orders">
             <div class="card__header card__header--row runtime-panel-header">
                 <div class="section-tools">
-                    <div class="inline-note" data-runtime-active-order-count>共 {{ active_order_rows|length }} 条当前订单</div>
+                    <div class="inline-note" data-runtime-pending-order-count>共 {{ pending_order_rows|length }} 条当前挂单</div>
                 </div>
             </div>
             <div class="table-wrap">
@@ -186,8 +195,68 @@
                             <th>原因</th>
                         </tr>
                     </thead>
-                    <tbody data-runtime-active-orders-body>
-                        {% for row in active_order_rows %}
+                    <tbody data-runtime-pending-orders-body>
+                        {% for row in pending_order_rows %}
+                        <tr>
+                            <td class="spread-metric">{{ row.row_code or row.pair_key or '--' }}</td>
+                            <td class="spread-metric">{{ row.time }}</td>
+                            <td>
+                                <div class="spread-symbol">
+                                    <strong>{{ row.symbol }}</strong>
+                                    <span class="spread-symbol__hint">{{ row.strategy }}</span>
+                                </div>
+                            </td>
+                            <td>{{ row.exchange }}</td>
+                            <td>{{ row.leg_role }}</td>
+                            <td>
+                                <div class="pair-cell pair-cell--hedge">
+                                    <span class="pair-cell__line pair-cell__line--hedge">{{ row.execution_action }}</span>
+                                    <span class="pair-cell__line pair-cell__line--hedge">{{ row.action }}</span>
+                                </div>
+                            </td>
+                            <td><span class="pill pill--{{ row.status_tone or 'brand' }}">{{ row.status }}</span></td>
+                            <td class="spread-metric">{{ row.requested_price }}</td>
+                            <td class="spread-metric">{{ row.requested_quantity }}</td>
+                            <td class="spread-metric">{{ row.filled_quantity }}</td>
+                            <td class="spread-metric">{{ row.requested_value }}</td>
+                            <td class="spread-metric">{{ row.filled_value }}</td>
+                            <td class="spread-metric">{{ row.retry_count }}</td>
+                            <td>{{ row.reason }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="runtime-tab-panel" data-runtime-tab-panel="actual-orders" hidden>
+            <div class="card__header card__header--row runtime-panel-header">
+                <div class="section-tools">
+                    <div class="inline-note" data-runtime-actual-order-count>共 {{ actual_order_rows|length }} 条实际订单</div>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table monitor-orders-table" data-pagination-items="tbody tr" data-page-size="5">
+                    <thead>
+                        <tr>
+                            <th>订单编码</th>
+                            <th>时间</th>
+                            <th>交易对 / 策略</th>
+                            <th>交易所</th>
+                            <th>腿</th>
+                            <th>开平动作</th>
+                            <th>订单状态</th>
+                            <th>挂单价</th>
+                            <th>挂单数量</th>
+                            <th>已成交数量</th>
+                            <th>挂单金额</th>
+                            <th>已成交金额</th>
+                            <th>重挂次数</th>
+                            <th>原因</th>
+                        </tr>
+                    </thead>
+                    <tbody data-runtime-actual-orders-body>
+                        {% for row in actual_order_rows %}
                         <tr>
                             <td class="spread-metric">{{ row.row_code or row.pair_key or '--' }}</td>
                             <td class="spread-metric">{{ row.time }}</td>
@@ -241,6 +310,7 @@
                             <th>成交数量</th>
                             <th>成交金额</th>
                             <th>成交笔数</th>
+                            <th>平仓类型</th>
                             <th>结果说明</th>
                         </tr>
                     </thead>
@@ -268,6 +338,7 @@
                             <td class="spread-metric">{{ row.filled_quantity }}</td>
                             <td class="spread-metric">{{ row.filled_value }}</td>
                             <td class="spread-metric">{{ row.fill_count }}</td>
+                            <td><span class="pill pill--{{ row.close_type_tone or 'neutral' }}">{{ row.close_type_label or '--' }}</span></td>
                             <td>{{ row.result }}</td>
                         </tr>
                         {% endfor %}

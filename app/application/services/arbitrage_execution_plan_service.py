@@ -6,7 +6,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from app.application.services.arbitrage_runtime_support_service import arbitrage_runtime_support_service
+from app.application.services.opportunity_user_overlay_service import opportunity_user_overlay_service
+from app.application.services.strategy_open_candidate_service import strategy_open_candidate_service
 from app.infrastructure.persistence import arbitrage_execution_repository
+from app.infrastructure.persistence.account_repository import account_repository
 
 
 @dataclass(frozen=True)
@@ -23,7 +26,25 @@ class ArbitrageExecutionPlanService:
         strategy_rule: Dict[str, Any],
         opportunity: Dict[str, Any],
     ) -> Optional[ExecutionPlanResult]:
+        strategy_rule = self._resolve_current_enabled_rule(user_id=user_id, strategy_rule=strategy_rule)
+        if strategy_rule is None:
+            return None
         strategy_type = str(strategy_rule.get("strategy_type") or "").strip().lower()
+        opportunity = self._prepare_execution_opportunity(
+            user_id=user_id,
+            strategy_type=strategy_type,
+            opportunity=opportunity,
+        )
+        if not bool(opportunity.get("execution_ready")) or not self._is_trading_status_normal(opportunity):
+            return None
+        if not self._is_open_candidate(
+            user_id=user_id,
+            strategy_type=strategy_type,
+            strategy_rule=strategy_rule,
+            opportunity=opportunity,
+        ):
+            return None
+
         if strategy_type == "funding":
             return self._create_funding_open_execution(
                 user_id=user_id,
@@ -43,6 +64,7 @@ class ArbitrageExecutionPlanService:
         *,
         execution_row: Dict[str, Any],
         reason: str,
+        close_fraction: float = 1.0,
     ) -> Optional[ExecutionPlanResult]:
         if str(execution_row.get("action") or "open") == "close":
             return None
@@ -72,6 +94,11 @@ class ArbitrageExecutionPlanService:
         )
         left_base_quantity = float((left_position or {}).get("quantity") or 0)
         right_base_quantity = float((right_position or {}).get("quantity") or 0)
+        effective_close_fraction = min(1.0, max(0.0, float(close_fraction or 1.0)))
+        if effective_close_fraction <= 0:
+            effective_close_fraction = 1.0
+        left_base_quantity *= effective_close_fraction
+        right_base_quantity *= effective_close_fraction
         if left_base_quantity <= 0 and right_base_quantity <= 0:
             return None
         left_plan = None
@@ -223,6 +250,7 @@ class ArbitrageExecutionPlanService:
             left_exchange_code=str(opportunity.get("left_exchange_code") or "").lower(),
             right_exchange_code=str(opportunity.get("right_exchange_code") or "").lower(),
         )
+        settlement_marker = self._build_funding_settlement_marker(opportunity)
         execution_id = arbitrage_execution_repository.create_execution(
             user_id=user_id,
             strategy_type="funding",
@@ -241,7 +269,7 @@ class ArbitrageExecutionPlanService:
             planned_order_amount_usdt=order_amount,
             max_position_usdt=float(strategy_rule.get("max_position_usdt") or order_amount),
             trigger_metric_primary=str(opportunity.get("net_rate") or ""),
-            trigger_metric_secondary=str(opportunity.get("annual") or ""),
+            trigger_metric_secondary=f"{opportunity.get('annual') or ''}{settlement_marker}",
             trigger_metric_risk=str(opportunity.get("spread") or ""),
             trigger_reason=(
                 f"资金费开仓: 净资金费率 {opportunity.get('net_rate') or '--'} / "
@@ -433,6 +461,92 @@ class ArbitrageExecutionPlanService:
     def _close_sides_by_strategy_type(self, strategy_type: str) -> tuple[str, str]:
         _ = strategy_type
         return ("sell", "buy")
+
+    def _resolve_current_enabled_rule(
+        self,
+        *,
+        user_id: int,
+        strategy_rule: Dict[str, Any],
+    ) -> Dict[str, Any] | None:
+        rule_id = int(strategy_rule.get("id") or 0)
+        if user_id <= 0 or rule_id <= 0:
+            return None
+        current_rule = account_repository.get_strategy_rule_by_id(rule_id, user_id)
+        if current_rule is None or not bool(current_rule.get("is_enabled")):
+            return None
+        return current_rule
+
+    def _prepare_execution_opportunity(
+        self,
+        *,
+        user_id: int,
+        strategy_type: str,
+        opportunity: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        rows = opportunity_user_overlay_service.enrich_execution_rows(
+            user_id=user_id,
+            channel=strategy_type,
+            rows=[opportunity],
+        )
+        return rows[0] if rows else dict(opportunity)
+
+    def _is_open_candidate(
+        self,
+        *,
+        user_id: int,
+        strategy_type: str,
+        strategy_rule: Dict[str, Any],
+        opportunity: Dict[str, Any],
+    ) -> bool:
+        context = strategy_open_candidate_service.build_evaluation_context(
+            user_id=user_id,
+            channel=strategy_type,
+            rule_rows=[strategy_rule],
+        )
+        result = strategy_open_candidate_service.evaluate_execution_rule(
+            user_id=user_id,
+            channel=strategy_type,
+            row=opportunity,
+            rule=strategy_rule,
+            context=context,
+        )
+        return bool(result.is_candidate)
+
+    def _is_trading_status_normal(self, row: Dict[str, Any]) -> bool:
+        status_code = row.get("status_code")
+        if status_code not in (None, ""):
+            try:
+                if int(status_code) != 1:
+                    return False
+            except (TypeError, ValueError):
+                return False
+        row_status = str(row.get("row_status") or "").strip().lower()
+        if row_status and row_status != "live":
+            return False
+        if "tradable" in row and not bool(row.get("tradable")):
+            return False
+        if bool(row.get("is_frozen")):
+            return False
+        if not bool(row.get("has_market_data")):
+            return False
+        if not bool(row.get("is_market_data_fresh")):
+            return False
+        if not bool(row.get("is_price_aligned", True)):
+            return False
+        return True
+
+    def _build_funding_settlement_marker(self, opportunity: Dict[str, Any]) -> str:
+        values: List[int] = []
+        for field_name in ("long_settlement_at_ms", "short_settlement_at_ms", "settlement_at_ms"):
+            try:
+                value = int(float(opportunity.get(field_name) or 0))
+            except (TypeError, ValueError):
+                value = 0
+            if value > 0:
+                values.append(value)
+        if not values:
+            return ""
+        return f" / settle_ms={max(values)}"
 
 
 arbitrage_execution_plan_service = ArbitrageExecutionPlanService()

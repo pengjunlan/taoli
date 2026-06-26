@@ -281,6 +281,7 @@ class MySQLConnectionManager:
                 max_hold_minutes INT NOT NULL DEFAULT 0,
                 close_interval_seconds INT NOT NULL DEFAULT 0,
                 close_batch_count INT NOT NULL DEFAULT 0,
+                close_batch_ratio_percent DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
                 single_leg_timeout_seconds INT NOT NULL DEFAULT 0,
                 is_enabled TINYINT(1) NOT NULL DEFAULT 1,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -511,6 +512,44 @@ class MySQLConnectionManager:
                     ON DELETE SET NULL,
                 CONSTRAINT fk_arbitrage_positions_fill
                     FOREIGN KEY (last_fill_id) REFERENCES arbitrage_fill_records (id)
+                    ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS arbitrage_funding_fee_receipts (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                execution_id BIGINT UNSIGNED NOT NULL,
+                order_leg_id BIGINT UNSIGNED NULL,
+                user_id BIGINT UNSIGNED NOT NULL,
+                exchange_account_id BIGINT UNSIGNED NULL,
+                exchange_code VARCHAR(32) NOT NULL DEFAULT '',
+                market_type VARCHAR(32) NOT NULL DEFAULT '',
+                symbol VARCHAR(128) NOT NULL DEFAULT '',
+                position_side VARCHAR(16) NOT NULL DEFAULT '',
+                asset_code VARCHAR(32) NOT NULL DEFAULT '',
+                fee_amount DECIMAL(28,12) NOT NULL DEFAULT 0.000000000000,
+                exchange_record_id VARCHAR(128) NOT NULL DEFAULT '',
+                settled_at DATETIME NULL,
+                raw_payload LONGTEXT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_arbitrage_funding_receipt_record (
+                    execution_id,
+                    exchange_account_id,
+                    exchange_record_id
+                ),
+                KEY idx_arbitrage_funding_fee_receipts_execution_id (execution_id),
+                KEY idx_arbitrage_funding_fee_receipts_user_id (user_id),
+                CONSTRAINT fk_arbitrage_funding_fee_receipts_execution
+                    FOREIGN KEY (execution_id) REFERENCES arbitrage_executions (id)
+                    ON DELETE CASCADE,
+                CONSTRAINT fk_arbitrage_funding_fee_receipts_order_leg
+                    FOREIGN KEY (order_leg_id) REFERENCES arbitrage_order_legs (id)
+                    ON DELETE SET NULL,
+                CONSTRAINT fk_arbitrage_funding_fee_receipts_user
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                    ON DELETE CASCADE,
+                CONSTRAINT fk_arbitrage_funding_fee_receipts_account
+                    FOREIGN KEY (exchange_account_id) REFERENCES exchange_accounts (id)
                     ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """,
@@ -1153,6 +1192,16 @@ class MySQLConnectionManager:
                 ddl="""
                     ALTER TABLE strategy_rules
                     ADD COLUMN single_leg_timeout_seconds INT NOT NULL DEFAULT 0
+                    AFTER close_batch_count
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="strategy_rules",
+                column_name="close_batch_ratio_percent",
+                ddl="""
+                    ALTER TABLE strategy_rules
+                    ADD COLUMN close_batch_ratio_percent DECIMAL(10,4) NOT NULL DEFAULT 0.0000
                     AFTER close_batch_count
                 """,
             )

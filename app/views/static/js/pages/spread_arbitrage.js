@@ -155,6 +155,11 @@ function getOpenCandidateTitle(row) {
   return ` title="${escapeHtml(title)}"`;
 }
 
+function renderOpenCandidateBadge(row) {
+  if (!row.open_candidate) return "";
+  return `<span class="open-candidate-badge">满足开仓</span>`;
+}
+
 function renderSpreadRows(rows) {
   if (!Array.isArray(rows) || !rows.length) {
     return `
@@ -183,7 +188,7 @@ function renderSpreadRows(rows) {
           </td>
           <td>
             <div class="spread-symbol">
-              <strong>${escapeHtml(row.symbol)}</strong>
+              <strong>${escapeHtml(row.symbol)}${renderOpenCandidateBadge(row)}</strong>
               <span class="spread-symbol__hint">${escapeHtml(row.symbol)}/USDT</span>
             </div>
           </td>

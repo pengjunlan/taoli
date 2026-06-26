@@ -245,7 +245,7 @@ function renderHistoryOrderRows(rows) {
   if (!Array.isArray(rows) || !rows.length) {
     return `
       <tr class="table-empty-row">
-        <td colspan="12" class="spread-metric">当前还没有历史订单记录。</td>
+        <td colspan="13" class="spread-metric">当前还没有历史订单记录。</td>
       </tr>
     `;
   }
@@ -275,6 +275,7 @@ function renderHistoryOrderRows(rows) {
           <td class="spread-metric">${escapeHtml(row.filled_quantity)}</td>
           <td class="spread-metric">${escapeHtml(row.filled_value)}</td>
           <td class="spread-metric">${escapeHtml(row.fill_count)}</td>
+          <td><span class="pill pill--${escapeHtml(row.close_type_tone || "neutral")}">${escapeHtml(row.close_type_label || "--")}</span></td>
           <td>${escapeHtml(row.result || "--")}</td>
         </tr>
       `,
@@ -349,18 +350,23 @@ function applyPayload(result) {
   updateRuntimeStatus(latestPayload.runtime_status);
 
   const activePositionsBody = document.querySelector("[data-runtime-active-positions-body]");
-  const activeOrdersBody = document.querySelector("[data-runtime-active-orders-body]");
+  const pendingOrdersBody = document.querySelector("[data-runtime-pending-orders-body]");
+  const actualOrdersBody = document.querySelector("[data-runtime-actual-orders-body]");
   const historyOrdersBody = document.querySelector("[data-runtime-history-orders-body]");
   const generatedAt = document.querySelector("[data-runtime-generated-at]");
   const activePositionCount = document.querySelector("[data-runtime-active-position-count]");
-  const activeOrderCount = document.querySelector("[data-runtime-active-order-count]");
+  const pendingOrderCount = document.querySelector("[data-runtime-pending-order-count]");
+  const actualOrderCount = document.querySelector("[data-runtime-actual-order-count]");
   const historyOrderCount = document.querySelector("[data-runtime-history-order-count]");
 
   if (activePositionsBody) {
     activePositionsBody.innerHTML = renderActivePositionRows(latestPayload.active_positions_rows || []);
   }
-  if (activeOrdersBody) {
-    activeOrdersBody.innerHTML = renderActiveOrderRows(latestPayload.active_order_rows || []);
+  if (pendingOrdersBody) {
+    pendingOrdersBody.innerHTML = renderActiveOrderRows(latestPayload.pending_order_rows || []);
+  }
+  if (actualOrdersBody) {
+    actualOrdersBody.innerHTML = renderActiveOrderRows(latestPayload.actual_order_rows || []);
   }
   if (historyOrdersBody) {
     historyOrdersBody.innerHTML = renderHistoryOrderRows(latestPayload.history_order_rows || []);
@@ -371,8 +377,11 @@ function applyPayload(result) {
   if (activePositionCount) {
     activePositionCount.textContent = `共 ${Number((latestPayload.active_positions_rows || []).length)} 个组合`;
   }
-  if (activeOrderCount) {
-    activeOrderCount.textContent = `共 ${Number((latestPayload.active_order_rows || []).length)} 条当前订单`;
+  if (pendingOrderCount) {
+    pendingOrderCount.textContent = `共 ${Number((latestPayload.pending_order_rows || []).length)} 条当前挂单`;
+  }
+  if (actualOrderCount) {
+    actualOrderCount.textContent = `共 ${Number((latestPayload.actual_order_rows || []).length)} 条实际订单`;
   }
   if (historyOrderCount) {
     historyOrderCount.textContent = `共 ${Number((latestPayload.history_order_rows || []).length)} 条历史订单`;

@@ -123,6 +123,7 @@ class AccountRepositoryAutomationMixin:
                     max_hold_minutes,
                     close_interval_seconds,
                     close_batch_count,
+                    close_batch_ratio_percent,
                     single_leg_timeout_seconds,
                     is_enabled,
                     created_at,
@@ -200,6 +201,7 @@ class AccountRepositoryAutomationMixin:
                     max_hold_minutes,
                     close_interval_seconds,
                     close_batch_count,
+                    close_batch_ratio_percent,
                     single_leg_timeout_seconds,
                     is_enabled,
                     created_at,
@@ -238,6 +240,7 @@ class AccountRepositoryAutomationMixin:
         max_hold_minutes: int,
         close_interval_seconds: int,
         close_batch_count: int,
+        close_batch_ratio_percent: float,
         single_leg_timeout_seconds: int,
         is_enabled: bool,
     ) -> StrategyRule:
@@ -269,10 +272,11 @@ class AccountRepositoryAutomationMixin:
                     max_hold_minutes,
                     close_interval_seconds,
                     close_batch_count,
+                    close_batch_ratio_percent,
                     single_leg_timeout_seconds,
                     is_enabled
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     user_id,
@@ -298,6 +302,7 @@ class AccountRepositoryAutomationMixin:
                     max_hold_minutes,
                     close_interval_seconds,
                     close_batch_count,
+                    close_batch_ratio_percent,
                     single_leg_timeout_seconds,
                     1 if is_enabled else 0,
                 ),
@@ -331,6 +336,7 @@ class AccountRepositoryAutomationMixin:
                     max_hold_minutes,
                     close_interval_seconds,
                     close_batch_count,
+                    close_batch_ratio_percent,
                     single_leg_timeout_seconds,
                     is_enabled,
                     created_at,
@@ -372,6 +378,7 @@ class AccountRepositoryAutomationMixin:
         max_hold_minutes: int,
         close_interval_seconds: int,
         close_batch_count: int,
+        close_batch_ratio_percent: float,
         single_leg_timeout_seconds: int,
         is_enabled: bool,
     ) -> StrategyRule | None:
@@ -403,6 +410,7 @@ class AccountRepositoryAutomationMixin:
                     max_hold_minutes = %s,
                     close_interval_seconds = %s,
                     close_batch_count = %s,
+                    close_batch_ratio_percent = %s,
                     single_leg_timeout_seconds = %s,
                     is_enabled = %s
                 WHERE id = %s AND user_id = %s
@@ -430,6 +438,7 @@ class AccountRepositoryAutomationMixin:
                     max_hold_minutes,
                     close_interval_seconds,
                     close_batch_count,
+                    close_batch_ratio_percent,
                     single_leg_timeout_seconds,
                     1 if is_enabled else 0,
                     rule_id,
@@ -465,6 +474,7 @@ class AccountRepositoryAutomationMixin:
                     max_hold_minutes,
                     close_interval_seconds,
                     close_batch_count,
+                    close_batch_ratio_percent,
                     single_leg_timeout_seconds,
                     is_enabled,
                     created_at,

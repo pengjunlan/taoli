@@ -48,6 +48,7 @@ const STRATEGY_FIELD_HINTS = {
   max_hold_minutes: "单个套利持仓最多持有多久。填 0 表示不按时间强制退出。",
   close_interval_seconds: "分批平仓时，两批之间至少间隔多少秒。填 0 表示不做间隔限制。",
   close_batch_count: "计划分几批平仓。填 0 表示由系统按默认方式处理。",
+  close_batch_ratio_percent: "每次触发平仓时最多平掉当前剩余仓位的百分比。填 0 时按平仓批次数等分处理。",
   single_leg_timeout_seconds: "一边成交、另一边迟迟未成交时，等待多久后进入异常处理。填 0 表示使用系统默认保护。",
   is_enabled: "启用后该规则会参与自动筛选和执行；关闭后只保留配置，不再触发新的自动开仓。",
 };
@@ -306,6 +307,7 @@ function bindStrategyModal() {
     "max_hold_minutes",
     "close_interval_seconds",
     "close_batch_count",
+    "close_batch_ratio_percent",
     "single_leg_timeout_seconds",
   ];
 

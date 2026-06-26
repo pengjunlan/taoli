@@ -112,6 +112,7 @@ class StrategyRule:
     max_hold_minutes: int
     close_interval_seconds: int
     close_batch_count: int
+    close_batch_ratio_percent: float
     single_leg_timeout_seconds: int
     is_enabled: bool
     created_at: datetime

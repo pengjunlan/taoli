@@ -5,10 +5,13 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List
 
 from app.application.services.arbitrage_execution_plan_service import arbitrage_execution_plan_service
+from app.application.services.opportunity_user_overlay_service import opportunity_user_overlay_service
 from app.application.services.opportunity_status_service import opportunity_status_service
 from app.application.services.strategy_runtime_monitor_service import strategy_runtime_monitor_service
+from app.application.services.trade_decision_service import trade_decision_service
 from app.infrastructure.cache import market_runtime_cache
 from app.infrastructure.persistence import arbitrage_execution_repository
+from app.infrastructure.persistence.account_repository import account_repository
 from app.shared.exceptions import AccountNotFoundError, AccountValidationError
 
 
@@ -24,6 +27,10 @@ EXPECTED_SUMMARY_CARD_KEYS = {
 class StrategyRuntimeService:
     def get_positions_orders_payload(self, user_id: int) -> Dict[str, object]:
         payload = dict(opportunity_status_service.build_strategy_payload(user_id=user_id))
+        live_strategy_payload = self._build_live_strategy_payload(user_id=user_id)
+        if live_strategy_payload is not None:
+            self._merge_live_strategy_payload(payload=payload, live_payload=live_strategy_payload)
+
         monitor_tables = strategy_runtime_monitor_service.build_monitor_tables(user_id=user_id)
 
         raw_active_positions_rows = list(monitor_tables.get("active_positions_rows") or [])
@@ -31,10 +38,14 @@ class StrategyRuntimeService:
             user_id=user_id,
             active_positions_rows=raw_active_positions_rows,
         )
+        pending_order_rows = list(monitor_tables.get("pending_order_rows") or [])
+        actual_order_rows = list(monitor_tables.get("actual_order_rows") or [])
         active_order_rows = list(monitor_tables.get("active_order_rows") or [])
         history_order_rows = list(monitor_tables.get("history_order_rows") or [])
 
         payload["active_positions_rows"] = active_positions_rows
+        payload["pending_order_rows"] = pending_order_rows
+        payload["actual_order_rows"] = actual_order_rows
         payload["active_order_rows"] = active_order_rows
         payload["history_order_rows"] = history_order_rows
 
@@ -50,6 +61,61 @@ class StrategyRuntimeService:
             summary_cards = self._empty_summary_cards()
         payload["summary_cards"] = summary_cards
         return payload
+
+    def _build_live_strategy_payload(self, *, user_id: int) -> Dict[str, object] | None:
+        funding_state = market_runtime_cache.get_public_rows_state("funding")
+        spread_state = market_runtime_cache.get_public_rows_state("spread")
+        if funding_state is None and spread_state is None:
+            return None
+
+        strategy_rows = account_repository.list_strategy_rules_by_user_id(user_id)
+        active_account_count = len(account_repository.list_active_accounts_with_address_by_user_id(user_id))
+        funding_rows = list((funding_state.rows if funding_state is not None else []) or [])
+        spread_rows = list((spread_state.rows if spread_state is not None else []) or [])
+        payload = trade_decision_service.build_runtime_payload(
+            user_id=user_id,
+            strategy_rows=strategy_rows,
+            funding_rows=funding_rows,
+            spread_rows=spread_rows,
+            account_count=active_account_count,
+        )
+        is_ready = bool((funding_state and funding_state.is_ready) or (spread_state and spread_state.is_ready))
+        payload["is_ready"] = is_ready
+        payload["source"] = "runtime_direct"
+        payload["status_message"] = "策略运行页已按当前公共机会数据重新生成候选、持仓和订单视图。"
+        payload["runtime_status"] = {
+            "state": "ready" if is_ready else "stale",
+            "label": "实时中" if is_ready else "快照中",
+            "tone": "positive" if is_ready else "warning",
+            "message": payload["status_message"],
+            "generated_at": self._format_datetime(payload.get("generated_at")),
+            "updated_at": self._format_datetime(payload.get("generated_at")),
+            "source": "runtime_direct",
+            "is_ready": is_ready,
+        }
+        payload["generated_at"] = self._format_datetime(payload.get("generated_at"))
+        return payload
+
+    def _merge_live_strategy_payload(
+        self,
+        *,
+        payload: Dict[str, object],
+        live_payload: Dict[str, object],
+    ) -> None:
+        for key in (
+            "candidate_rows",
+            "positions_rows",
+            "order_rows",
+            "fill_rows",
+            "enabled_rule_count",
+            "account_count",
+            "generated_at",
+            "runtime_status",
+            "pending_order_rows",
+            "actual_order_rows",
+        ):
+            if key in live_payload:
+                payload[key] = live_payload[key]
 
     def request_close_execution(self, *, user_id: int, execution_id: int) -> Dict[str, object]:
         execution_row = arbitrage_execution_repository.get_execution_by_id(execution_id)
@@ -314,11 +380,17 @@ class StrategyRuntimeService:
     def _find_runtime_opportunity(self, *, user_id: int, strategy_type: str, pair_key: str) -> Dict[str, Any] | None:
         if not strategy_type or not pair_key:
             return None
-        state = market_runtime_cache.get_user_rows_state(strategy_type, user_id)
-        rows: List[Dict[str, Any]] = list(state.rows) if state is not None else []
+        state = market_runtime_cache.get_public_rows_state(strategy_type)
+        public_rows: List[Dict[str, Any]] = list(state.rows) if state is not None else []
+        rows = opportunity_user_overlay_service.enrich_execution_rows(
+            user_id=user_id,
+            channel=strategy_type,
+            rows=public_rows,
+        )
+        normalized_pair_key = pair_key.strip().lower()
         for row in rows:
             market_pair_key = str(row.get("market_pair_key") or "").strip().lower()
-            if market_pair_key and pair_key.endswith(market_pair_key):
+            if market_pair_key and normalized_pair_key.endswith(market_pair_key):
                 return row
         return None
 
@@ -358,6 +430,11 @@ class StrategyRuntimeService:
 
     def _format_money(self, value: float) -> str:
         return f"${float(value or 0):,.2f}".rstrip("0").rstrip(".")
+
+    def _format_datetime(self, value: Any) -> str:
+        if hasattr(value, "strftime"):
+            return value.strftime("%Y-%m-%d %H:%M:%S")
+        return str(value or "--")
 
 
 strategy_runtime_service = StrategyRuntimeService()

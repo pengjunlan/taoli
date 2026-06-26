@@ -15,7 +15,7 @@ class StrategyRuleRuntimeView:
     stop_loss_price_diff: float
     max_pairs: int
     order_amount_usdt: float
-    max_position_quantity: float
+    max_position_usdt: float
     order_interval_seconds: int
 
 
@@ -27,15 +27,15 @@ class StrategyRuleRuntimeService:
     - funding `annualized_rate_threshold` => open net funding threshold
     - spread `spread_rate_threshold` => open spread-rate threshold
     - `max_spread_rate_threshold` => absolute price-diff limit / stop loss
-    - `max_position_usdt` => single-leg quantity cap
+    - `max_position_usdt` => single-pair notional cap in USDT
     """
 
     def build_runtime_view(self, rule_row: Dict[str, Any]) -> StrategyRuleRuntimeView:
         strategy_type = str(rule_row.get("strategy_type") or "").strip().lower()
         order_amount_usdt = self._float(rule_row.get("order_amount_usdt"))
-        max_position_quantity = self._float(rule_row.get("max_position_usdt"))
-        if max_position_quantity <= 0:
-            max_position_quantity = order_amount_usdt
+        max_position_usdt = self._float(rule_row.get("max_position_usdt"))
+        if max_position_usdt <= 0:
+            max_position_usdt = order_amount_usdt
 
         if strategy_type == "funding":
             open_threshold = self._float(rule_row.get("annualized_rate_threshold"))
@@ -52,7 +52,7 @@ class StrategyRuleRuntimeService:
             stop_loss_price_diff=self._float(rule_row.get("max_spread_rate_threshold")),
             max_pairs=max(0, int(rule_row.get("max_pairs") or 0)),
             order_amount_usdt=order_amount_usdt,
-            max_position_quantity=max_position_quantity,
+            max_position_usdt=max_position_usdt,
             order_interval_seconds=max(0, int(rule_row.get("order_interval_seconds") or 0)),
         )
 

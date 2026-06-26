@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from typing import Any, List
 
 from app.infrastructure.persistence.mysql import mysql_manager
@@ -397,5 +398,65 @@ class ArbitrageExecutionRepositoryCommandsMixin:
                 WHERE id = %s
                 """,
                 (status, execution_id),
+            )
+            connection.commit()
+
+    def upsert_funding_fee_receipt(
+        self,
+        *,
+        execution_id: int,
+        order_leg_id: int | None,
+        user_id: int,
+        exchange_account_id: int | None,
+        exchange_code: str,
+        market_type: str,
+        symbol: str,
+        position_side: str,
+        asset_code: str,
+        fee_amount: float,
+        exchange_record_id: str,
+        settled_at: datetime | None,
+        raw_payload: Any,
+    ) -> None:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                INSERT INTO arbitrage_funding_fee_receipts (
+                    execution_id,
+                    order_leg_id,
+                    user_id,
+                    exchange_account_id,
+                    exchange_code,
+                    market_type,
+                    symbol,
+                    position_side,
+                    asset_code,
+                    fee_amount,
+                    exchange_record_id,
+                    settled_at,
+                    raw_payload
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    fee_amount = VALUES(fee_amount),
+                    settled_at = VALUES(settled_at),
+                    raw_payload = VALUES(raw_payload)
+                """,
+                (
+                    execution_id,
+                    order_leg_id,
+                    user_id,
+                    exchange_account_id,
+                    exchange_code,
+                    market_type,
+                    symbol,
+                    position_side,
+                    asset_code,
+                    fee_amount,
+                    exchange_record_id,
+                    settled_at,
+                    json.dumps(raw_payload, ensure_ascii=True, default=str) if raw_payload is not None else None,
+                ),
             )
             connection.commit()

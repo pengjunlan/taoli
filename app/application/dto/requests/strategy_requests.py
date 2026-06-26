@@ -26,6 +26,7 @@ class StrategyRuleCreateRequest(BaseModel):
     max_hold_minutes: int = 0
     close_interval_seconds: int = 0
     close_batch_count: int = 0
+    close_batch_ratio_percent: float = 0
     single_leg_timeout_seconds: int = 0
     is_enabled: bool = True
 
@@ -53,6 +54,7 @@ class StrategyRuleUpdateRequest(BaseModel):
     max_hold_minutes: int = 0
     close_interval_seconds: int = 0
     close_batch_count: int = 0
+    close_batch_ratio_percent: float = 0
     single_leg_timeout_seconds: int = 0
     is_enabled: bool = True
     close_positions_on_disable: bool = False

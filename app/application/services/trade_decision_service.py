@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 from app.application.services.opportunity_user_overlay_service import opportunity_user_overlay_service
 from app.infrastructure.persistence.account_repository import account_repository
 from app.application.services.local_position_service import local_position_service
+from app.application.services.strategy_open_candidate_service import strategy_open_candidate_service
 from app.application.services.strategy_rule_runtime_service import strategy_rule_runtime_service
 from app.application.services.strategy_runtime_monitor_service import strategy_runtime_monitor_service
 
@@ -43,10 +44,36 @@ class TradeDecisionService:
             channel="spread",
             rows=spread_rows,
         )
+        funding_context = strategy_open_candidate_service.build_evaluation_context(
+            user_id=user_id,
+            channel="funding",
+            rule_rows=funding_rules,
+        )
+        spread_context = strategy_open_candidate_service.build_evaluation_context(
+            user_id=user_id,
+            channel="spread",
+            rule_rows=spread_rules,
+        )
 
         candidates: List[Dict[str, object]] = []
-        candidates.extend(self._build_funding_candidates(funding_execution_rows, funding_rules, funding_rule_views))
-        candidates.extend(self._build_spread_candidates(spread_execution_rows, spread_rules, spread_rule_views))
+        candidates.extend(
+            self._build_funding_candidates(
+                user_id=user_id,
+                opportunity_rows=funding_execution_rows,
+                rule_rows=funding_rules,
+                rule_views=funding_rule_views,
+                evaluation_context=funding_context,
+            )
+        )
+        candidates.extend(
+            self._build_spread_candidates(
+                user_id=user_id,
+                opportunity_rows=spread_execution_rows,
+                rule_rows=spread_rules,
+                rule_views=spread_rule_views,
+                evaluation_context=spread_context,
+            )
+        )
 
         runtime_tables = local_position_service.build_runtime_tables(
             user_id=user_id,
@@ -57,6 +84,8 @@ class TradeDecisionService:
         order_rows = list(runtime_tables.get("order_rows") or [])
         fill_rows = list(runtime_tables.get("fill_rows") or [])
         active_positions_rows = list(monitor_tables.get("active_positions_rows") or [])
+        pending_order_rows = list(monitor_tables.get("pending_order_rows") or [])
+        actual_order_rows = list(monitor_tables.get("actual_order_rows") or [])
         active_order_rows = list(monitor_tables.get("active_order_rows") or [])
         history_order_rows = list(monitor_tables.get("history_order_rows") or [])
         summary_cards = self._build_summary_cards(
@@ -79,6 +108,8 @@ class TradeDecisionService:
             "order_rows": order_rows,
             "fill_rows": fill_rows,
             "active_positions_rows": active_positions_rows,
+            "pending_order_rows": pending_order_rows,
+            "actual_order_rows": actual_order_rows,
             "active_order_rows": active_order_rows,
             "history_order_rows": history_order_rows,
             "summary_cards": summary_cards,
@@ -86,9 +117,12 @@ class TradeDecisionService:
 
     def _build_funding_candidates(
         self,
+        *,
+        user_id: int,
         opportunity_rows: List[Dict[str, Any]],
         rule_rows: List[Dict[str, Any]],
         rule_views: Dict[int, object],
+        evaluation_context,
     ) -> List[Dict[str, object]]:
         if not opportunity_rows or not rule_rows:
             return []
@@ -96,28 +130,21 @@ class TradeDecisionService:
         default_rule = rule_rows[0]
         result: List[Dict[str, object]] = []
         for rank, row in enumerate(opportunity_rows, start=1):
-            if not bool(row.get("execution_ready")):
-                continue
-            net_rate = self._parse_float(row.get("net_rate_value"), fallback=row.get("net_rate"))
-            price_diff = self._parse_float(row.get("price_diff_value"), fallback=row.get("price_diff"))
-            matched_rule = next(
-                (
-                    rule
-                    for rule in rule_rows
-                    if net_rate > rule_views.get(int(rule.get("id") or 0)).open_threshold
-                    and (
-                        rule_views.get(int(rule.get("id") or 0)).stop_loss_price_diff <= 0
-                        or price_diff <= rule_views.get(int(rule.get("id") or 0)).stop_loss_price_diff
-                    )
-                ),
-                None,
+            evaluation_result = strategy_open_candidate_service.evaluate_row(
+                user_id=user_id,
+                channel="funding",
+                row=row,
+                context=evaluation_context,
             )
+            if not evaluation_result.is_candidate:
+                continue
+            matched_rule = self._find_rule_by_id(rule_rows=rule_rows, rule_id=evaluation_result.rule_id)
             if matched_rule is None:
                 continue
 
             runtime_rule = rule_views.get(int(matched_rule.get("id") or 0))
             order_amount = runtime_rule.order_amount_usdt
-            max_position = runtime_rule.max_position_quantity
+            max_position = runtime_rule.max_position_usdt
             result.append(
                 {
                     "rank": rank,
@@ -133,7 +160,6 @@ class TradeDecisionService:
                     "risk_metric": str(row.get("price_diff") or "--"),
                     "planned_order_amount": order_amount,
                     "max_position_usdt": max_position,
-                    "max_position_quantity": max_position,
                     "order_interval_seconds": runtime_rule.order_interval_seconds,
                     "reason": (
                         f"命中规则 {matched_rule.get('name') or '--'}："
@@ -145,16 +171,19 @@ class TradeDecisionService:
                     "status_tone": "brand",
                     "action_label": "开资金费对冲",
                     "opportunity_time": str(row.get("settlement") or "--"),
-                    "position_size_text": self._format_quantity(max_position, str(row.get("symbol") or "")),
+                    "position_size_text": self._format_money(max_position),
                 }
             )
         return result
 
     def _build_spread_candidates(
         self,
+        *,
+        user_id: int,
         opportunity_rows: List[Dict[str, Any]],
         rule_rows: List[Dict[str, Any]],
         rule_views: Dict[int, object],
+        evaluation_context,
     ) -> List[Dict[str, object]]:
         if not opportunity_rows or not rule_rows:
             return []
@@ -162,28 +191,21 @@ class TradeDecisionService:
         default_rule = rule_rows[0]
         result: List[Dict[str, object]] = []
         for rank, row in enumerate(opportunity_rows, start=1):
-            if not bool(row.get("execution_ready")):
-                continue
-            latest_spread = self._parse_float(row.get("latest_spread_value"), fallback=row.get("latest_spread"))
-            price_diff = self._parse_float(row.get("price_diff_value"), fallback=row.get("price_diff"))
-            matched_rule = next(
-                (
-                    rule
-                    for rule in rule_rows
-                    if latest_spread >= rule_views.get(int(rule.get("id") or 0)).open_threshold
-                    and (
-                        rule_views.get(int(rule.get("id") or 0)).stop_loss_price_diff <= 0
-                        or price_diff <= rule_views.get(int(rule.get("id") or 0)).stop_loss_price_diff
-                    )
-                ),
-                None,
+            evaluation_result = strategy_open_candidate_service.evaluate_row(
+                user_id=user_id,
+                channel="spread",
+                row=row,
+                context=evaluation_context,
             )
+            if not evaluation_result.is_candidate:
+                continue
+            matched_rule = self._find_rule_by_id(rule_rows=rule_rows, rule_id=evaluation_result.rule_id)
             if matched_rule is None:
                 continue
 
             runtime_rule = rule_views.get(int(matched_rule.get("id") or 0))
             order_amount = runtime_rule.order_amount_usdt
-            max_position = runtime_rule.max_position_quantity
+            max_position = runtime_rule.max_position_usdt
             result.append(
                 {
                     "rank": rank,
@@ -199,7 +221,6 @@ class TradeDecisionService:
                     "risk_metric": str(row.get("price_diff") or "--"),
                     "planned_order_amount": order_amount,
                     "max_position_usdt": max_position,
-                    "max_position_quantity": max_position,
                     "order_interval_seconds": runtime_rule.order_interval_seconds,
                     "reason": (
                         f"命中规则 {matched_rule.get('name') or '--'}："
@@ -210,10 +231,16 @@ class TradeDecisionService:
                     "status_tone": "brand",
                     "action_label": "开价差对冲",
                     "opportunity_time": str(row.get("opportunity_time") or "--"),
-                    "position_size_text": self._format_quantity(max_position, str(row.get("symbol") or "")),
+                    "position_size_text": self._format_money(max_position),
                 }
             )
         return result
+
+    def _find_rule_by_id(self, *, rule_rows: List[Dict[str, Any]], rule_id: int) -> Dict[str, Any] | None:
+        for rule in rule_rows:
+            if int(rule.get("id") or 0) == int(rule_id or 0):
+                return rule
+        return None
 
     def _build_summary_cards(
         self,

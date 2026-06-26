@@ -41,10 +41,14 @@ class StrategyRuntimeMonitorService:
             order_legs=recent_order_legs,
             open_positions=open_positions,
         )
-        active_order_rows = self._build_active_order_rows(recent_order_legs)
+        pending_order_rows = self._build_pending_order_rows(recent_order_legs)
+        actual_order_rows = self._build_actual_order_rows(recent_order_legs)
+        active_order_rows = pending_order_rows + actual_order_rows
         history_order_rows = self._build_history_order_rows(recent_order_legs, recent_fills)
         return {
             "active_positions_rows": positions_rows,
+            "pending_order_rows": pending_order_rows,
+            "actual_order_rows": actual_order_rows,
             "active_order_rows": active_order_rows,
             "history_order_rows": history_order_rows,
         }
@@ -187,42 +191,57 @@ class StrategyRuntimeMonitorService:
         )
         return merged_rows
 
-    def _build_active_order_rows(self, order_legs: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    def _build_pending_order_rows(self, order_legs: List[Dict[str, Any]]) -> List[Dict[str, str]]:
         active_statuses = {"pending", "created", "submitting", "submitted", "partial"}
         rows: List[Dict[str, str]] = []
         for row in order_legs:
             status = str(row.get("status") or "").strip().lower()
             if status not in active_statuses:
                 continue
-            rows.append(
-                {
-                    "row_code": self._build_order_row_code(row),
-                    "time": self._format_time(row.get("submitted_at") or row.get("acknowledged_at") or row.get("created_at")),
-                    "symbol": str(row.get("symbol") or "--").replace("/", ""),
-                    "strategy": str(row.get("strategy_rule_name") or "--"),
-                    "pair_key": str(row.get("pair_key") or ""),
-                    "exchange": str(row.get("exchange_code") or "--").upper(),
-                    "leg_role": self._format_leg_role(str(row.get("leg_role") or "")),
-                    "action": self._format_side(str(row.get("side") or ""), str(row.get("position_side") or "")),
-                    "execution_action": self._format_execution_action(str(row.get("action") or "")),
-                    "status": self._format_order_status(status),
-                    "status_tone": self._status_tone(status),
-                    "requested_price": self._format_price(self._parse_float(row.get("requested_price"))),
-                    "requested_quantity": self._format_quantity(
-                        self._to_base_quantity(row, "requested_quantity"),
-                        self._base_asset_from_symbol(str(row.get("symbol") or "")),
-                    ),
-                    "filled_quantity": self._format_quantity(
-                        self._parse_float(row.get("filled_quantity")),
-                        self._base_asset_from_symbol(str(row.get("symbol") or "")),
-                    ),
-                    "requested_value": self._format_value_display(self._parse_float(row.get("requested_value_usdt"))),
-                    "filled_value": self._format_value_display(self._parse_float(row.get("filled_value_usdt"))),
-                    "retry_count": str(int(row.get("retry_count") or 0)),
-                    "reason": str(row.get("status_message") or row.get("trigger_reason") or "--"),
-                }
-            )
+            if str(row.get("exchange_order_id") or "").strip():
+                continue
+            rows.append(self._build_active_order_row(row, status=status))
         return rows
+
+    def _build_actual_order_rows(self, order_legs: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        active_statuses = {"pending", "created", "submitting", "submitted", "partial"}
+        rows: List[Dict[str, str]] = []
+        for row in order_legs:
+            status = str(row.get("status") or "").strip().lower()
+            if status not in active_statuses:
+                continue
+            if not str(row.get("exchange_order_id") or "").strip():
+                continue
+            rows.append(self._build_active_order_row(row, status=status))
+        return rows
+
+    def _build_active_order_row(self, row: Dict[str, Any], *, status: str) -> Dict[str, str]:
+        return {
+            "row_code": self._build_order_row_code(row),
+            "time": self._format_time(row.get("submitted_at") or row.get("acknowledged_at") or row.get("created_at")),
+            "symbol": str(row.get("symbol") or "--").replace("/", ""),
+            "strategy": str(row.get("strategy_rule_name") or "--"),
+            "pair_key": str(row.get("pair_key") or ""),
+            "exchange": str(row.get("exchange_code") or "--").upper(),
+            "leg_role": self._format_leg_role(str(row.get("leg_role") or "")),
+            "action": self._format_side(str(row.get("side") or ""), str(row.get("position_side") or "")),
+            "execution_action": self._format_execution_action(str(row.get("action") or "")),
+            "status": self._format_order_status(status),
+            "status_tone": self._status_tone(status),
+            "requested_price": self._format_price(self._parse_float(row.get("requested_price"))),
+            "requested_quantity": self._format_quantity(
+                self._to_base_quantity(row, "requested_quantity"),
+                self._base_asset_from_symbol(str(row.get("symbol") or "")),
+            ),
+            "filled_quantity": self._format_quantity(
+                self._parse_float(row.get("filled_quantity")),
+                self._base_asset_from_symbol(str(row.get("symbol") or "")),
+            ),
+            "requested_value": self._format_value_display(self._parse_float(row.get("requested_value_usdt"))),
+            "filled_value": self._format_value_display(self._parse_float(row.get("filled_value_usdt"))),
+            "retry_count": str(int(row.get("retry_count") or 0)),
+            "reason": str(row.get("status_message") or row.get("trigger_reason") or "--"),
+        }
 
     def _build_history_order_rows(
         self,
@@ -251,6 +270,7 @@ class StrategyRuntimeMonitorService:
                 symbol=str(row.get("symbol") or ""),
                 side=str(row.get("side") or ""),
             )
+            close_type = self._resolve_close_type(row)
             rows.append(
                 {
                     "row_code": self._build_order_row_code(row),
@@ -271,10 +291,31 @@ class StrategyRuntimeMonitorService:
                     ),
                     "filled_value": self._format_value_display(self._parse_float(row.get("filled_value_usdt"))),
                     "fill_count": str(fill_count_map.get(history_key, 0)),
+                    "close_type": close_type["key"],
+                    "close_type_label": close_type["label"],
+                    "close_type_tone": close_type["tone"],
                     "result": str(row.get("status_message") or "--"),
                 }
             )
         return rows
+
+    def _resolve_close_type(self, row: Dict[str, Any]) -> Dict[str, str]:
+        execution_action = str(row.get("action") or "").strip().lower()
+        status = str(row.get("status") or "").strip().lower()
+        reason = f"{row.get('trigger_reason') or ''} {row.get('status_message') or ''}".lower()
+        if execution_action != "close":
+            return {"key": "open", "label": "开仓订单", "tone": self._status_tone(status)}
+        if "止盈" in reason or "take_profit" in reason:
+            return {"key": "take_profit", "label": "止盈平仓", "tone": "positive"}
+        if "止损" in reason or "stop_loss" in reason or "超过最大价差" in reason or "最大资金费成本" in reason:
+            return {"key": "stop_loss", "label": "止损平仓", "tone": "danger"}
+        if "强制" in reason or "单腿" in reason or "暴露" in reason or "force" in reason:
+            return {"key": "force_close", "label": "强制平仓", "tone": "danger"}
+        if "一键" in reason or "手动" in reason or "manual" in reason:
+            return {"key": "manual_close", "label": "手动平仓", "tone": "warning"}
+        if "最大持有时间" in reason or "回落" in reason or "正常平仓" in reason:
+            return {"key": "normal_close", "label": "正常平仓", "tone": "brand"}
+        return {"key": "close", "label": "平仓订单", "tone": self._status_tone(status)}
 
     def _match_position(
         self,

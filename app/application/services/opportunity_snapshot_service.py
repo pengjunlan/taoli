@@ -60,6 +60,8 @@ class OpportunitySnapshotService:
             "fill_rows": list(payload.get("fill_rows") or []),
             "candidate_rows": filtered_candidate_rows,
             "active_positions_rows": list(payload.get("active_positions_rows") or []),
+            "pending_order_rows": list(payload.get("pending_order_rows") or []),
+            "actual_order_rows": list(payload.get("actual_order_rows") or []),
             "active_order_rows": list(payload.get("active_order_rows") or []),
             "history_order_rows": list(payload.get("history_order_rows") or []),
             "generated_at": generated_at.isoformat(),
@@ -116,6 +118,8 @@ class OpportunitySnapshotService:
             "fill_rows": list(payload.get("fill_rows") or []),
             "candidate_rows": filtered_candidate_rows,
             "active_positions_rows": list(payload.get("active_positions_rows") or []),
+            "pending_order_rows": list(payload.get("pending_order_rows") or []),
+            "actual_order_rows": list(payload.get("actual_order_rows") or []),
             "active_order_rows": list(payload.get("active_order_rows") or []),
             "history_order_rows": list(payload.get("history_order_rows") or []),
             "generated_at": self._parse_datetime(payload.get("generated_at")) or snapshot.get("generated_at"),
@@ -138,4 +142,3 @@ class OpportunitySnapshotService:
 
 
 opportunity_snapshot_service = OpportunitySnapshotService()
-

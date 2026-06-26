@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Tuple
 
+from app.application.services.strategy_risk_config import strategy_risk_config
 from app.infrastructure.persistence import arbitrage_execution_repository
 from app.infrastructure.persistence.account_repository import account_repository
-from app.shared.utils.formatters import format_usd_compact
+from app.shared.utils.formatters import format_signed_percent, format_usd_compact
 
 
 class OpportunityUserOverlayService:
@@ -213,6 +214,7 @@ class OpportunityUserOverlayService:
         if normalized_channel == "spread":
             self._set_fee_fields(item=item, prefix="buy", account=left_account)
             self._set_fee_fields(item=item, prefix="sell", account=right_account)
+            self._apply_user_net_spread(item=item)
 
     def _set_fee_fields(self, *, item: Dict[str, Any], prefix: str, account: Dict[str, Any] | None) -> None:
         maker_fee_rate = self._resolve_account_fee_rate(account, field_name="maker_fee_rate")
@@ -224,6 +226,16 @@ class OpportunityUserOverlayService:
         item[f"{prefix}_taker_fee_rate_value"] = taker_fee_rate
         item[f"{prefix}_fee_rate"] = self._format_fee_rate(display_fee_rate)
         item[f"{prefix}_fee_rate_value"] = display_fee_rate
+
+    def _apply_user_net_spread(self, *, item: Dict[str, Any]) -> None:
+        latest_spread = self._to_float(item.get("latest_spread_value"))
+        if latest_spread <= 0:
+            return
+        buy_fee = self._to_float(item.get("buy_taker_fee_rate_value"))
+        sell_fee = self._to_float(item.get("sell_taker_fee_rate_value"))
+        net_spread = latest_spread - buy_fee - sell_fee
+        item["net_spread_value"] = net_spread
+        item["net_spread"] = format_signed_percent(net_spread, 2)
 
     def _resolve_account_fee_rate(self, account: Dict[str, Any] | None, *, field_name: str) -> float:
         if account is None:
@@ -237,7 +249,8 @@ class OpportunityUserOverlayService:
     def _estimate_quantity(self, available_amount: float, price: float) -> float:
         if available_amount <= 0 or price <= 0:
             return 0.0
-        usable = min(available_amount, 1000.0)
+        usable_cap = max(0.0, float(strategy_risk_config.overlay_available_cap_usdt or 0))
+        usable = min(available_amount, usable_cap) if usable_cap > 0 else available_amount
         return usable / price
 
     def _format_quantity(self, quantity: float, base_asset: str) -> str:

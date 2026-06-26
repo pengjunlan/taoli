@@ -13,6 +13,7 @@ from typing import Any, Dict, List
 from app.application.services.market_sync_service import market_sync_service
 from app.application.services.monitor_center_service import monitor_center_service
 from app.application.services.opportunity_snapshot_service import opportunity_snapshot_service
+from app.application.services.strategy_risk_config import strategy_risk_config
 from app.application.services.trade_decision_service import trade_decision_service
 from app.infrastructure.cache import market_runtime_cache, strategy_runtime_cache
 from app.infrastructure.persistence.account_repository import account_repository
@@ -233,8 +234,10 @@ class OpportunityRuntimeService:
                 stale_seconds=self._market_data_display_stale_seconds,
             )
 
+            left_funding_rate_4h = self._normalized_funding_rate_percent(left_funding)
+            right_funding_rate_4h = self._normalized_funding_rate_percent(right_funding)
             funding_diff_percent = (
-                left_funding.funding_rate_percent - right_funding.funding_rate_percent
+                left_funding_rate_4h - right_funding_rate_4h
                 if has_market_data and left_funding is not None and right_funding is not None
                 else 0.0
             )
@@ -242,45 +245,21 @@ class OpportunityRuntimeService:
             raw_left_price_value = float(left_ticker.last_price) if left_ticker is not None else 0.0
             raw_right_price_value = float(right_ticker.last_price) if right_ticker is not None else 0.0
             left_short_right_long_net_rate = (
-                left_funding.funding_rate_percent - right_funding.funding_rate_percent
+                left_funding_rate_4h - right_funding_rate_4h
                 if has_market_data and left_funding is not None and right_funding is not None
                 else 0.0
             )
             right_short_left_long_net_rate = (
-                right_funding.funding_rate_percent - left_funding.funding_rate_percent
+                right_funding_rate_4h - left_funding_rate_4h
                 if has_market_data and left_funding is not None and right_funding is not None
                 else 0.0
-            )
-            long_settlement_hours = self._resolve_settlement_interval_hours(
-                right_funding if left_is_short_leg else left_funding,
-            )
-            short_settlement_hours = self._resolve_settlement_interval_hours(
-                left_funding if left_is_short_leg else right_funding,
             )
             actual_net_rate = (
-                abs(
-                    (
-                        (
-                            left_funding.funding_rate_percent
-                            if left_is_short_leg and left_funding is not None
-                            else right_funding.funding_rate_percent if right_funding is not None else 0.0
-                        )
-                        / max(short_settlement_hours, 1e-9)
-                    )
-                    - (
-                        (
-                            right_funding.funding_rate_percent
-                            if left_is_short_leg and right_funding is not None
-                            else left_funding.funding_rate_percent if left_funding is not None else 0.0
-                        )
-                        / max(long_settlement_hours, 1e-9)
-                    )
-                )
-                * 4
+                abs(funding_diff_percent)
                 if has_market_data and left_funding is not None and right_funding is not None
                 else 0.0
             )
-            annualized = actual_net_rate * 3 * 365 if has_market_data else 0.0
+            annualized = actual_net_rate * 6 * 365 if has_market_data else 0.0
             short_exchange_code = left_exchange_code if left_is_short_leg else right_exchange_code
             long_exchange_code = right_exchange_code if left_is_short_leg else left_exchange_code
             short_symbol_raw = str(pair["left_symbol"]) if left_is_short_leg else str(pair["right_symbol"])
@@ -296,7 +275,7 @@ class OpportunityRuntimeService:
                 else float(right_ticker.last_price) if right_ticker is not None else 0.0
             )
             spread_percent = (
-                self._calc_price_gap_percent(short_price_value, long_price_value, absolute=True)
+                self._calc_price_gap_percent(short_price_value, long_price_value)
                 if has_market_data
                 else 0.0
             )
@@ -369,6 +348,14 @@ class OpportunityRuntimeService:
                     "right_symbol_raw": short_symbol_raw,
                     "left_price_value": long_price_value,
                     "right_price_value": short_price_value,
+                    **self._build_execution_quality_fields(
+                        left_bid=left_ticker.bid_price if left_ticker is not None else 0,
+                        left_ask=left_ticker.ask_price if left_ticker is not None else 0,
+                        left_quote_volume=left_ticker.quote_volume if left_ticker is not None else 0,
+                        right_bid=right_ticker.bid_price if right_ticker is not None else 0,
+                        right_ask=right_ticker.ask_price if right_ticker is not None else 0,
+                        right_quote_volume=right_ticker.quote_volume if right_ticker is not None else 0,
+                    ),
                     "annual": format_percent(annualized, 2) if has_market_data else "--",
                     "net_rate": format_percent(actual_net_rate, 4) if has_market_data else "--",
                     "net_rate_value": actual_net_rate,
@@ -462,16 +449,18 @@ class OpportunityRuntimeService:
                 stale_seconds=self._market_data_display_stale_seconds,
             )
 
-            left_buy_right_sell_spread = (
-                self._calc_price_gap_percent(right_ticker.bid_price, left_ticker.ask_price, absolute=True)
+            left_buy_right_sell_spread_raw = (
+                self._calc_price_gap_percent(right_ticker.bid_price, left_ticker.ask_price)
                 if has_market_data and left_ticker is not None and right_ticker is not None and left_ticker.ask_price > 0
                 else 0.0
             )
-            right_buy_left_sell_spread = (
-                self._calc_price_gap_percent(left_ticker.bid_price, right_ticker.ask_price, absolute=True)
+            right_buy_left_sell_spread_raw = (
+                self._calc_price_gap_percent(left_ticker.bid_price, right_ticker.ask_price)
                 if has_market_data and left_ticker is not None and right_ticker is not None and right_ticker.ask_price > 0
                 else 0.0
             )
+            left_buy_right_sell_spread = max(0.0, left_buy_right_sell_spread_raw)
+            right_buy_left_sell_spread = max(0.0, right_buy_left_sell_spread_raw)
             buy_price_value = float(left_ticker.ask_price) if left_ticker is not None else 0.0
             sell_price_value = float(right_ticker.bid_price) if right_ticker is not None else 0.0
             reverse_buy_price_value = float(right_ticker.ask_price) if right_ticker is not None else 0.0
@@ -562,35 +551,20 @@ class OpportunityRuntimeService:
                 if left_is_buy_leg and right_funding is not None
                 else left_funding.next_funding_at if left_funding is not None else None
             )
-            buy_settlement_hours = self._resolve_settlement_interval_hours(
-                left_funding if left_is_buy_leg else right_funding,
+            left_funding_rate_4h = self._normalized_funding_rate_percent(left_funding)
+            right_funding_rate_4h = self._normalized_funding_rate_percent(right_funding)
+            left_buy_right_sell_funding_carry = (
+                right_funding_rate_4h - left_funding_rate_4h if has_funding_data else 0.0
             )
-            sell_settlement_hours = self._resolve_settlement_interval_hours(
-                right_funding if left_is_buy_leg else left_funding,
+            right_buy_left_sell_funding_carry = (
+                left_funding_rate_4h - right_funding_rate_4h if has_funding_data else 0.0
             )
-            funding_diff_percent = (
-                abs(
-                    (
-                        (
-                            left_funding.funding_rate_percent
-                            if left_is_buy_leg and left_funding is not None
-                            else right_funding.funding_rate_percent if right_funding is not None else 0.0
-                        )
-                        / max(buy_settlement_hours, 1e-9)
-                    )
-                    - (
-                        (
-                            right_funding.funding_rate_percent
-                            if left_is_buy_leg and right_funding is not None
-                            else left_funding.funding_rate_percent if left_funding is not None else 0.0
-                        )
-                        / max(sell_settlement_hours, 1e-9)
-                    )
-                )
-                * 4
-                if has_funding_data
-                else 0.0
+            funding_carry = (
+                left_buy_right_sell_funding_carry
+                if left_is_buy_leg
+                else right_buy_left_sell_funding_carry
             )
+            funding_diff_percent = funding_carry if has_funding_data else 0.0
 
             result.append(
                 {
@@ -611,10 +585,42 @@ class OpportunityRuntimeService:
                     "right_symbol_raw": sell_symbol_raw,
                     "left_price_value": buy_price_value,
                     "right_price_value": sell_price_value,
+                    **self._build_execution_quality_fields(
+                        left_bid=(
+                            left_ticker.bid_price
+                            if left_is_buy_leg and left_ticker is not None
+                            else right_ticker.bid_price if right_ticker is not None else 0
+                        ),
+                        left_ask=(
+                            left_ticker.ask_price
+                            if left_is_buy_leg and left_ticker is not None
+                            else right_ticker.ask_price if right_ticker is not None else 0
+                        ),
+                        left_quote_volume=(
+                            left_ticker.quote_volume
+                            if left_is_buy_leg and left_ticker is not None
+                            else right_ticker.quote_volume if right_ticker is not None else 0
+                        ),
+                        right_bid=(
+                            right_ticker.bid_price
+                            if left_is_buy_leg and right_ticker is not None
+                            else left_ticker.bid_price if left_ticker is not None else 0
+                        ),
+                        right_ask=(
+                            right_ticker.ask_price
+                            if left_is_buy_leg and right_ticker is not None
+                            else left_ticker.ask_price if left_ticker is not None else 0
+                        ),
+                        right_quote_volume=(
+                            right_ticker.quote_volume
+                            if left_is_buy_leg and right_ticker is not None
+                            else left_ticker.quote_volume if left_ticker is not None else 0
+                        ),
+                    ),
                     "latest_spread": format_signed_percent(latest_spread, 2) if has_market_data else "--",
                     "latest_spread_value": latest_spread,
-                    "left_buy_right_sell_spread_value": left_buy_right_sell_spread,
-                    "right_buy_left_sell_spread_value": right_buy_left_sell_spread,
+                    "left_buy_right_sell_spread_value": left_buy_right_sell_spread_raw,
+                    "right_buy_left_sell_spread_value": right_buy_left_sell_spread_raw,
                     "net_spread": format_signed_percent(net_spread, 2) if has_market_data else "--",
                     "net_spread_value": net_spread,
                     "price_diff": self._format_price(absolute_price_diff) if has_market_data else "--",
@@ -623,6 +629,11 @@ class OpportunityRuntimeService:
                     "right_buy_left_sell_price_diff_value": right_buy_left_sell_price_diff,
                     "net_rate": format_signed_percent(funding_diff_percent, 4) if has_funding_data else "--",
                     "net_rate_value": funding_diff_percent,
+                    "funding_carry_value": funding_carry,
+                    "left_buy_right_sell_funding_carry_value": left_buy_right_sell_funding_carry,
+                    "right_buy_left_sell_funding_carry_value": right_buy_left_sell_funding_carry,
+                    "buy_funding_rate_value": left_funding_rate_4h if left_is_buy_leg else right_funding_rate_4h,
+                    "sell_funding_rate_value": right_funding_rate_4h if left_is_buy_leg else left_funding_rate_4h,
                     "buy_funding_rate": (
                         format_signed_percent(
                             left_funding.funding_rate_percent if left_is_buy_leg and left_funding is not None else right_funding.funding_rate_percent,
@@ -698,6 +709,31 @@ class OpportunityRuntimeService:
             return 0.10
         return 0.05
 
+    def _build_execution_quality_fields(
+        self,
+        *,
+        left_bid: float,
+        left_ask: float,
+        left_quote_volume: float,
+        right_bid: float,
+        right_ask: float,
+        right_quote_volume: float,
+    ) -> Dict[str, Any]:
+        left_spread = self._calc_bid_ask_spread_percent(left_bid, left_ask)
+        right_spread = self._calc_bid_ask_spread_percent(right_bid, right_ask)
+        max_bid_ask = max(0.0, strategy_risk_config.max_bid_ask_spread_percent)
+        return {
+            "left_bid_price_value": float(left_bid or 0),
+            "left_ask_price_value": float(left_ask or 0),
+            "right_bid_price_value": float(right_bid or 0),
+            "right_ask_price_value": float(right_ask or 0),
+            "left_bid_ask_spread_percent_value": left_spread,
+            "right_bid_ask_spread_percent_value": right_spread,
+            "left_quote_volume_value": float(left_quote_volume or 0),
+            "right_quote_volume_value": float(right_quote_volume or 0),
+            "execution_quality_ready": left_spread <= max_bid_ask and right_spread <= max_bid_ask,
+        }
+
     def _calc_price_gap_percent(self, sell_price: float, buy_price: float, *, absolute: bool = False) -> float:
         if sell_price <= 0 or buy_price <= 0:
             return 0.0
@@ -710,6 +746,16 @@ class OpportunityRuntimeService:
         if high_price <= 0 or low_price <= 0:
             return 0.0
         return abs((high_price - low_price) / low_price) * 100
+
+    def _calc_bid_ask_spread_percent(self, bid_price: float, ask_price: float) -> float:
+        bid = float(bid_price or 0)
+        ask = float(ask_price or 0)
+        if bid <= 0 or ask <= 0:
+            return 0.0
+        mid = (bid + ask) / 2
+        if mid <= 0:
+            return 0.0
+        return max(0.0, ask - bid) / mid * 100
 
     def _resolve_status_code(
         self,
@@ -854,6 +900,12 @@ class OpportunityRuntimeService:
             value = 0.0
         return value if value > 0 else 8.0
 
+    def _normalized_funding_rate_percent(self, funding_item, *, target_hours: float = 4.0) -> float:
+        if funding_item is None:
+            return 0.0
+        interval_hours = self._resolve_settlement_interval_hours(funding_item)
+        return float(getattr(funding_item, "funding_rate_percent", 0.0) or 0.0) / max(interval_hours, 1e-9) * target_hours
+
     def _is_frozen_symbol(self, *values: Any) -> bool:
         for value in values:
             normalized = str(value or "").strip().upper()
@@ -917,6 +969,8 @@ class OpportunityRuntimeService:
                 "fill_rows": payload.get("fill_rows") or [],
                 "candidate_rows": payload.get("candidate_rows") or [],
                 "active_positions_rows": payload.get("active_positions_rows") or [],
+                "pending_order_rows": payload.get("pending_order_rows") or [],
+                "actual_order_rows": payload.get("actual_order_rows") or [],
                 "active_order_rows": payload.get("active_order_rows") or [],
                 "history_order_rows": payload.get("history_order_rows") or [],
             }

@@ -23,6 +23,8 @@ class ArbitrageExecutionRepositoryOrderQueriesMixin:
                     ol.symbol,
                     ol.side,
                     ol.position_side,
+                    ol.client_order_id,
+                    ol.exchange_order_id,
                     ol.status,
                     ol.status_message,
                     ol.requested_price,

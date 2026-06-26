@@ -55,6 +55,65 @@ class ArbitrageExecutionRepositoryPositionQueriesMixin:
             except (TypeError, ValueError):
                 return 0.0
 
+    def get_position_notional(
+        self,
+        *,
+        exchange_account_id: int,
+        market_type: str,
+        symbol: str,
+        position_side: str | None = None,
+    ) -> Optional[float]:
+        if exchange_account_id <= 0 or not market_type or not symbol:
+            return None
+
+        params: List[Any] = [exchange_account_id, market_type, symbol]
+        side_filter = ""
+        if position_side:
+            side_filter = " AND position_side IN (%s, 'net')"
+            params.append(position_side)
+
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                f"""
+                SELECT
+                    quantity,
+                    market_value_usdt,
+                    mark_price,
+                    avg_entry_price,
+                    position_side
+                FROM arbitrage_positions
+                WHERE exchange_account_id = %s
+                  AND market_type = %s
+                  AND symbol = %s
+                  AND status = 'open'
+                  {side_filter}
+                ORDER BY
+                    CASE
+                        WHEN position_side = %s THEN 0
+                        WHEN position_side = 'net' THEN 1
+                        ELSE 2
+                    END,
+                    updated_at DESC
+                LIMIT 1
+                """,
+                tuple(params + [position_side or "net"]),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            try:
+                quantity = abs(float(row.get("quantity") or 0))
+                market_value = abs(float(row.get("market_value_usdt") or 0))
+                mark_price = float(row.get("mark_price") or 0)
+                avg_price = float(row.get("avg_entry_price") or 0)
+            except (TypeError, ValueError):
+                return 0.0
+            if market_value > 0:
+                return market_value
+            price = mark_price if mark_price > 0 else avg_price
+            return quantity * price if quantity > 0 and price > 0 else 0.0
+
     def list_open_positions_for_user(self, *, user_id: int, limit: int = 20) -> List[Dict[str, object]]:
         safe_limit = max(1, int(limit or 20))
         with mysql_manager.connection() as connection:

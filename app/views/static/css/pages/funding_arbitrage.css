@@ -35,6 +35,21 @@
     background: linear-gradient(90deg, rgba(25, 103, 210, 0.12), rgba(234, 242, 255, 0.42) 44%, rgba(255, 255, 255, 0.02));
 }
 
+.page-funding_arbitrage .open-candidate-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(25, 103, 210, 0.1);
+    color: #195fc2;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1.2;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
 .page-funding_arbitrage .status-cell {
     display: grid;
     justify-items: center;

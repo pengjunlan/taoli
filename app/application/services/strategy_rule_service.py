@@ -63,6 +63,7 @@ class StrategyRuleService:
             max_hold_minutes=payload.max_hold_minutes,
             close_interval_seconds=payload.close_interval_seconds,
             close_batch_count=payload.close_batch_count,
+            close_batch_ratio_percent=payload.close_batch_ratio_percent,
             single_leg_timeout_seconds=payload.single_leg_timeout_seconds,
             is_enabled=payload.is_enabled,
         )
@@ -111,6 +112,7 @@ class StrategyRuleService:
             max_hold_minutes=payload.max_hold_minutes,
             close_interval_seconds=payload.close_interval_seconds,
             close_batch_count=payload.close_batch_count,
+            close_batch_ratio_percent=payload.close_batch_ratio_percent,
             single_leg_timeout_seconds=payload.single_leg_timeout_seconds,
             is_enabled=payload.is_enabled,
         )
@@ -208,6 +210,7 @@ class StrategyRuleService:
         max_hold_minutes: int,
         close_interval_seconds: int,
         close_batch_count: int,
+        close_batch_ratio_percent: float,
         single_leg_timeout_seconds: int,
         is_enabled: bool,
     ) -> Dict[str, object]:
@@ -234,6 +237,7 @@ class StrategyRuleService:
             "max_hold_minutes": int(max_hold_minutes or 0),
             "close_interval_seconds": int(close_interval_seconds or 0),
             "close_batch_count": int(close_batch_count or 0),
+            "close_batch_ratio_percent": round(float(close_batch_ratio_percent or 0), 4),
             "single_leg_timeout_seconds": int(single_leg_timeout_seconds or 0),
             "is_enabled": bool(is_enabled),
         }
@@ -272,10 +276,13 @@ class StrategyRuleService:
             "max_funding_cost": "最大资金费成本",
             "min_net_profit_threshold": "最低净收益保护",
             "take_profit_threshold": "止盈收益阈值",
+            "close_batch_ratio_percent": "单批平仓比例",
         }
         for field_name, field_label in percent_field_labels.items():
             if float(payload[field_name]) < 0:
                 raise AccountValidationError(f"{field_label}不能小于 0。")
+        if float(payload["close_batch_ratio_percent"]) > 100:
+            raise AccountValidationError("单批平仓比例不能大于 100%。")
         funding_window_start = int(payload["funding_open_window_start_minutes"])
         funding_window_end = int(payload["funding_open_window_end_minutes"])
         if funding_window_start > 0 and funding_window_end > 0 and funding_window_start < funding_window_end:
@@ -303,13 +310,13 @@ class StrategyRuleService:
         max_spread_rate_threshold = runtime_rule.stop_loss_price_diff
         is_enabled = bool(row.get("is_enabled"))
         order_amount_usdt = float(row.get("order_amount_usdt") or 0)
-        max_position_quantity = runtime_rule.max_position_quantity
+        max_position_usdt = runtime_rule.max_position_usdt
 
         active_position_amount = 0.0
         user_id = int(row.get("user_id") or 0)
         rule_id = int(row.get("id") or 0)
         if user_id > 0 and rule_id > 0:
-            active_position_amount = arbitrage_execution_repository.sum_live_position_quantity_by_rule(
+            active_position_amount = arbitrage_execution_repository.sum_committed_position_amount_by_rule(
                 user_id=user_id,
                 strategy_rule_id=rule_id,
             )
@@ -347,8 +354,8 @@ class StrategyRuleService:
             "max_pairs": int(row.get("max_pairs") or 0),
             "order_amount_usdt": order_amount_usdt,
             "order_amount_text": self._format_money(order_amount_usdt),
-            "max_position_usdt": max_position_quantity,
-            "max_position_text": self._format_quantity_value(max_position_quantity),
+            "max_position_usdt": max_position_usdt,
+            "max_position_text": self._format_money(max_position_usdt),
             "order_interval_seconds": int(row.get("order_interval_seconds") or 0),
             "order_interval_text": f"{int(row.get('order_interval_seconds') or 0)} 秒",
             "funding_open_window_start_minutes": int(row.get("funding_open_window_start_minutes") or 0),
@@ -362,6 +369,7 @@ class StrategyRuleService:
             "max_hold_minutes": int(row.get("max_hold_minutes") or 0),
             "close_interval_seconds": int(row.get("close_interval_seconds") or 0),
             "close_batch_count": int(row.get("close_batch_count") or 0),
+            "close_batch_ratio_percent": float(row.get("close_batch_ratio_percent") or 0),
             "single_leg_timeout_seconds": int(row.get("single_leg_timeout_seconds") or 0),
             "is_enabled": is_enabled,
             "status_label": "已启用" if is_enabled else "已停用",
