@@ -232,3 +232,37 @@ class ArbitrageExecutionRepositoryPositionQueriesMixin:
                 (exchange_account_id, market_type, symbol, position_side),
             )
             return cursor.fetchone()
+
+    def list_open_positions_by_pair(
+        self,
+        *,
+        user_id: int,
+        strategy_rule_id: int,
+        pair_key: str,
+    ) -> List[Dict[str, object]]:
+        if user_id <= 0 or strategy_rule_id <= 0 or not str(pair_key or "").strip():
+            return []
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT
+                    p.*,
+                    COALESCE(source_ex.strategy_rule_id, ex.strategy_rule_id) AS runtime_strategy_rule_id,
+                    COALESCE(source_ex.pair_key, ex.pair_key) AS runtime_pair_key
+                FROM arbitrage_positions AS p
+                LEFT JOIN arbitrage_executions AS ex
+                    ON ex.id = p.opened_by_execution_id
+                LEFT JOIN arbitrage_executions AS source_ex
+                    ON ex.action = 'close'
+                   AND source_ex.id = ex.source_execution_id
+                WHERE p.user_id = %s
+                  AND p.status = 'open'
+                  AND p.quantity > 0
+                  AND COALESCE(source_ex.strategy_rule_id, ex.strategy_rule_id) = %s
+                  AND COALESCE(source_ex.pair_key, ex.pair_key) = %s
+                ORDER BY p.updated_at DESC, p.id DESC
+                """,
+                (user_id, strategy_rule_id, pair_key),
+            )
+            return list(cursor.fetchall())

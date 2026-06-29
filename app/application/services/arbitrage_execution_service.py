@@ -11,7 +11,9 @@ from app.application.services.arbitrage_execution_plan_service import arbitrage_
 from app.application.services.arbitrage_opportunity_monitor_service import arbitrage_opportunity_monitor_service
 from app.application.services.arbitrage_runtime_support_service import arbitrage_runtime_support_service
 from app.application.services.exchange_connection_service import exchange_connection_service
+from app.application.services.funding_runtime_state_service import funding_runtime_state_service
 from app.application.services.monitor_center_service import monitor_center_service
+from app.application.services.spread_runtime_state_service import spread_runtime_state_service
 from app.application.services.strategy_risk_config import strategy_risk_config
 from app.application.services.system_exchange_config_service import system_exchange_config_service
 from app.infrastructure.persistence import arbitrage_execution_repository
@@ -26,6 +28,7 @@ class ArbitrageExecutionService:
     _DEFAULT_MAX_RETRIES = strategy_risk_config.max_order_retries
     _DEFAULT_SINGLE_LEG_TIMEOUT_SECONDS = strategy_risk_config.single_leg_timeout_seconds
     _MAX_PRICE_DRIFT_PERCENT = strategy_risk_config.max_price_drift_percent
+    _ACTIVE_CLOSE_STATUSES = {"pending", "created", "processing", "opening", "open", "closing"}
 
     def process_order_leg(self, order_leg: Dict[str, Any]) -> str:
         blocked_result = self._block_disabled_opening_flow(order_leg)
@@ -59,6 +62,18 @@ class ArbitrageExecutionService:
         action = str(order_leg.get("action") or "").strip().lower()
         if action != "open":
             return None
+
+        execution_id = int(order_leg.get("execution_id") or 0)
+        if execution_id > 0 and self._source_open_execution_is_closing(execution_id=execution_id):
+            arbitrage_execution_repository.update_order_leg_status(
+                order_leg_id=int(order_leg.get("id") or 0),
+                status="filled",
+                status_message="source_execution_closing_skip_open_child",
+                filled_quantity=0.0,
+                filled_value_usdt=0.0,
+                closed_at=datetime.now(),
+            )
+            return "filled"
 
         strategy_rule_id = int(order_leg.get("strategy_rule_id") or 0)
         user_id = int(order_leg.get("user_id") or 0)
@@ -193,6 +208,7 @@ class ArbitrageExecutionService:
             market_type=str(order_leg.get("market_type") or ""),
             symbol=str(order_leg.get("symbol") or ""),
             side=str(order_leg.get("side") or ""),
+            prefer_post_only=True,
         )
         if latest_price <= 0:
             return 0.0
@@ -209,6 +225,14 @@ class ArbitrageExecutionService:
 
         statuses = {str(leg.get("status") or "") for leg in order_legs}
         action = str(execution_row.get("action") or "open").strip().lower()
+
+        if action == "open" and self._has_active_close_execution_for_open_execution(execution_row=execution_row):
+            self._update_execution_status_if_changed(
+                execution_id=execution_id,
+                current_row=execution_row,
+                status="closing",
+            )
+            return "closing"
 
         if statuses.issubset({"pending", "created", "submitting", "submitted", "partial"}):
             next_status = "opening" if action == "open" else "closing"
@@ -235,6 +259,10 @@ class ArbitrageExecutionService:
                 current_row=execution_row,
                 status=next_status,
             )
+            if action == "open" and self._continue_spread_staged_open(execution_row=execution_row):
+                return "opening"
+            if action == "open" and self._continue_funding_staged_open(execution_row=execution_row):
+                return "opening"
             if action == "close":
                 self._mark_source_execution_closed(execution_row=execution_row)
             return next_status
@@ -354,6 +382,7 @@ class ArbitrageExecutionService:
             execution_id=source_execution_id,
             status="open",
         )
+        self._sync_pair_open_execution_statuses(source_execution=source_execution, status="open")
 
     def _restore_source_execution_to_closing(self, *, execution_row: Dict[str, Any]) -> None:
         source_execution_id = int(execution_row.get("source_execution_id") or 0)
@@ -368,6 +397,7 @@ class ArbitrageExecutionService:
             execution_id=source_execution_id,
             status="closing",
         )
+        self._sync_pair_open_execution_statuses(source_execution=source_execution, status="closing")
 
     def _has_exposed_position(self, order_legs: Iterable[Dict[str, Any]]) -> bool:
         for row in order_legs:
@@ -427,11 +457,378 @@ class ArbitrageExecutionService:
                 execution_id=source_execution_id,
                 status="open",
             )
+            self._sync_pair_open_execution_statuses(source_execution=source_execution, status="open")
             return
         arbitrage_execution_repository.update_execution_status(
             execution_id=source_execution_id,
             status="closed",
         )
+        self._sync_pair_open_execution_statuses(source_execution=source_execution, status="closed")
+        self._clear_pair_runtime_state(source_execution=source_execution)
+
+    def _continue_spread_staged_open(self, *, execution_row: Dict[str, Any]) -> bool:
+        if str(execution_row.get("strategy_type") or "").strip().lower() != "spread":
+            return False
+        if str(execution_row.get("action") or "").strip().lower() != "open":
+            return False
+
+        user_id = int(execution_row.get("user_id") or 0)
+        rule_id = int(execution_row.get("strategy_rule_id") or 0)
+        pair_key = str(execution_row.get("pair_key") or "")
+        if user_id <= 0 or rule_id <= 0 or not pair_key:
+            return False
+
+        order_legs = arbitrage_execution_repository.list_order_legs_by_execution(
+            execution_id=int(execution_row.get("id") or 0),
+        )
+        if len(order_legs) < 2:
+            return False
+
+        runtime_state = spread_runtime_state_service.get_pair_state(
+            user_id=user_id,
+            rule_id=rule_id,
+            pair_key=pair_key,
+        )
+        strategy_rule = account_repository.get_strategy_rule_by_id(rule_id, user_id)
+        if strategy_rule is None:
+            return False
+
+        target_amount = float(runtime_state.get("target_order_amount_usdt") or 0)
+        if target_amount <= 0:
+            target_amount = float(execution_row.get("planned_order_amount_usdt") or 0)
+
+        split_amount = float(runtime_state.get("split_order_amount_usdt") or 0)
+        if split_amount <= 0:
+            split_amount = float(strategy_rule.get("split_order_amount_usdt") or 0)
+        if split_amount <= 0:
+            split_amount = float(strategy_rule.get("order_amount_usdt") or 0)
+
+        if target_amount <= 0 or split_amount <= 0:
+            return False
+
+        accumulated_filled_amount = self._resolve_execution_filled_value(execution_id=int(execution_row.get("id") or 0))
+        now = datetime.now()
+        if accumulated_filled_amount + 0.000001 >= target_amount:
+            spread_runtime_state_service.patch_pair_state(
+                user_id=user_id,
+                rule_id=rule_id,
+                pair_key=pair_key,
+                last_order_at=now,
+                accumulated_filled_amount_usdt=accumulated_filled_amount,
+                pending_target_amount_usdt=0.0,
+                last_open_spread_value=self._resolve_float_metric(runtime_state.get("latest_spread_value")),
+                last_open_net_spread_value=self._resolve_float_metric(runtime_state.get("latest_net_spread_value")),
+                staging_status="completed",
+            )
+            return False
+
+        if not runtime_state:
+            spread_runtime_state_service.patch_pair_state(
+                user_id=user_id,
+                rule_id=rule_id,
+                pair_key=pair_key,
+                target_order_amount_usdt=target_amount,
+                split_order_amount_usdt=split_amount,
+                latest_spread_value=self._resolve_float_metric(runtime_state.get("latest_spread_value")),
+                latest_net_spread_value=self._resolve_float_metric(runtime_state.get("latest_net_spread_value")),
+                last_open_spread_value=self._resolve_float_metric(execution_row.get("trigger_metric_primary")),
+                last_open_net_spread_value=self._resolve_float_metric(execution_row.get("trigger_metric_secondary")),
+            )
+
+        if not bool(strategy_rule.get("is_enabled")):
+            spread_runtime_state_service.patch_pair_state(
+                user_id=user_id,
+                rule_id=rule_id,
+                pair_key=pair_key,
+                last_order_at=now,
+                accumulated_filled_amount_usdt=accumulated_filled_amount,
+                pending_target_amount_usdt=max(0.0, target_amount - accumulated_filled_amount),
+                staging_status="rule_disabled",
+            )
+            return False
+
+        interval_seconds = max(0, int(strategy_rule.get("order_interval_seconds") or 0))
+        next_child_amount = min(split_amount, max(0.0, target_amount - accumulated_filled_amount))
+        if next_child_amount <= 0:
+            return False
+
+        left_leg = next((row for row in order_legs if str(row.get("leg_role") or "") == "left"), None)
+        right_leg = next((row for row in order_legs if str(row.get("leg_role") or "") == "right"), None)
+        if left_leg is None or right_leg is None:
+            return False
+
+        left_plan = arbitrage_runtime_support_service.build_quantity_plan(
+            exchange_code=str(left_leg.get("exchange_code") or "").lower(),
+            market_type=str(left_leg.get("market_type") or ""),
+            symbol=str(left_leg.get("symbol") or ""),
+            side=str(left_leg.get("side") or "").lower(),
+            order_amount_usdt=next_child_amount,
+        )
+        right_plan = arbitrage_runtime_support_service.build_quantity_plan(
+            exchange_code=str(right_leg.get("exchange_code") or "").lower(),
+            market_type=str(right_leg.get("market_type") or ""),
+            symbol=str(right_leg.get("symbol") or ""),
+            side=str(right_leg.get("side") or "").lower(),
+            order_amount_usdt=next_child_amount,
+            base_quantity=left_plan.base_quantity,
+        )
+        if left_plan.order_quantity <= 0 or right_plan.order_quantity <= 0:
+            spread_runtime_state_service.patch_pair_state(
+                user_id=user_id,
+                rule_id=rule_id,
+                pair_key=pair_key,
+                last_order_at=now,
+                accumulated_filled_amount_usdt=accumulated_filled_amount,
+                pending_target_amount_usdt=max(0.0, target_amount - accumulated_filled_amount),
+                staging_status="quantity_plan_failed",
+            )
+            return False
+
+        scheduled_submit_at = now + timedelta(seconds=interval_seconds) if interval_seconds > 0 else now
+        left_leg_id = arbitrage_execution_repository.create_order_leg(
+            execution_id=int(execution_row.get("id") or 0),
+            user_id=user_id,
+            exchange_account_id=int(left_leg.get("exchange_account_id") or 0) or None,
+            leg_role="left",
+            position_side=str(left_leg.get("position_side") or "long"),
+            exchange_code=str(left_leg.get("exchange_code") or "").lower(),
+            market_type=str(left_leg.get("market_type") or ""),
+            symbol=str(left_leg.get("symbol") or ""),
+            side=str(left_leg.get("side") or "").lower(),
+            order_type="limit",
+            requested_price=left_plan.requested_price,
+            requested_quantity=left_plan.order_quantity,
+            requested_value_usdt=left_plan.order_value_usdt,
+            status="pending",
+            status_message=(
+                f"spread_staged_child target={target_amount:.2f} child={next_child_amount:.2f} "
+                f"filled={accumulated_filled_amount:.2f} wait_until={scheduled_submit_at.isoformat()}"
+            ),
+            submitted_at=scheduled_submit_at,
+        )
+        right_leg_id = arbitrage_execution_repository.create_order_leg(
+            execution_id=int(execution_row.get("id") or 0),
+            user_id=user_id,
+            exchange_account_id=int(right_leg.get("exchange_account_id") or 0) or None,
+            leg_role="right",
+            position_side=str(right_leg.get("position_side") or "short"),
+            exchange_code=str(right_leg.get("exchange_code") or "").lower(),
+            market_type=str(right_leg.get("market_type") or ""),
+            symbol=str(right_leg.get("symbol") or ""),
+            side=str(right_leg.get("side") or "").lower(),
+            order_type="limit",
+            requested_price=right_plan.requested_price,
+            requested_quantity=right_plan.order_quantity,
+            requested_value_usdt=right_plan.order_value_usdt,
+            status="pending",
+            status_message=(
+                f"spread_staged_child target={target_amount:.2f} child={next_child_amount:.2f} "
+                f"filled={accumulated_filled_amount:.2f} wait_until={scheduled_submit_at.isoformat()}"
+            ),
+            submitted_at=scheduled_submit_at,
+        )
+        spread_runtime_state_service.patch_pair_state(
+            user_id=user_id,
+            rule_id=rule_id,
+            pair_key=pair_key,
+            last_order_at=scheduled_submit_at,
+            accumulated_filled_amount_usdt=accumulated_filled_amount,
+            pending_target_amount_usdt=max(0.0, target_amount - accumulated_filled_amount - next_child_amount),
+            staging_status="waiting_next_child",
+            staged_child_execution_id=int(execution_row.get("id") or 0),
+            staged_child_order_leg_ids=[left_leg_id, right_leg_id],
+            staged_child_amount_usdt=next_child_amount,
+        )
+        arbitrage_execution_repository.update_execution_status(
+            execution_id=int(execution_row.get("id") or 0),
+            status="opening",
+        )
+        return True
+
+    def _continue_funding_staged_open(self, *, execution_row: Dict[str, Any]) -> bool:
+        if str(execution_row.get("strategy_type") or "").strip().lower() != "funding":
+            return False
+        if str(execution_row.get("action") or "").strip().lower() != "open":
+            return False
+
+        user_id = int(execution_row.get("user_id") or 0)
+        rule_id = int(execution_row.get("strategy_rule_id") or 0)
+        pair_key = str(execution_row.get("pair_key") or "")
+        if user_id <= 0 or rule_id <= 0 or not pair_key:
+            return False
+
+        order_legs = arbitrage_execution_repository.list_order_legs_by_execution(
+            execution_id=int(execution_row.get("id") or 0),
+        )
+        if len(order_legs) < 2:
+            return False
+
+        runtime_state = funding_runtime_state_service.get_pair_state(
+            user_id=user_id,
+            rule_id=rule_id,
+            pair_key=pair_key,
+        )
+        strategy_rule = account_repository.get_strategy_rule_by_id(rule_id, user_id)
+        if strategy_rule is None:
+            return False
+
+        target_amount = float(runtime_state.get("target_order_amount_usdt") or 0)
+        if target_amount <= 0:
+            target_amount = float(execution_row.get("planned_order_amount_usdt") or 0)
+
+        split_amount = float(runtime_state.get("split_order_amount_usdt") or 0)
+        if split_amount <= 0:
+            split_amount = float(strategy_rule.get("split_order_amount_usdt") or 0)
+        if split_amount <= 0:
+            split_amount = float(strategy_rule.get("order_amount_usdt") or 0)
+
+        if target_amount <= 0 or split_amount <= 0:
+            return False
+
+        accumulated_filled_amount = self._resolve_execution_filled_value(execution_id=int(execution_row.get("id") or 0))
+        now = datetime.now()
+        if accumulated_filled_amount + 0.000001 >= target_amount:
+            funding_runtime_state_service.patch_pair_state(
+                user_id=user_id,
+                rule_id=rule_id,
+                pair_key=pair_key,
+                last_order_at=now,
+                accumulated_filled_amount_usdt=accumulated_filled_amount,
+                pending_target_amount_usdt=0.0,
+                last_open_net_rate_value=self._resolve_float_metric(runtime_state.get("latest_net_rate_value")),
+                last_open_spread_value=self._resolve_float_metric(runtime_state.get("latest_spread_value")),
+                staging_status="completed",
+            )
+            return False
+
+        if not runtime_state:
+            funding_runtime_state_service.patch_pair_state(
+                user_id=user_id,
+                rule_id=rule_id,
+                pair_key=pair_key,
+                target_order_amount_usdt=target_amount,
+                split_order_amount_usdt=split_amount,
+                last_open_net_rate_value=self._resolve_float_metric(execution_row.get("trigger_metric_primary")),
+                last_open_spread_value=self._resolve_float_metric(execution_row.get("trigger_metric_risk")),
+            )
+
+        if not bool(strategy_rule.get("is_enabled")):
+            funding_runtime_state_service.patch_pair_state(
+                user_id=user_id,
+                rule_id=rule_id,
+                pair_key=pair_key,
+                last_order_at=now,
+                accumulated_filled_amount_usdt=accumulated_filled_amount,
+                pending_target_amount_usdt=max(0.0, target_amount - accumulated_filled_amount),
+                staging_status="rule_disabled",
+            )
+            return False
+
+        interval_seconds = max(0, int(strategy_rule.get("order_interval_seconds") or 0))
+        next_child_amount = min(split_amount, max(0.0, target_amount - accumulated_filled_amount))
+        if next_child_amount <= 0:
+            return False
+
+        left_leg = next((row for row in order_legs if str(row.get("leg_role") or "") == "left"), None)
+        right_leg = next((row for row in order_legs if str(row.get("leg_role") or "") == "right"), None)
+        if left_leg is None or right_leg is None:
+            return False
+
+        left_plan = arbitrage_runtime_support_service.build_quantity_plan(
+            exchange_code=str(left_leg.get("exchange_code") or "").lower(),
+            market_type=str(left_leg.get("market_type") or ""),
+            symbol=str(left_leg.get("symbol") or ""),
+            side=str(left_leg.get("side") or "").lower(),
+            order_amount_usdt=next_child_amount,
+        )
+        right_plan = arbitrage_runtime_support_service.build_quantity_plan(
+            exchange_code=str(right_leg.get("exchange_code") or "").lower(),
+            market_type=str(right_leg.get("market_type") or ""),
+            symbol=str(right_leg.get("symbol") or ""),
+            side=str(right_leg.get("side") or "").lower(),
+            order_amount_usdt=next_child_amount,
+            base_quantity=left_plan.base_quantity,
+        )
+        if left_plan.order_quantity <= 0 or right_plan.order_quantity <= 0:
+            funding_runtime_state_service.patch_pair_state(
+                user_id=user_id,
+                rule_id=rule_id,
+                pair_key=pair_key,
+                last_order_at=now,
+                accumulated_filled_amount_usdt=accumulated_filled_amount,
+                pending_target_amount_usdt=max(0.0, target_amount - accumulated_filled_amount),
+                staging_status="quantity_plan_failed",
+            )
+            return False
+
+        scheduled_submit_at = now + timedelta(seconds=interval_seconds) if interval_seconds > 0 else now
+        left_leg_id = arbitrage_execution_repository.create_order_leg(
+            execution_id=int(execution_row.get("id") or 0),
+            user_id=user_id,
+            exchange_account_id=int(left_leg.get("exchange_account_id") or 0) or None,
+            leg_role="left",
+            position_side=str(left_leg.get("position_side") or "long"),
+            exchange_code=str(left_leg.get("exchange_code") or "").lower(),
+            market_type=str(left_leg.get("market_type") or ""),
+            symbol=str(left_leg.get("symbol") or ""),
+            side=str(left_leg.get("side") or "").lower(),
+            order_type="limit",
+            requested_price=left_plan.requested_price,
+            requested_quantity=left_plan.order_quantity,
+            requested_value_usdt=left_plan.order_value_usdt,
+            status="pending",
+            status_message=(
+                f"funding_staged_child target={target_amount:.2f} child={next_child_amount:.2f} "
+                f"filled={accumulated_filled_amount:.2f} wait_until={scheduled_submit_at.isoformat()}"
+            ),
+            submitted_at=scheduled_submit_at,
+        )
+        right_leg_id = arbitrage_execution_repository.create_order_leg(
+            execution_id=int(execution_row.get("id") or 0),
+            user_id=user_id,
+            exchange_account_id=int(right_leg.get("exchange_account_id") or 0) or None,
+            leg_role="right",
+            position_side=str(right_leg.get("position_side") or "short"),
+            exchange_code=str(right_leg.get("exchange_code") or "").lower(),
+            market_type=str(right_leg.get("market_type") or ""),
+            symbol=str(right_leg.get("symbol") or ""),
+            side=str(right_leg.get("side") or "").lower(),
+            order_type="limit",
+            requested_price=right_plan.requested_price,
+            requested_quantity=right_plan.order_quantity,
+            requested_value_usdt=right_plan.order_value_usdt,
+            status="pending",
+            status_message=(
+                f"funding_staged_child target={target_amount:.2f} child={next_child_amount:.2f} "
+                f"filled={accumulated_filled_amount:.2f} wait_until={scheduled_submit_at.isoformat()}"
+            ),
+            submitted_at=scheduled_submit_at,
+        )
+        funding_runtime_state_service.patch_pair_state(
+            user_id=user_id,
+            rule_id=rule_id,
+            pair_key=pair_key,
+            last_order_at=scheduled_submit_at,
+            accumulated_filled_amount_usdt=accumulated_filled_amount,
+            pending_target_amount_usdt=max(0.0, target_amount - accumulated_filled_amount - next_child_amount),
+            staging_status="waiting_next_child",
+            staged_child_execution_id=int(execution_row.get("id") or 0),
+            staged_child_order_leg_ids=[left_leg_id, right_leg_id],
+            staged_child_amount_usdt=next_child_amount,
+        )
+        arbitrage_execution_repository.update_execution_status(
+            execution_id=int(execution_row.get("id") or 0),
+            status="opening",
+        )
+        return True
+
+    def _resolve_execution_filled_value(self, *, execution_id: int) -> float:
+        order_legs = arbitrage_execution_repository.list_order_legs_by_execution(execution_id=execution_id)
+        totals: Dict[str, float] = {}
+        for row in order_legs:
+            leg_role = str(row.get("leg_role") or "").strip().lower() or "unknown"
+            totals[leg_role] = totals.get(leg_role, 0.0) + float(row.get("filled_value_usdt") or 0)
+        return max(totals.values()) if totals else 0.0
 
     def _source_execution_has_remaining_position(self, source_execution: Dict[str, Any]) -> bool:
         source_legs = arbitrage_execution_repository.list_order_legs_by_execution(
@@ -448,7 +845,82 @@ class ArbitrageExecutionService:
                 return True
         return False
 
+    def _source_open_execution_is_closing(self, *, execution_id: int) -> bool:
+        execution_row = arbitrage_execution_repository.get_execution_by_id(execution_id)
+        if execution_row is None:
+            return False
+        if str(execution_row.get("action") or "").strip().lower() != "open":
+            return False
+        status = str(execution_row.get("status") or "").strip().lower()
+        if status in {"closing", "closed"}:
+            return True
+        return self._has_active_close_execution_for_open_execution(execution_row=execution_row)
+
+    def _has_active_close_execution_for_open_execution(self, *, execution_row: Dict[str, Any]) -> bool:
+        if str(execution_row.get("action") or "").strip().lower() != "open":
+            return False
+        user_id = int(execution_row.get("user_id") or 0)
+        rule_id = int(execution_row.get("strategy_rule_id") or 0)
+        pair_key = str(execution_row.get("pair_key") or "").strip()
+        if user_id <= 0 or rule_id <= 0 or not pair_key:
+            return False
+        latest_close = arbitrage_execution_repository.get_latest_active_close_execution_by_pair(
+            user_id=user_id,
+            strategy_rule_id=rule_id,
+            pair_key=pair_key,
+        )
+        latest_close_status = str((latest_close or {}).get("status") or "").strip().lower()
+        return latest_close is not None and latest_close_status in self._ACTIVE_CLOSE_STATUSES
+
+    def _sync_pair_open_execution_statuses(self, *, source_execution: Dict[str, Any], status: str) -> None:
+        user_id = int(source_execution.get("user_id") or 0)
+        rule_id = int(source_execution.get("strategy_rule_id") or 0)
+        pair_key = str(source_execution.get("pair_key") or "").strip()
+        source_execution_id = int(source_execution.get("id") or 0)
+        if user_id <= 0 or rule_id <= 0 or not pair_key or source_execution_id <= 0:
+            return
+        pair_open_executions = arbitrage_execution_repository.list_open_executions_by_rule_pair(
+            user_id=user_id,
+            strategy_rule_id=rule_id,
+            pair_key=pair_key,
+        )
+        for row in pair_open_executions:
+            execution_id = int(row.get("id") or 0)
+            if execution_id <= 0 or execution_id == source_execution_id:
+                continue
+            current_status = str(row.get("status") or "").strip().lower()
+            if current_status == "closed":
+                continue
+            arbitrage_execution_repository.update_execution_status(
+                execution_id=execution_id,
+                status=status,
+            )
+
+    def _clear_pair_runtime_state(self, *, source_execution: Dict[str, Any]) -> None:
+        user_id = int(source_execution.get("user_id") or 0)
+        rule_id = int(source_execution.get("strategy_rule_id") or 0)
+        pair_key = str(source_execution.get("pair_key") or "").strip()
+        strategy_type = str(source_execution.get("strategy_type") or "").strip().lower()
+        if user_id <= 0 or rule_id <= 0 or not pair_key:
+            return
+        if strategy_type == "funding":
+            funding_runtime_state_service.clear_pair_state(
+                user_id=user_id,
+                rule_id=rule_id,
+                pair_key=pair_key,
+            )
+            return
+        if strategy_type == "spread":
+            spread_runtime_state_service.clear_pair_state(
+                user_id=user_id,
+                rule_id=rule_id,
+                pair_key=pair_key,
+            )
+
     def _submit_order(self, order_leg: Dict[str, Any]) -> str:
+        if self._is_staged_child_waiting(order_leg):
+            return "pending"
+
         account_row = account_repository.get_active_account_with_address_by_id(
             int(order_leg.get("exchange_account_id") or 0),
             int(order_leg.get("user_id") or 0),
@@ -516,7 +988,7 @@ class ArbitrageExecutionService:
                 request=client_request,
                 order_leg=order_leg,
             )
-            response = client.create_order(
+            response = client.create_post_only_order(
                 str(order_leg.get("symbol") or ""),
                 "limit",
                 str(order_leg.get("side") or "").lower(),
@@ -649,12 +1121,18 @@ class ArbitrageExecutionService:
                 return "submitted"
 
             if normalized_status == "cancelled":
-                retry_count = int(order_leg.get("retry_count") or 0)
+                retry_count = int(order_leg.get("retry_count") or 0) + 1
+                total_filled_base_quantity = max(float(order_leg.get("filled_quantity") or 0), filled_quantity)
                 if retry_count >= self._DEFAULT_MAX_RETRIES:
                     arbitrage_execution_repository.update_order_leg_status(
                         order_leg_id=int(order_leg["id"]),
                         status="failed",
                         status_message="撤单重挂超过 10 次",
+                        retry_count=retry_count,
+                        last_retry_at=datetime.now(),
+                        average_fill_price=average_fill_price if average_fill_price > 0 else None,
+                        filled_quantity=total_filled_base_quantity if total_filled_base_quantity > 0 else None,
+                        filled_value_usdt=filled_value_usdt if filled_value_usdt > 0 else None,
                         closed_at=datetime.now(),
                     )
                     return "failed"
@@ -662,6 +1140,11 @@ class ArbitrageExecutionService:
                     order_leg_id=int(order_leg["id"]),
                     status="pending",
                     status_message="订单已撤销，准备重挂",
+                    retry_count=retry_count,
+                    last_retry_at=datetime.now(),
+                    average_fill_price=average_fill_price if average_fill_price > 0 else None,
+                    filled_quantity=total_filled_base_quantity if total_filled_base_quantity > 0 else None,
+                    filled_value_usdt=filled_value_usdt if filled_value_usdt > 0 else None,
                 )
                 return "pending"
 
@@ -672,9 +1155,8 @@ class ArbitrageExecutionService:
                 closed_at=datetime.now(),
             )
             return "failed"
-        except Exception:
-            logger.debug("Monitor order degraded to submitted: leg_id=%s", order_leg.get("id"))
-            return "submitted"
+        except Exception as exc:
+            return self._handle_monitor_order_exception(order_leg=order_leg, exc=exc)
         finally:
             try:
                 client.close()
@@ -723,10 +1205,22 @@ class ArbitrageExecutionService:
             market_type=str(order_leg.get("market_type") or ""),
             symbol=str(order_leg.get("symbol") or ""),
             side=str(order_leg.get("side") or ""),
+            prefer_post_only=True,
         )
         current_requested_quantity = float(order_leg.get("requested_quantity") or 0)
         remaining_quantity = max(0.0, current_requested_quantity - total_filled_order_quantity)
-        next_requested_quantity = remaining_quantity if remaining_quantity > 0 else current_requested_quantity
+        if remaining_quantity <= 0:
+            arbitrage_execution_repository.update_order_leg_status(
+                order_leg_id=int(order_leg["id"]),
+                status="filled",
+                status_message="订单剩余数量已为 0，结束重挂",
+                average_fill_price=average_fill_price if average_fill_price > 0 else None,
+                filled_quantity=total_filled_base_quantity if total_filled_base_quantity > 0 else None,
+                filled_value_usdt=filled_value_usdt if filled_value_usdt > 0 else None,
+                closed_at=datetime.now(),
+            )
+            return "filled"
+        next_requested_quantity = remaining_quantity
         next_requested_price = latest_price if latest_price > 0 else float(order_leg.get("requested_price") or 0)
         next_requested_base_quantity = arbitrage_runtime_support_service.to_base_quantity(
             exchange_code=str(order_leg.get("exchange_code") or ""),
@@ -753,6 +1247,39 @@ class ArbitrageExecutionService:
             filled_value_usdt=filled_value_usdt if filled_value_usdt > 0 else None,
         )
         return "pending"
+
+    def _handle_monitor_order_exception(self, *, order_leg: Dict[str, Any], exc: Exception) -> str:
+        now = datetime.now()
+        reference_time = (
+            order_leg.get("last_retry_at")
+            or order_leg.get("submitted_at")
+            or order_leg.get("acknowledged_at")
+            or order_leg.get("created_at")
+        )
+        if isinstance(reference_time, datetime) and now - reference_time < timedelta(seconds=self._DEFAULT_RETRY_SECONDS):
+            logger.debug("Monitor order degraded to submitted: leg_id=%s", order_leg.get("id"))
+            return "submitted"
+
+        retry_count = int(order_leg.get("retry_count") or 0) + 1
+        if retry_count >= self._DEFAULT_MAX_RETRIES:
+            arbitrage_execution_repository.update_order_leg_status(
+                order_leg_id=int(order_leg["id"]),
+                status="failed",
+                status_message=f"查询订单状态连续失败: {exc}",
+                retry_count=retry_count,
+                last_retry_at=now,
+                closed_at=now,
+            )
+            return "failed"
+
+        arbitrage_execution_repository.update_order_leg_status(
+            order_leg_id=int(order_leg["id"]),
+            status="submitted",
+            status_message=f"查询订单状态失败，稍后重试: {exc}",
+            retry_count=retry_count,
+            last_retry_at=now,
+        )
+        return "submitted"
 
     def _sync_incremental_fill_progress(
         self,
@@ -1009,6 +1536,26 @@ class ArbitrageExecutionService:
             "new": "submitted",
         }
         return mapping.get(normalized, normalized or "submitted")
+
+    def _is_staged_child_waiting(self, order_leg: Dict[str, Any]) -> bool:
+        if str(order_leg.get("action") or "").strip().lower() != "open":
+            return False
+
+        status_message = str(order_leg.get("status_message") or "")
+        if "spread_staged_child" not in status_message and "funding_staged_child" not in status_message:
+            return False
+
+        scheduled_submit_at = order_leg.get("submitted_at")
+        if not isinstance(scheduled_submit_at, datetime):
+            return False
+        return scheduled_submit_at > datetime.now()
+
+    def _resolve_float_metric(self, value: Any, *, fallback: Any = 0) -> float:
+        text = str(value or fallback or "").replace("%", "").replace("+", "").replace(",", "").strip()
+        try:
+            return float(text)
+        except (TypeError, ValueError):
+            return 0.0
 
 
 arbitrage_execution_service = ArbitrageExecutionService()

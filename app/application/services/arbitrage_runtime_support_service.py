@@ -18,15 +18,25 @@ class OrderQuantityPlan:
 
 
 class ArbitrageRuntimeSupportService:
-    def get_latest_price(self, *, exchange_code: str, market_type: str, symbol: str, side: str) -> float:
+    def get_latest_price(
+        self,
+        *,
+        exchange_code: str,
+        market_type: str,
+        symbol: str,
+        side: str,
+        prefer_post_only: bool = True,
+    ) -> float:
         ticker = market_runtime_cache.get_ticker(exchange_code, market_type, symbol)
         if ticker is None:
             return 0.0
         normalized_side = str(side or "").strip().lower()
         if normalized_side == "buy":
-            return float(ticker.ask_price or ticker.last_price or 0)
+            primary_price = ticker.bid_price if prefer_post_only else ticker.ask_price
+            return float(primary_price or ticker.last_price or 0)
         if normalized_side == "sell":
-            return float(ticker.bid_price or ticker.last_price or 0)
+            primary_price = ticker.ask_price if prefer_post_only else ticker.bid_price
+            return float(primary_price or ticker.last_price or 0)
         return float(ticker.last_price or 0)
 
     def build_quantity_plan(

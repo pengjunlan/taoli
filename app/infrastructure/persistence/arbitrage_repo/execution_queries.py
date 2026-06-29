@@ -523,6 +523,55 @@ class ArbitrageExecutionRepositoryExecutionQueriesMixin:
             row = cursor.fetchone()
             return int(row[0] if row else 0) > 0
 
+    def get_latest_active_close_execution_by_pair(
+        self,
+        *,
+        user_id: int,
+        strategy_rule_id: int,
+        pair_key: str,
+    ) -> Dict[str, object] | None:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT *
+                FROM arbitrage_executions
+                WHERE user_id = %s
+                  AND strategy_rule_id = %s
+                  AND pair_key = %s
+                  AND action = 'close'
+                  AND status IN ('pending', 'created', 'processing', 'opening', 'open', 'closing')
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (user_id, strategy_rule_id, pair_key),
+            )
+            return cursor.fetchone()
+
+    def get_latest_close_execution_by_pair(
+        self,
+        *,
+        user_id: int,
+        strategy_rule_id: int,
+        pair_key: str,
+    ) -> Dict[str, object] | None:
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT *
+                FROM arbitrage_executions
+                WHERE user_id = %s
+                  AND strategy_rule_id = %s
+                  AND pair_key = %s
+                  AND action = 'close'
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (user_id, strategy_rule_id, pair_key),
+            )
+            return cursor.fetchone()
+
     def has_open_close_execution_by_user_pair_suffix(
         self,
         *,
@@ -547,6 +596,38 @@ class ArbitrageExecutionRepositoryExecutionQueriesMixin:
             )
             row = cursor.fetchone()
             return int(row[0] if row else 0) > 0
+
+    def list_pair_close_executions(
+        self,
+        *,
+        user_id: int,
+        strategy_rule_id: int,
+        pair_key: str,
+        statuses: List[str] | None = None,
+    ) -> List[Dict[str, object]]:
+        normalized_statuses = [str(status).strip().lower() for status in (statuses or []) if str(status).strip()]
+        params: List[object] = [user_id, strategy_rule_id, pair_key]
+        status_clause = ""
+        if normalized_statuses:
+            placeholders = ", ".join(["%s"] * len(normalized_statuses))
+            status_clause = f" AND status IN ({placeholders})"
+            params.extend(normalized_statuses)
+        with mysql_manager.connection() as connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                f"""
+                SELECT *
+                FROM arbitrage_executions
+                WHERE user_id = %s
+                  AND strategy_rule_id = %s
+                  AND pair_key = %s
+                  AND action = 'close'
+                  {status_clause}
+                ORDER BY id DESC
+                """,
+                tuple(params),
+            )
+            return list(cursor.fetchall())
 
     def get_latest_close_execution_by_source(self, *, source_execution_id: int) -> Dict[str, object] | None:
         with mysql_manager.connection() as connection:

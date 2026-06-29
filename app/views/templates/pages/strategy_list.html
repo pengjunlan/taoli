@@ -20,7 +20,7 @@
         <div class="card__header card__header--row strategy-section__header">
             <div>
                 <h2>规则列表</h2>
-                <p>这里配置的是会真实参与自动执行的策略规则。资金费套利按净资金费率择优触发，低于最小净资金费率时平仓；价差套利保持按原有价差率逻辑触发，并统一控制最大开仓交易对数、单笔下单金额、最大持仓、止损价差和下单间隔。</p>
+                <p>这里配置的是会真实参与自动执行的策略规则。资金费套利按净资金费率择优触发，低于最小净资金费率时平仓；价差套利将逐步切换为区间开仓、组合浮盈浮亏跟踪和分层加仓/止盈的仓位管理方式。</p>
             </div>
             <div class="section-tools">
                 <div class="inline-note" data-rule-count>加载中...</div>
@@ -36,11 +36,11 @@
                         <th>类型</th>
                         <th>触发条件</th>
                         <th>最小平仓阈值</th>
-                        <th>最大价差阈值</th>
+                        <th>风险最大价差</th>
                         <th>最大开仓交易对数</th>
-                        <th>单笔下单金额</th>
-                        <th>最大持仓</th>
-                        <th>下单间隔</th>
+                        <th>下单/目标金额</th>
+                        <th>持仓上限</th>
+                        <th>节奏间隔</th>
                         <th>状态</th>
                         <th>更新时间</th>
                         <th>操作</th>
@@ -63,7 +63,7 @@
             <div>
                 <div class="eyebrow">Rule Config</div>
                 <h2 id="strategy-modal-title">新增规则</h2>
-                <p>按当前业务配置真实策略规则，达到设定阈值后才允许继续自动开仓。</p>
+                <p>按当前业务配置真实策略规则，达到设定阈值后才允许继续自动开仓。资金费套利与价差套利页面都会先按“目标金额 + 子委托金额 + 间隔时间”做页面预演，自动拆单执行仍以后端接入为准。</p>
             </div>
             <button class="account-modal__close" type="button" aria-label="关闭规则弹窗" data-strategy-modal-close>脳</button>
         </div>
@@ -96,8 +96,13 @@
                 </label>
 
                 <label class="field is-hidden" data-field-spread>
-                    <span class="field__label">价差率阈值(%)</span>
+                    <span class="field__label">开仓最小价差率(%)</span>
                     <input class="field__control" type="number" name="spread_rate_threshold" min="0" step="0.01" value="0" placeholder="例如 0.3" disabled>
+                </label>
+
+                <label class="field is-hidden" data-field-open-max-spread>
+                    <span class="field__label">开仓最大价差率(%)</span>
+                    <input class="field__control" type="number" name="open_spread_rate_max_threshold" min="0" step="0.01" value="0" placeholder="例如 3.0" disabled>
                 </label>
 
                 <label class="field is-hidden" data-field-min-close-spread>
@@ -106,28 +111,33 @@
                 </label>
 
                 <label class="field">
-                    <span class="field__label">最大价差阈值(%)</span>
+                    <span class="field__label">风险最大价差(%)</span>
                     <input class="field__control" type="number" name="max_spread_rate_threshold" min="0" step="0.01" value="0" placeholder="例如 1.5">
                 </label>
 
                 <label class="field">
-                    <span class="field__label">最大开仓交易对数</span>
+                    <span class="field__label"><span data-copy-label="max_pairs">最大运行交易对数</span></span>
                     <input class="field__control" type="number" name="max_pairs" min="1" step="1" value="1" placeholder="例如 5">
                 </label>
 
                 <label class="field">
-                    <span class="field__label">单笔下单金额 (U)</span>
+                    <span class="field__label"><span data-copy-label="order_amount_usdt">每次开仓/加仓目标金额 (U)</span></span>
                     <input class="field__control" type="number" name="order_amount_usdt" min="0" step="0.01" value="0" placeholder="例如 1000">
                 </label>
 
                 <label class="field">
-                    <span class="field__label">最大持仓 (U)</span>
+                    <span class="field__label"><span data-copy-label="max_position_usdt">单交易对累计持仓上限 (U)</span></span>
                     <input class="field__control" type="number" name="max_position_usdt" min="0" step="0.01" value="0" placeholder="例如 5000">
                 </label>
 
                 <label class="field">
-                    <span class="field__label">加单间隔时间 (秒)</span>
+                    <span class="field__label"><span data-copy-label="order_interval_seconds">子委托间隔时间 (秒)</span></span>
                     <input class="field__control" type="number" name="order_interval_seconds" min="0" step="1" value="0" placeholder="例如 30">
+                </label>
+
+                <label class="field">
+                    <span class="field__label">实际子委托金额 (U)</span>
+                    <input class="field__control" type="number" name="split_order_amount_usdt" min="0" step="0.01" value="0" placeholder="例如 10">
                 </label>
 
                 <div class="strategy-form__section field--full" data-funding-advanced>
@@ -147,6 +157,11 @@
                         </label>
 
                         <label class="field">
+                            <span class="field__label">结算时间差 (分钟)</span>
+                            <input class="field__control" type="number" name="funding_settlement_skew_minutes" min="0" step="1" value="0" placeholder="例如 5">
+                        </label>
+
+                        <label class="field">
                             <span class="field__label">最小同向价差 (%)</span>
                             <input class="field__control" type="number" name="funding_spread_resonance_min" min="0" step="0.0001" value="0" placeholder="例如 0.0300">
                         </label>
@@ -156,7 +171,7 @@
                 <div class="strategy-form__section field--full is-hidden" data-spread-advanced>
                     <div class="strategy-form__section-header">
                         <h3>价差增强</h3>
-                        <p>补充净价差、资金费 Carry 与最大资金费成本保护。</p>
+                        <p>补充净价差、资金费收益与最大资金费成本保护。</p>
                     </div>
                     <div class="strategy-form__grid strategy-form__grid--compact">
                         <label class="field">
@@ -165,7 +180,7 @@
                         </label>
 
                         <label class="field">
-                            <span class="field__label">资金费 Carry 下限 (%)</span>
+                            <span class="field__label">资金费收益下限 (%)</span>
                             <input class="field__control" type="number" name="funding_carry_min" min="0" step="0.0001" value="0" placeholder="例如 0.0100" disabled>
                         </label>
 
@@ -176,20 +191,33 @@
                     </div>
                 </div>
 
+                <div class="strategy-form__section field--full is-hidden" data-spread-positioning>
+                    <div class="strategy-form__section-header">
+                        <h3 data-spread-positioning-title>拆单与仓位</h3>
+                        <p data-spread-positioning-description>面向资金费套利与价差套利的页面预演区。这里先按“每次开仓/加仓目标金额 + 实际子委托金额 + 间隔时间”推演拆单节奏，同时保留浮亏加仓和整体止盈入口。</p>
+                    </div>
+                    <div class="strategy-form__grid strategy-form__grid--compact">
+                        <label class="field">
+                            <span class="field__label">浮亏加仓阶梯间隔 (%)</span>
+                            <input class="field__control" type="number" name="drawdown_add_step_percent" min="0" step="0.01" value="0" placeholder="例如 1.0" disabled>
+                        </label>
+
+                        <label class="field">
+                            <span class="field__label">整体浮盈止盈阈值 (%)</span>
+                            <input class="field__control" type="number" name="take_profit_threshold" min="0" step="0.0001" value="0" placeholder="例如 0.3000">
+                        </label>
+                    </div>
+                </div>
+
                 <div class="strategy-form__section field--full">
                     <div class="strategy-form__section-header">
                         <h3>退出与风控</h3>
-                        <p>补充止盈、净收益保护、最大持有时间和平仓分批节奏。</p>
+                        <p>补充净收益保护、最大持有时间、平仓节奏和异常处理。</p>
                     </div>
                     <div class="strategy-form__grid strategy-form__grid--compact">
                         <label class="field">
                             <span class="field__label">最低净收益保护 (%)</span>
                             <input class="field__control" type="number" name="min_net_profit_threshold" min="0" step="0.0001" value="0" placeholder="例如 0.0500">
-                        </label>
-
-                        <label class="field">
-                            <span class="field__label">止盈收益阈值 (%)</span>
-                            <input class="field__control" type="number" name="take_profit_threshold" min="0" step="0.0001" value="0" placeholder="例如 0.3000">
                         </label>
 
                         <label class="field">
@@ -202,14 +230,14 @@
                             <input class="field__control" type="number" name="close_interval_seconds" min="0" step="1" value="0" placeholder="例如 30">
                         </label>
 
-                        <label class="field">
+                        <label class="field is-hidden">
                             <span class="field__label">平仓批次数</span>
                             <input class="field__control" type="number" name="close_batch_count" min="0" step="1" value="0" placeholder="例如 3">
                         </label>
 
                         <label class="field">
-                            <span class="field__label">单批平仓比例 (%)</span>
-                            <input class="field__control" type="number" name="close_batch_ratio_percent" min="0" max="100" step="0.0001" value="0" placeholder="例如 25">
+                            <span class="field__label">单批平仓金额 (U)</span>
+                            <input class="field__control" type="number" name="close_batch_ratio_percent" min="0" step="0.01" value="0" placeholder="例如 10">
                         </label>
 
                         <label class="field">

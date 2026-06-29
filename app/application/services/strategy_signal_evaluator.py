@@ -11,6 +11,7 @@ from app.application.services.strategy_execution_quality_service import strategy
 from app.application.services.funding_fee_receipt_service import funding_fee_receipt_service
 from app.application.services.strategy_risk_config import strategy_risk_config
 from app.application.services.strategy_rule_runtime_service import StrategyRuleRuntimeView
+from app.infrastructure.persistence import arbitrage_execution_repository
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class StrategySignalEvaluator:
         row: Dict[str, Any],
         rule: Dict[str, Any],
         runtime_rule: StrategyRuleRuntimeView,
+        is_existing_pair: bool = False,
     ) -> StrategySignalResult:
         max_spread = runtime_rule.stop_loss_price_diff
         price_diff = self._parse_float(row.get("price_diff_value"), fallback=row.get("price_diff"))
@@ -51,6 +53,7 @@ class StrategySignalEvaluator:
                 runtime_rule=runtime_rule,
                 price_diff=price_diff,
                 price_diff_percent=price_diff_percent,
+                is_existing_pair=is_existing_pair,
             )
         return StrategySignalResult(False, blocked_reason="unsupported_strategy_type")
 
@@ -103,7 +106,7 @@ class StrategySignalEvaluator:
         return ""
 
     def evaluate_liquidity(self, *, row: Dict[str, Any], runtime_rule: StrategyRuleRuntimeView) -> str:
-        order_amount = float(runtime_rule.order_amount_usdt or 0)
+        order_amount = float(runtime_rule.split_order_amount_usdt or runtime_rule.order_amount_usdt or 0)
         if order_amount <= 0:
             return "order_amount_invalid"
 
@@ -147,8 +150,9 @@ class StrategySignalEvaluator:
         opportunity: Dict[str, Any],
         strategy_type: str,
     ) -> float:
+        aggregate_entry = self._resolve_pair_entry_metrics(execution_row=execution_row, strategy_type=strategy_type)
         if strategy_type == "funding":
-            entry_spread = self._parse_percent(execution_row.get("trigger_metric_risk"))
+            entry_spread = aggregate_entry["entry_spread"]
             current_spread = self.funding_signed_spread_percent(opportunity)
             current_net_rate = self.resolve_funding_close_metric(
                 execution_row=execution_row,
@@ -156,13 +160,71 @@ class StrategySignalEvaluator:
             )
             return max(0.0, entry_spread - current_spread) + max(0.0, current_net_rate)
 
-        entry_spread = self._parse_percent(execution_row.get("trigger_metric_primary"))
+        entry_spread = aggregate_entry["entry_spread"]
         current_spread = self.resolve_spread_close_metric(
             execution_row=execution_row,
             opportunity=opportunity,
         )
         funding_carry = self.spread_funding_carry_percent(opportunity)
         return max(0.0, entry_spread - current_spread) + funding_carry
+
+    def _resolve_pair_entry_metrics(self, *, execution_row: Dict[str, Any], strategy_type: str) -> Dict[str, float]:
+        user_id = int(execution_row.get("user_id") or 0)
+        rule_id = int(execution_row.get("strategy_rule_id") or 0)
+        pair_key = str(execution_row.get("pair_key") or "").strip()
+        if user_id <= 0 or rule_id <= 0 or not pair_key:
+            return self._single_execution_entry_metrics(execution_row=execution_row, strategy_type=strategy_type)
+
+        executions = arbitrage_execution_repository.list_open_executions_by_rule_pair(
+            user_id=user_id,
+            strategy_rule_id=rule_id,
+            pair_key=pair_key,
+        )
+        if not executions:
+            return self._single_execution_entry_metrics(execution_row=execution_row, strategy_type=strategy_type)
+
+        weighted_spread = 0.0
+        weighted_aux = 0.0
+        total_weight = 0.0
+        for row in executions:
+            weight = self._resolve_execution_weight(row)
+            if weight <= 0:
+                continue
+            metrics = self._single_execution_entry_metrics(execution_row=row, strategy_type=strategy_type)
+            weighted_spread += metrics["entry_spread"] * weight
+            weighted_aux += metrics["entry_aux"] * weight
+            total_weight += weight
+        if total_weight <= 0:
+            return self._single_execution_entry_metrics(execution_row=execution_row, strategy_type=strategy_type)
+        return {
+            "entry_spread": weighted_spread / total_weight,
+            "entry_aux": weighted_aux / total_weight,
+        }
+
+    def _single_execution_entry_metrics(self, *, execution_row: Dict[str, Any], strategy_type: str) -> Dict[str, float]:
+        if strategy_type == "funding":
+            return {
+                "entry_spread": self._parse_percent(execution_row.get("trigger_metric_risk")),
+                "entry_aux": self._parse_percent(execution_row.get("trigger_metric_primary")),
+            }
+        return {
+            "entry_spread": self._parse_percent(execution_row.get("trigger_metric_primary")),
+            "entry_aux": self._parse_percent(execution_row.get("trigger_metric_secondary")),
+        }
+
+    def _resolve_execution_weight(self, execution_row: Dict[str, Any]) -> float:
+        execution_id = int(execution_row.get("id") or 0)
+        if execution_id <= 0:
+            return max(0.0, float(execution_row.get("planned_order_amount_usdt") or 0))
+        order_legs = arbitrage_execution_repository.list_order_legs_by_execution(execution_id=execution_id)
+        totals: Dict[str, float] = {}
+        for row in order_legs:
+            role = str(row.get("leg_role") or "").strip().lower() or "unknown"
+            totals[role] = totals.get(role, 0.0) + float(row.get("filled_value_usdt") or 0)
+        filled_value = max(totals.values()) if totals else 0.0
+        if filled_value > 0:
+            return filled_value
+        return max(0.0, float(execution_row.get("planned_order_amount_usdt") or 0))
 
     def is_funding_direction_reversed(self, *, execution_row: Dict[str, Any], opportunity: Dict[str, Any]) -> bool:
         left_exchange = str(execution_row.get("left_exchange_code") or "").strip().lower()
@@ -220,6 +282,12 @@ class StrategySignalEvaluator:
         start_minutes = max(0, int(rule.get("funding_open_window_start_minutes") or 0))
         end_minutes = max(0, int(rule.get("funding_open_window_end_minutes") or 0))
         if start_minutes <= 0 and end_minutes <= 0:
+            settlement_values = self.funding_settlement_values(row)
+            if not settlement_values:
+                return True
+            skew_minutes = self._resolve_funding_settlement_skew_minutes(rule)
+            if len(settlement_values) > 1 and skew_minutes > 0:
+                return (max(settlement_values) - min(settlement_values)) / 60000 <= skew_minutes
             return True
 
         settlement_values = self.funding_settlement_values(row)
@@ -227,7 +295,7 @@ class StrategySignalEvaluator:
             return False
 
         now_ms = datetime.now(tz=timezone.utc).timestamp() * 1000
-        skew_minutes = max(0, int(strategy_risk_config.max_funding_settlement_skew_minutes or 0))
+        skew_minutes = self._resolve_funding_settlement_skew_minutes(rule)
         if len(settlement_values) > 1 and skew_minutes > 0:
             if (max(settlement_values) - min(settlement_values)) / 60000 > skew_minutes:
                 return False
@@ -252,6 +320,12 @@ class StrategySignalEvaluator:
             return values
         fallback = self._parse_float(row.get("settlement_at_ms"))
         return [fallback] if fallback > 0 else []
+
+    def _resolve_funding_settlement_skew_minutes(self, rule: Dict[str, Any]) -> int:
+        raw_value = rule.get("funding_settlement_skew_minutes")
+        if raw_value in (None, ""):
+            return max(0, int(strategy_risk_config.max_funding_settlement_skew_minutes or 0))
+        return max(0, int(raw_value or 0))
 
     def funding_signed_spread_percent(self, row: Dict[str, Any]) -> float:
         long_price = self._parse_float(row.get("left_price_value"))
@@ -359,7 +433,10 @@ class StrategySignalEvaluator:
                 f"{runtime_rule.open_threshold:.4f}%, spread {spread_percent:.4f}%, "
                 f"fee {fee_cost:.4f}%, slippage {slippage_cost:.4f}%, "
                 f"expected_net {expected_net:.4f}%, "
-                f"price_diff {price_diff:.6f}, price_diff_percent {price_diff_percent:.4f}%"
+                f"price_diff {price_diff:.6f}, price_diff_percent {price_diff_percent:.4f}%, "
+                f"target_order {runtime_rule.order_amount_usdt:.2f}U, "
+                f"child_order {runtime_rule.split_order_amount_usdt:.2f}U, "
+                f"child_interval {runtime_rule.order_interval_seconds}s"
             ),
             expected_net_profit_percent=expected_net,
         )
@@ -372,10 +449,21 @@ class StrategySignalEvaluator:
         runtime_rule: StrategyRuleRuntimeView,
         price_diff: float,
         price_diff_percent: float,
+        is_existing_pair: bool = False,
     ) -> StrategySignalResult:
         latest_spread = self._parse_float(row.get("latest_spread_value"), fallback=row.get("latest_spread"))
         if latest_spread < runtime_rule.open_threshold:
             return StrategySignalResult(False, blocked_reason="spread_threshold_not_met")
+        if (
+            not is_existing_pair
+            and runtime_rule.open_spread_rate_max_threshold > 0
+            and latest_spread > runtime_rule.open_spread_rate_max_threshold
+        ):
+            return StrategySignalResult(False, blocked_reason="spread_open_max_threshold_exceeded")
+        if (
+            runtime_rule.open_spread_rate_max_threshold > 0
+        ):
+            row["spread_open_range_upper_value"] = runtime_rule.open_spread_rate_max_threshold
 
         net_spread = self._parse_float(row.get("net_spread_value"), fallback=row.get("net_spread"))
         net_spread_threshold = self._parse_float(rule.get("net_spread_threshold"))
@@ -408,7 +496,10 @@ class StrategySignalEvaluator:
                 f"{runtime_rule.open_threshold:.4f}%, net_spread {net_spread:.4f}%, "
                 f"carry {funding_carry:.4f}%, slippage {slippage_cost:.4f}%, "
                 f"expected_net {expected_net:.4f}%, "
-                f"price_diff {price_diff:.6f}, price_diff_percent {price_diff_percent:.4f}%"
+                f"price_diff {price_diff:.6f}, price_diff_percent {price_diff_percent:.4f}%, "
+                f"target_order {runtime_rule.order_amount_usdt:.2f}U, "
+                f"child_order {runtime_rule.split_order_amount_usdt:.2f}U, "
+                f"child_interval {runtime_rule.order_interval_seconds}s"
             ),
             expected_net_profit_percent=expected_net,
         )

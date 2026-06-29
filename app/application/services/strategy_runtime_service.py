@@ -129,8 +129,10 @@ class StrategyRuntimeService:
         if current_status == "closed":
             raise AccountValidationError("该组合已经完成平仓。")
 
-        existing_close = arbitrage_execution_repository.get_latest_close_execution_by_source(
-            source_execution_id=execution_id,
+        existing_close = arbitrage_execution_repository.get_latest_active_close_execution_by_pair(
+            user_id=user_id,
+            strategy_rule_id=int(execution_row.get("strategy_rule_id") or 0),
+            pair_key=str(execution_row.get("pair_key") or ""),
         )
         existing_close_status = str((existing_close or {}).get("status") or "").strip().lower()
         active_close_statuses = {"pending", "created", "processing", "opening", "open", "closing"}

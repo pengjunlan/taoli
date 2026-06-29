@@ -264,20 +264,24 @@ class MySQLConnectionManager:
                 annualized_rate_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
                 min_net_funding_rate_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
                 spread_rate_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
+                open_spread_rate_max_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
                 min_close_spread_rate_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
                 max_spread_rate_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
                 max_pairs INT NOT NULL DEFAULT 1,
                 order_amount_usdt DECIMAL(18,2) NOT NULL DEFAULT 0.00,
                 max_position_usdt DECIMAL(18,2) NOT NULL DEFAULT 0.00,
                 order_interval_seconds INT NOT NULL DEFAULT 0,
+                split_order_amount_usdt DECIMAL(18,2) NOT NULL DEFAULT 0.00,
                 funding_open_window_start_minutes INT NOT NULL DEFAULT 0,
                 funding_open_window_end_minutes INT NOT NULL DEFAULT 0,
+                funding_settlement_skew_minutes INT NOT NULL DEFAULT 0,
                 funding_spread_resonance_min DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
                 net_spread_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
                 funding_carry_min DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
                 max_funding_cost DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
                 min_net_profit_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
                 take_profit_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
+                drawdown_add_step_percent DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
                 max_hold_minutes INT NOT NULL DEFAULT 0,
                 close_interval_seconds INT NOT NULL DEFAULT 0,
                 close_batch_count INT NOT NULL DEFAULT 0,
@@ -1066,6 +1070,25 @@ class MySQLConnectionManager:
                 except MySQLError as exc:
                     if "Duplicate column name" not in str(exc):
                         raise
+            self._ensure_column(
+                cursor,
+                table_name="strategy_rules",
+                column_name="open_spread_rate_max_threshold",
+                ddl="""
+                    ALTER TABLE strategy_rules
+                    ADD COLUMN open_spread_rate_max_threshold DECIMAL(10,4) NOT NULL DEFAULT 0.0000
+                    AFTER spread_rate_threshold
+                """,
+            )
+            cursor.execute(
+                """
+                UPDATE strategy_rules
+                SET open_spread_rate_max_threshold = max_spread_rate_threshold
+                WHERE strategy_type = 'spread'
+                  AND open_spread_rate_max_threshold <= 0
+                  AND max_spread_rate_threshold > 0
+                """
+            )
             cursor.execute(
                 """
                 UPDATE strategy_rules
@@ -1095,6 +1118,33 @@ class MySQLConnectionManager:
                     AFTER funding_open_window_start_minutes
                 """,
             )
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s
+                  AND TABLE_NAME = 'strategy_rules'
+                  AND COLUMN_NAME = 'funding_settlement_skew_minutes'
+                """,
+                (mysql_config.database,),
+            )
+            has_funding_settlement_skew_minutes = int(cursor.fetchone()[0]) > 0
+            if not has_funding_settlement_skew_minutes:
+                cursor.execute(
+                    """
+                    ALTER TABLE strategy_rules
+                    ADD COLUMN funding_settlement_skew_minutes INT NOT NULL DEFAULT 0
+                    AFTER funding_open_window_end_minutes
+                    """
+                )
+                cursor.execute(
+                    """
+                    UPDATE strategy_rules
+                    SET funding_settlement_skew_minutes = %s
+                    WHERE strategy_type = 'funding'
+                    """,
+                    (int(strategy_risk_config.max_funding_settlement_skew_minutes or 0),),
+                )
             self._ensure_column(
                 cursor,
                 table_name="strategy_rules",
@@ -1158,12 +1208,40 @@ class MySQLConnectionManager:
             self._ensure_column(
                 cursor,
                 table_name="strategy_rules",
+                column_name="drawdown_add_step_percent",
+                ddl="""
+                    ALTER TABLE strategy_rules
+                    ADD COLUMN drawdown_add_step_percent DECIMAL(10,4) NOT NULL DEFAULT 0.0000
+                    AFTER take_profit_threshold
+                """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="strategy_rules",
                 column_name="max_hold_minutes",
                 ddl="""
                     ALTER TABLE strategy_rules
                     ADD COLUMN max_hold_minutes INT NOT NULL DEFAULT 0
                     AFTER take_profit_threshold
                 """,
+            )
+            self._ensure_column(
+                cursor,
+                table_name="strategy_rules",
+                column_name="split_order_amount_usdt",
+                ddl="""
+                    ALTER TABLE strategy_rules
+                    ADD COLUMN split_order_amount_usdt DECIMAL(18,2) NOT NULL DEFAULT 0.00
+                    AFTER order_interval_seconds
+                """,
+            )
+            cursor.execute(
+                """
+                UPDATE strategy_rules
+                SET split_order_amount_usdt = order_amount_usdt
+                WHERE split_order_amount_usdt <= 0
+                  AND order_amount_usdt > 0
+                """
             )
             self._ensure_column(
                 cursor,

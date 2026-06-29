@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
+from app.application.services.funding_runtime_state_service import funding_runtime_state_service
+from app.application.services.spread_runtime_state_service import spread_runtime_state_service
 from app.application.services.strategy_risk_config import strategy_risk_config
 from app.application.services.strategy_rule_runtime_service import StrategyRuleRuntimeView
 from app.infrastructure.cache import redis_runtime_support
@@ -13,7 +15,7 @@ from app.infrastructure.persistence.account_repository import account_repository
 
 
 BUSY_OPEN_STATUSES = {"pending", "created", "processing", "opening", "closing"}
-TERMINAL_BLOCK_STATUSES = {"closed"}
+TERMINAL_BLOCK_STATUSES = set()
 
 
 class StrategyPositionGuard:
@@ -56,21 +58,13 @@ class StrategyPositionGuard:
             return "pair_in_cooldown", is_same_rule_pair
 
         if latest_open is None:
-            latest_terminal = arbitrage_execution_repository.get_latest_open_execution_by_user_pair_suffix(
-                user_id=user_id,
-                pair_suffix=pair_suffix,
-            )
-            latest_terminal_status = str((latest_terminal or {}).get("status") or "").strip().lower()
-            if latest_terminal_status in TERMINAL_BLOCK_STATUSES:
-                return "pair_has_closed_execution", False
             return "", False
-
-        if latest_status in TERMINAL_BLOCK_STATUSES:
-            return "pair_has_closed_execution", False
 
         if latest_status == "open":
             if not is_same_rule_pair:
                 return "pair_has_active_execution", False
+            if not self.is_same_execution_direction(latest_open=latest_open, row=row):
+                return "pair_direction_conflict", False
             add_block = self.evaluate_existing_pair_add_state(
                 execution_row=latest_open,
                 runtime_rule=runtime_rule,
@@ -146,12 +140,12 @@ class StrategyPositionGuard:
                 user_id=user_id,
                 strategy_rule_id=rule_id,
             ):
-                execution = arbitrage_execution_repository.get_latest_active_open_execution_by_pair(
+                executions = arbitrage_execution_repository.list_open_executions_by_rule_pair(
                     user_id=user_id,
                     strategy_rule_id=rule_id,
                     pair_key=str(pair_key),
                 )
-                position_notional = self.resolve_execution_pair_notional(execution)
+                position_notional = self.resolve_execution_pair_notional(executions[0] if executions else None)
                 opening_notional = arbitrage_execution_repository.sum_opening_execution_planned_amount_without_position_by_pair(
                     user_id=user_id,
                     strategy_rule_id=rule_id,
@@ -169,16 +163,17 @@ class StrategyPositionGuard:
         if not self.is_pair_position_balanced(execution_row):
             return "pair_position_unbalanced"
 
+        strategy_type = str(runtime_rule.strategy_type or "").strip().lower()
         interval_seconds = int(runtime_rule.order_interval_seconds or 0)
-        if interval_seconds <= 0:
-            return ""
+        if interval_seconds > 0:
+            last_order_at = self._resolve_last_add_reference_time(execution_row=execution_row, runtime_rule=runtime_rule)
+            if isinstance(last_order_at, datetime) and datetime.now() - last_order_at < timedelta(seconds=interval_seconds):
+                return "order_interval_waiting"
 
-        updated_at = execution_row.get("updated_at")
-        if not isinstance(updated_at, datetime):
-            return ""
-
-        if datetime.now() - updated_at < timedelta(seconds=interval_seconds):
-            return "order_interval_waiting"
+        if strategy_type == "spread":
+            spread_block = self._evaluate_spread_add_step(execution_row=execution_row, runtime_rule=runtime_rule)
+            if spread_block:
+                return spread_block
         return ""
 
     def is_pair_position_balanced(self, execution_row: Dict[str, Any]) -> bool:
@@ -260,9 +255,59 @@ class StrategyPositionGuard:
         pair_suffix = self.build_pair_suffix(row=row)
         return f"{int(rule_id or 0)}:{pair_suffix}" if pair_suffix else ""
 
+    def is_same_execution_direction(self, *, latest_open: Dict[str, Any], row: Dict[str, Any]) -> bool:
+        latest_left_exchange = str(latest_open.get("left_exchange_code") or "").strip().lower()
+        latest_right_exchange = str(latest_open.get("right_exchange_code") or "").strip().lower()
+        latest_left_symbol = str(latest_open.get("left_symbol") or "").strip()
+        latest_right_symbol = str(latest_open.get("right_symbol") or "").strip()
+
+        row_left_exchange = str(row.get("left_exchange_code") or "").strip().lower()
+        row_right_exchange = str(row.get("right_exchange_code") or "").strip().lower()
+        row_left_symbol = str(row.get("left_symbol_raw") or row.get("left_symbol") or "").strip()
+        row_right_symbol = str(row.get("right_symbol_raw") or row.get("right_symbol") or "").strip()
+
+        if not latest_left_exchange or not latest_right_exchange or not row_left_exchange or not row_right_exchange:
+            return True
+        if not latest_left_symbol or not latest_right_symbol or not row_left_symbol or not row_right_symbol:
+            return True
+        return (
+            latest_left_exchange == row_left_exchange
+            and latest_right_exchange == row_right_exchange
+            and latest_left_symbol == row_left_symbol
+            and latest_right_symbol == row_right_symbol
+        )
+
     def resolve_execution_pair_notional(self, execution: Dict[str, Any] | None) -> float:
         if execution is None:
             return 0.0
+        user_id = int(execution.get("user_id") or 0)
+        rule_id = int(execution.get("strategy_rule_id") or 0)
+        pair_key = str(execution.get("pair_key") or "").strip()
+        if user_id > 0 and rule_id > 0 and pair_key:
+            positions = arbitrage_execution_repository.list_open_positions_by_pair(
+                user_id=user_id,
+                strategy_rule_id=rule_id,
+                pair_key=pair_key,
+            )
+            if positions:
+                notionals: List[float] = []
+                for row in positions:
+                    try:
+                        quantity = abs(float(row.get("quantity") or 0))
+                        market_value = abs(float(row.get("market_value_usdt") or 0))
+                        mark_price = float(row.get("mark_price") or 0)
+                        avg_price = float(row.get("avg_entry_price") or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if market_value > 0:
+                        notionals.append(market_value)
+                        continue
+                    price = mark_price if mark_price > 0 else avg_price
+                    if quantity > 0 and price > 0:
+                        notionals.append(quantity * price)
+                if notionals:
+                    return max(notionals)
+
         source_legs = arbitrage_execution_repository.list_order_legs_by_execution(
             execution_id=int(execution.get("id") or 0),
         )
@@ -282,6 +327,63 @@ class StrategyPositionGuard:
             return float(value or 0)
         except (TypeError, ValueError):
             return 0.0
+
+    def _resolve_last_add_reference_time(
+        self,
+        *,
+        execution_row: Dict[str, Any],
+        runtime_rule: StrategyRuleRuntimeView,
+    ) -> datetime | None:
+        runtime_state = self._get_runtime_state(execution_row=execution_row, runtime_rule=runtime_rule)
+        last_order_at = redis_runtime_support.parse_datetime(runtime_state.get("last_order_at"))
+        if isinstance(last_order_at, datetime):
+            return last_order_at
+        updated_at = execution_row.get("updated_at")
+        return updated_at if isinstance(updated_at, datetime) else None
+
+    def _evaluate_spread_add_step(
+        self,
+        *,
+        execution_row: Dict[str, Any],
+        runtime_rule: StrategyRuleRuntimeView,
+    ) -> str:
+        drawdown_step = float(runtime_rule.drawdown_add_step_percent or 0)
+        if drawdown_step <= 0:
+            return ""
+        runtime_state = spread_runtime_state_service.get_pair_state(
+            user_id=int(execution_row.get("user_id") or 0),
+            rule_id=int(runtime_rule.rule_id or 0),
+            pair_key=str(execution_row.get("pair_key") or ""),
+        )
+        last_spread_value = self._parse_float(runtime_state.get("last_open_spread_value"))
+        latest_spread_value = self._parse_float(runtime_state.get("latest_spread_value"))
+        if last_spread_value <= 0 or latest_spread_value <= 0:
+            return ""
+        if latest_spread_value < last_spread_value + drawdown_step:
+            return "spread_add_step_not_reached"
+        return ""
+
+    def _get_runtime_state(
+        self,
+        *,
+        execution_row: Dict[str, Any],
+        runtime_rule: StrategyRuleRuntimeView,
+    ) -> Dict[str, Any]:
+        user_id = int(execution_row.get("user_id") or 0)
+        rule_id = int(runtime_rule.rule_id or 0)
+        pair_key = str(execution_row.get("pair_key") or "")
+        strategy_type = str(runtime_rule.strategy_type or "").strip().lower()
+        if strategy_type == "funding":
+            return funding_runtime_state_service.get_pair_state(
+                user_id=user_id,
+                rule_id=rule_id,
+                pair_key=pair_key,
+            )
+        return spread_runtime_state_service.get_pair_state(
+            user_id=user_id,
+            rule_id=rule_id,
+            pair_key=pair_key,
+        )
 
 
 strategy_position_guard = StrategyPositionGuard()

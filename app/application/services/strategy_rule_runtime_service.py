@@ -11,12 +11,16 @@ class StrategyRuleRuntimeView:
     rule_id: int
     strategy_type: str
     open_threshold: float
+    open_spread_rate_max_threshold: float
     close_threshold: float
     stop_loss_price_diff: float
     max_pairs: int
     order_amount_usdt: float
     max_position_usdt: float
     order_interval_seconds: int
+    split_order_amount_usdt: float
+    funding_settlement_skew_minutes: int
+    drawdown_add_step_percent: float
 
 
 class StrategyRuleRuntimeService:
@@ -36,6 +40,9 @@ class StrategyRuleRuntimeService:
         max_position_usdt = self._float(rule_row.get("max_position_usdt"))
         if max_position_usdt <= 0:
             max_position_usdt = order_amount_usdt
+        split_order_amount_usdt = self._float(rule_row.get("split_order_amount_usdt"))
+        if split_order_amount_usdt <= 0:
+            split_order_amount_usdt = order_amount_usdt
 
         if strategy_type == "funding":
             open_threshold = self._float(rule_row.get("annualized_rate_threshold"))
@@ -48,12 +55,16 @@ class StrategyRuleRuntimeService:
             rule_id=int(rule_row.get("id") or 0),
             strategy_type=strategy_type,
             open_threshold=open_threshold,
+            open_spread_rate_max_threshold=self._float(rule_row.get("open_spread_rate_max_threshold")),
             close_threshold=close_threshold,
             stop_loss_price_diff=self._float(rule_row.get("max_spread_rate_threshold")),
             max_pairs=max(0, int(rule_row.get("max_pairs") or 0)),
             order_amount_usdt=order_amount_usdt,
             max_position_usdt=max_position_usdt,
             order_interval_seconds=max(0, int(rule_row.get("order_interval_seconds") or 0)),
+            split_order_amount_usdt=split_order_amount_usdt,
+            funding_settlement_skew_minutes=max(0, int(rule_row.get("funding_settlement_skew_minutes") or 0)),
+            drawdown_add_step_percent=self._float(rule_row.get("drawdown_add_step_percent")),
         )
 
     def _float(self, value: Any) -> float:

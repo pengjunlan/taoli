@@ -95,20 +95,24 @@ class StrategyRule:
     annualized_rate_threshold: float
     min_net_funding_rate_threshold: float
     spread_rate_threshold: float
+    open_spread_rate_max_threshold: float
     min_close_spread_rate_threshold: float
     max_spread_rate_threshold: float
     max_pairs: int
     order_amount_usdt: float
     max_position_usdt: float
     order_interval_seconds: int
+    split_order_amount_usdt: float
     funding_open_window_start_minutes: int
     funding_open_window_end_minutes: int
+    funding_settlement_skew_minutes: int
     funding_spread_resonance_min: float
     net_spread_threshold: float
     funding_carry_min: float
     max_funding_cost: float
     min_net_profit_threshold: float
     take_profit_threshold: float
+    drawdown_add_step_percent: float
     max_hold_minutes: int
     close_interval_seconds: int
     close_batch_count: int

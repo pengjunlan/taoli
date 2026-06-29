@@ -100,6 +100,41 @@ function formatRawPrice(value) {
   return String(value);
 }
 
+function parseSignedMetricNumber(value) {
+  const text = String(value ?? "").replace("%", "").replace(",", "").trim();
+  const numeric = Number(text);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function getSignedMetricClass(value) {
+  const numeric = parseSignedMetricNumber(value);
+  if (numeric === null) {
+    return "spread-fee";
+  }
+  if (numeric > 0) {
+    return "spread-fee is-positive";
+  }
+  if (numeric < 0) {
+    return "spread-fee is-negative";
+  }
+  return "spread-fee";
+}
+
+function formatSignedMetricDisplay(value) {
+  const text = String(value ?? "").trim();
+  const numeric = parseSignedMetricNumber(value);
+  if (numeric === null) {
+    return text;
+  }
+  if (numeric === 0) {
+    return text.replace(/^[+-]/, "");
+  }
+  if (numeric > 0) {
+    return text.replace(/^\+/, "");
+  }
+  return text;
+}
+
 function renderSettlementCell(row) {
   const longSettlementAtMs = toSettlementMs(row.long_settlement_at_ms ?? row.settlement_at_ms);
   const shortSettlementAtMs = toSettlementMs(row.short_settlement_at_ms ?? row.settlement_at_ms);
@@ -200,7 +235,7 @@ function renderFundingRows(rows) {
           </td>
           <td>
             <div class="spread-symbol">
-              <strong class="spread-fee">${escapeHtml(row.net_rate)}</strong>
+              <strong class="${escapeHtml(getSignedMetricClass(row.net_rate))}">${escapeHtml(formatSignedMetricDisplay(row.net_rate))}</strong>
               <span class="spread-symbol__hint">4小时净资率</span>
             </div>
           </td>

@@ -144,6 +144,7 @@ class TradeDecisionService:
 
             runtime_rule = rule_views.get(int(matched_rule.get("id") or 0))
             order_amount = runtime_rule.order_amount_usdt
+            split_amount = runtime_rule.split_order_amount_usdt
             max_position = runtime_rule.max_position_usdt
             result.append(
                 {
@@ -159,6 +160,7 @@ class TradeDecisionService:
                     "secondary_metric": str(row.get("annual") or "--"),
                     "risk_metric": str(row.get("price_diff") or "--"),
                     "planned_order_amount": order_amount,
+                    "actual_child_order_amount": split_amount,
                     "max_position_usdt": max_position,
                     "order_interval_seconds": runtime_rule.order_interval_seconds,
                     "reason": (
@@ -171,7 +173,7 @@ class TradeDecisionService:
                     "status_tone": "brand",
                     "action_label": "开资金费对冲",
                     "opportunity_time": str(row.get("settlement") or "--"),
-                    "position_size_text": self._format_money(max_position),
+                    "position_size_text": self._format_money(order_amount),
                 }
             )
         return result
@@ -205,6 +207,7 @@ class TradeDecisionService:
 
             runtime_rule = rule_views.get(int(matched_rule.get("id") or 0))
             order_amount = runtime_rule.order_amount_usdt
+            split_amount = runtime_rule.split_order_amount_usdt
             max_position = runtime_rule.max_position_usdt
             result.append(
                 {
@@ -220,6 +223,7 @@ class TradeDecisionService:
                     "secondary_metric": str(row.get("net_spread") or "--"),
                     "risk_metric": str(row.get("price_diff") or "--"),
                     "planned_order_amount": order_amount,
+                    "actual_child_order_amount": split_amount,
                     "max_position_usdt": max_position,
                     "order_interval_seconds": runtime_rule.order_interval_seconds,
                     "reason": (
@@ -231,7 +235,7 @@ class TradeDecisionService:
                     "status_tone": "brand",
                     "action_label": "开价差对冲",
                     "opportunity_time": str(row.get("opportunity_time") or "--"),
-                    "position_size_text": self._format_money(max_position),
+                    "position_size_text": self._format_money(order_amount),
                 }
             )
         return result

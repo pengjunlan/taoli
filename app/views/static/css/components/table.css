@@ -73,6 +73,16 @@
     color: var(--text);
 }
 
+.spread-fee.is-positive,
+.spread-metric.is-positive {
+    color: var(--positive);
+}
+
+.spread-fee.is-negative,
+.spread-metric.is-negative {
+    color: var(--negative);
+}
+
 .spread-metric--strong {
     font-weight: 700;
 }

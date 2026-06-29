@@ -38,7 +38,7 @@ class StrategyExecutionQualityService:
         row: Dict[str, Any],
         runtime_rule: StrategyRuleRuntimeView,
     ) -> tuple[str, float]:
-        order_amount = float(runtime_rule.order_amount_usdt or 0)
+        order_amount = float(runtime_rule.split_order_amount_usdt or runtime_rule.order_amount_usdt or 0)
         if order_amount <= 0:
             return "order_amount_invalid", 0.0
 

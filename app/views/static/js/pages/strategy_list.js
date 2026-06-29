@@ -30,27 +30,46 @@ const STRATEGY_FIELD_HINTS = {
   strategy_type: "选择策略模型：资金费套利看资金费率，价差套利看跨交易所价差。",
   annualized_rate_threshold: "资金费套利开仓阈值。净资金费率达到该值后，才允许进入开仓判断。",
   min_net_funding_rate_threshold: "资金费套利正常平仓线。净资金费率回落到该值以下，说明继续持有不划算。",
-  spread_rate_threshold: "价差套利开仓阈值。价差率达到该值后，才允许买便宜侧、空昂贵侧。",
+  spread_rate_threshold: "价差套利开仓最小值。只有价差率高于这个下限，才允许进入区间开仓判断。",
+  open_spread_rate_max_threshold: "价差套利开仓最大值。只有价差率落在最小值和这个最大值之间，才允许开仓，避免在异常大价差附近来回摩擦。",
   min_close_spread_rate_threshold: "价差套利正常平仓线。价差回落到该值以下，说明价差收益空间基本释放。",
-  max_spread_rate_threshold: "风控边界。价差继续向不利方向扩大到该值附近时，用于停止加仓或触发止损。",
-  max_pairs: "限制同一规则最多同时运行多少个交易对，防止机会过多时占满资金。",
-  order_amount_usdt: "每一批双边开仓的名义金额，单位 U。加仓时也按这个金额分批执行。",
-  max_position_usdt: "同一交易对在这条规则下允许累计持有的最大名义金额，单位 U。",
-  order_interval_seconds: "同一交易对两次开仓/加仓之间至少间隔多少秒，避免连续追单。",
+  max_spread_rate_threshold: "风险边界。这个值更适合做持仓后的止损/停加仓上限，不建议与开仓最大价差共用。",
+  max_pairs: "限制同一规则最多同时运行多少个交易对，防止机会过多时占满资金。资金费套利与价差套利都按同一口径理解。",
+  order_amount_usdt: "页面统一展示为每次开仓/加仓目标金额。比如填 100U，表示本次希望累计做到 100U。",
+  max_position_usdt: "同一交易对在这条规则下允许累计持有的最大名义金额上限，单位 U。资金费套利与价差套利都按同一口径理解。",
+  order_interval_seconds: "页面统一展示为子委托之间的节奏间隔。比如目标 100U、子委托 10U，则可按这个间隔逐笔推进。",
+  split_order_amount_usdt: "实际子委托金额。表示一次真实委托要发出的金额，例如目标 100U、子委托 10U，则系统会按约 10 笔逐步完成。",
   funding_open_window_start_minutes: "资金费结算前多少分钟开始允许开仓。填 0 表示不限制最早开仓时间。",
   funding_open_window_end_minutes: "距离结算太近时停止新开仓，避免最后几分钟成交/滑点风险。填 0 表示不限制。",
+  funding_settlement_skew_minutes: "两个交易所的资金费结算时间允许最多相差多少分钟。超过这个时间差，就不做这组资金费套利。填 0 表示必须同一结算时间，不允许错开。",
   funding_spread_resonance_min: "资金费方向和价差方向同向时，要求价差至少达到多少。填 0 表示只要求同向，不要求最小幅度。",
   net_spread_threshold: "扣除手续费、滑点和预估资金费成本后的真实价差开仓门槛。",
-  funding_carry_min: "价差套利方向下，资金费 Carry 至少不能太差。填 0 表示不额外要求资金费正贡献。",
+  funding_carry_min: "价差套利方向下，资金费收益至少不能太差。填 0 表示不额外要求资金费正贡献。",
   max_funding_cost: "价差套利持仓期间最多允许被资金费消耗多少收益，超过后停止加仓或考虑退出。",
   min_net_profit_threshold: "最低净收益保护。预期收益必须覆盖手续费、滑点和安全垫后才允许开仓。",
-  take_profit_threshold: "整体净收益达到该值后触发止盈，建议配合分批平仓。",
+  take_profit_threshold: "后续建议按组合整体浮盈率来触发止盈，并配合分批平仓执行。",
+  drawdown_add_step_percent: "价差套利加仓阶梯。系统会把它作为相对上一次开仓/加仓基准价差的恶化间隔，达到一个阶梯才允许再按目标金额发起下一轮加仓。",
   max_hold_minutes: "单个套利持仓最多持有多久。填 0 表示不按时间强制退出。",
   close_interval_seconds: "分批平仓时，两批之间至少间隔多少秒。填 0 表示不做间隔限制。",
-  close_batch_count: "计划分几批平仓。填 0 表示由系统按默认方式处理。",
-  close_batch_ratio_percent: "每次触发平仓时最多平掉当前剩余仓位的百分比。填 0 时按平仓批次数等分处理。",
+  close_batch_count: "本地页面预留字段，当前已隐藏，不参与当前页面配置。",
+  close_batch_ratio_percent: "单批平仓金额。比如当前组合还有 100U，填 10 表示每次平约 10U；平完后按平仓间隔时间等待，再继续下一批，直到全部平完。填 0 表示不分批，直接一次性平完。",
   single_leg_timeout_seconds: "一边成交、另一边迟迟未成交时，等待多久后进入异常处理。填 0 表示使用系统默认保护。",
   is_enabled: "启用后该规则会参与自动筛选和执行；关闭后只保留配置，不再触发新的自动开仓。",
+};
+
+const STRATEGY_COPY_BY_TYPE = {
+  funding: {
+    max_pairs: "最大运行交易对数",
+    order_amount_usdt: "每次开仓/加仓目标金额 (U)",
+    max_position_usdt: "单交易对累计持仓上限 (U)",
+    order_interval_seconds: "子委托间隔时间 (秒)",
+  },
+  spread: {
+    max_pairs: "最大运行交易对数",
+    order_amount_usdt: "每次开仓/加仓目标金额 (U)",
+    max_position_usdt: "单交易对累计持仓上限 (U)",
+    order_interval_seconds: "子委托间隔时间 (秒)",
+  },
 };
 
 let strategyFieldTooltip = null;
@@ -142,6 +161,13 @@ function injectStrategyFieldHints(form) {
     helpElement.addEventListener("blur", hideStrategyFieldTooltip);
     label.appendChild(helpElement);
   });
+}
+
+function formatMoney(value) {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount) || amount <= 0) return "0";
+  if (Math.abs(amount - Math.round(amount)) < 1e-9) return String(Math.round(amount));
+  return amount.toFixed(2).replace(/\.?0+$/, "");
 }
 
 async function getJson(url) {
@@ -270,9 +296,11 @@ function bindStrategyModal() {
   const annualizedField = document.querySelector("[data-field-annualized]");
   const minNetFundingField = document.querySelector("[data-field-min-net-funding]");
   const spreadField = document.querySelector("[data-field-spread]");
+  const openMaxSpreadField = document.querySelector("[data-field-open-max-spread]");
   const minCloseSpreadField = document.querySelector("[data-field-min-close-spread]");
   const fundingAdvancedSections = document.querySelectorAll("[data-funding-advanced]");
   const spreadAdvancedSections = document.querySelectorAll("[data-spread-advanced]");
+  const spreadPositioningSections = document.querySelectorAll("[data-spread-positioning]");
   const confirmModal = document.querySelector("[data-strategy-confirm]");
   const confirmMessage = document.querySelector("[data-strategy-confirm-message]");
   const confirmAccept = document.querySelector("[data-strategy-confirm-accept]");
@@ -280,8 +308,17 @@ function bindStrategyModal() {
   const title = document.getElementById("strategy-modal-title");
   const hiddenRuleId = form?.querySelector('input[name="rule_id"]');
   const submitButton = form?.querySelector('button[type="submit"]');
+  const splitPreviewText = form?.querySelector("[data-spread-split-preview]");
+  const spreadPositioningTitle = form?.querySelector("[data-spread-positioning-title]");
+  const spreadPositioningDescription = form?.querySelector("[data-spread-positioning-description]");
+  const copyTargets = {
+    max_pairs: form?.querySelector('[data-copy-label="max_pairs"]'),
+    order_amount_usdt: form?.querySelector('[data-copy-label="order_amount_usdt"]'),
+    max_position_usdt: form?.querySelector('[data-copy-label="max_position_usdt"]'),
+    order_interval_seconds: form?.querySelector('[data-copy-label="order_interval_seconds"]'),
+  };
 
-  if (!modal || !form || !openButton || !typeField || !annualizedField || !minNetFundingField || !spreadField || !minCloseSpreadField || !title || !hiddenRuleId || !submitButton) {
+  if (!modal || !form || !openButton || !typeField || !annualizedField || !minNetFundingField || !spreadField || !openMaxSpreadField || !minCloseSpreadField || !title || !hiddenRuleId || !submitButton) {
     return;
   }
 
@@ -292,6 +329,7 @@ function bindStrategyModal() {
   const fundingAdvancedFieldNames = [
     "funding_open_window_start_minutes",
     "funding_open_window_end_minutes",
+    "funding_settlement_skew_minutes",
     "funding_spread_resonance_min",
   ];
 
@@ -299,6 +337,11 @@ function bindStrategyModal() {
     "net_spread_threshold",
     "funding_carry_min",
     "max_funding_cost",
+  ];
+
+  const spreadRuntimeFieldNames = [
+    "open_spread_rate_max_threshold",
+    "drawdown_add_step_percent",
   ];
 
   const sharedAdvancedFieldNames = [
@@ -335,6 +378,44 @@ function bindStrategyModal() {
     });
   };
 
+  const syncFieldCopy = (strategyType) => {
+    const copyMap = STRATEGY_COPY_BY_TYPE[strategyType] || STRATEGY_COPY_BY_TYPE.funding;
+    Object.entries(copyTargets).forEach(([key, element]) => {
+      if (!element) return;
+      element.textContent = copyMap[key] || "";
+    });
+    if (spreadPositioningTitle) {
+      spreadPositioningTitle.textContent = "拆单与仓位";
+    }
+    if (spreadPositioningDescription) {
+      spreadPositioningDescription.textContent = "面向资金费套利与价差套利的页面预演区。这里先按“每次开仓/加仓目标金额 + 实际子委托金额 + 间隔时间”推演拆单节奏，同时保留浮亏加仓和整体止盈入口。";
+    }
+  };
+
+  const syncSpreadSplitPreview = () => {
+    if (!splitPreviewText) return;
+    const targetAmount = Number(form.elements.order_amount_usdt?.value || 0);
+    const splitAmount = Number(form.elements.split_order_amount_usdt?.value || 0);
+    const intervalSeconds = Number(form.elements.order_interval_seconds?.value || 0);
+    const maxPosition = Number(form.elements.max_position_usdt?.value || 0);
+
+    if (targetAmount <= 0) {
+      splitPreviewText.textContent = "请先填写“每次开仓/加仓目标金额”，页面会按目标金额推演拆单节奏。";
+      return;
+    }
+
+    if (splitAmount <= 0) {
+      splitPreviewText.textContent = `当前目标金额是 ${formatMoney(targetAmount)}U。请再填写“实际子委托金额”，页面会估算需要拆成多少笔。`;
+      return;
+    }
+
+    const estimatedBatches = Math.ceil(targetAmount / splitAmount);
+    const coveredAmount = estimatedBatches * splitAmount;
+    const intervalText = intervalSeconds > 0 ? `${intervalSeconds} 秒/笔` : "无额外间隔限制";
+    const capText = maxPosition > 0 ? `，单交易对持仓上限 ${formatMoney(maxPosition)}U` : "";
+    splitPreviewText.textContent = `页面预演：每次开仓/加仓目标 ${formatMoney(targetAmount)}U，按 ${formatMoney(splitAmount)}U/笔 拆分，预计约 ${estimatedBatches} 笔完成，覆盖约 ${formatMoney(coveredAmount)}U，节奏 ${intervalText}${capText}。`;
+  };
+
   const syncBodyScrollLock = () => {
     const hasVisibleLayer = [modal, confirmModal].some((element) => element && !element.hidden);
     document.body.style.overflow = hasVisibleLayer ? "hidden" : "";
@@ -347,28 +428,37 @@ function bindStrategyModal() {
 
     const strategyType = String(typeField.value || "funding").trim();
     const isFunding = strategyType === "funding";
+    syncFieldCopy(strategyType);
 
     annualizedField.classList.toggle("is-hidden", !isFunding);
     minNetFundingField.classList.toggle("is-hidden", !isFunding);
     spreadField.classList.toggle("is-hidden", isFunding);
+    openMaxSpreadField.classList.toggle("is-hidden", isFunding);
     minCloseSpreadField.classList.toggle("is-hidden", isFunding);
     syncAdvancedSection(fundingAdvancedSections, !isFunding);
     syncAdvancedSection(spreadAdvancedSections, isFunding);
+    syncAdvancedSection(spreadPositioningSections, false);
 
     form.elements.annualized_rate_threshold.disabled = !isFunding;
     form.elements.min_net_funding_rate_threshold.disabled = !isFunding;
     form.elements.spread_rate_threshold.disabled = isFunding;
+    form.elements.open_spread_rate_max_threshold.disabled = isFunding;
     form.elements.min_close_spread_rate_threshold.disabled = isFunding;
+    form.elements.drawdown_add_step_percent.disabled = isFunding;
 
     if (isFunding) {
       form.elements.spread_rate_threshold.value = 0;
+      form.elements.open_spread_rate_max_threshold.value = 0;
       form.elements.min_close_spread_rate_threshold.value = 0;
       resetFieldValues(spreadAdvancedFieldNames);
+      resetFieldValues(spreadRuntimeFieldNames);
     } else {
       form.elements.annualized_rate_threshold.value = 0;
       form.elements.min_net_funding_rate_threshold.value = 0;
       resetFieldValues(fundingAdvancedFieldNames);
     }
+
+    syncSpreadSplitPreview();
   };
 
   const resetFormMode = () => {
@@ -379,6 +469,7 @@ function bindStrategyModal() {
     form.elements.annualized_rate_threshold.value = 0;
     form.elements.min_net_funding_rate_threshold.value = 0;
     form.elements.spread_rate_threshold.value = 0;
+    form.elements.open_spread_rate_max_threshold.value = 0;
     form.elements.min_close_spread_rate_threshold.value = 0;
     form.elements.max_spread_rate_threshold.value = 0;
     form.elements.max_pairs.value = 1;
@@ -387,6 +478,7 @@ function bindStrategyModal() {
     form.elements.order_interval_seconds.value = 0;
     resetFieldValues(fundingAdvancedFieldNames);
     resetFieldValues(spreadAdvancedFieldNames);
+    form.elements.split_order_amount_usdt.value = 0;
     resetFieldValues(sharedAdvancedFieldNames);
     form.elements.is_enabled.checked = true;
     title.textContent = "新增规则";
@@ -421,21 +513,25 @@ function bindStrategyModal() {
     form.elements.annualized_rate_threshold.value = Number(rule.annualized_rate_threshold || 0);
     form.elements.min_net_funding_rate_threshold.value = Number(rule.min_net_funding_rate_threshold || 0);
     form.elements.spread_rate_threshold.value = Number(rule.spread_rate_threshold || 0);
+    form.elements.open_spread_rate_max_threshold.value = Number(rule.open_spread_rate_max_threshold || 0);
     form.elements.min_close_spread_rate_threshold.value = Number(rule.min_close_spread_rate_threshold || 0);
     form.elements.max_spread_rate_threshold.value = Number(rule.max_spread_rate_threshold || 0);
     form.elements.max_pairs.value = Number(rule.max_pairs || 1);
     form.elements.order_amount_usdt.value = Number(rule.order_amount_usdt || 0);
     form.elements.max_position_usdt.value = Number(rule.max_position_usdt || 0);
     form.elements.order_interval_seconds.value = Number(rule.order_interval_seconds || 0);
-    [...fundingAdvancedFieldNames, ...spreadAdvancedFieldNames, ...sharedAdvancedFieldNames].forEach((name) => {
+    form.elements.split_order_amount_usdt.value = Number(rule.split_order_amount_usdt || 0);
+    [...fundingAdvancedFieldNames, ...spreadAdvancedFieldNames, ...spreadRuntimeFieldNames, ...sharedAdvancedFieldNames].forEach((name) => {
       setFieldValue(name, rule[name]);
     });
     form.elements.is_enabled.checked = Boolean(rule.is_enabled);
 
     if (strategyType === "funding") {
       form.elements.spread_rate_threshold.value = 0;
+      form.elements.open_spread_rate_max_threshold.value = 0;
       form.elements.min_close_spread_rate_threshold.value = 0;
       resetFieldValues(spreadAdvancedFieldNames);
+      resetFieldValues(spreadRuntimeFieldNames);
     } else {
       form.elements.annualized_rate_threshold.value = 0;
       form.elements.min_net_funding_rate_threshold.value = 0;
@@ -445,6 +541,7 @@ function bindStrategyModal() {
     title.textContent = "编辑规则";
     submitButton.textContent = "保存修改";
     syncTypeFields();
+    syncSpreadSplitPreview();
   };
 
   const openDeleteConfirm = (message) =>
@@ -507,6 +604,11 @@ function bindStrategyModal() {
   }
 
   typeField.addEventListener("change", syncTypeFields);
+  ["order_amount_usdt", "split_order_amount_usdt", "order_interval_seconds", "max_position_usdt"].forEach((name) => {
+    const control = form.elements[name];
+    if (!control) return;
+    control.addEventListener("input", syncSpreadSplitPreview);
+  });
 
   if (modalDialog) {
     modalDialog.addEventListener("scroll", hideStrategyFieldTooltip, { passive: true });
@@ -590,24 +692,29 @@ function bindStrategyModal() {
       annualized_rate_threshold: Number(formData.get("annualized_rate_threshold") || 0),
       min_net_funding_rate_threshold: Number(formData.get("min_net_funding_rate_threshold") || 0),
       spread_rate_threshold: Number(formData.get("spread_rate_threshold") || 0),
+      open_spread_rate_max_threshold: Number(formData.get("open_spread_rate_max_threshold") || 0),
       min_close_spread_rate_threshold: Number(formData.get("min_close_spread_rate_threshold") || 0),
       max_spread_rate_threshold: Number(formData.get("max_spread_rate_threshold") || 0),
       max_pairs: Number(formData.get("max_pairs") || 0),
       order_amount_usdt: Number(formData.get("order_amount_usdt") || 0),
       max_position_usdt: Number(formData.get("max_position_usdt") || 0),
       order_interval_seconds: Number(formData.get("order_interval_seconds") || 0),
+      split_order_amount_usdt: Number(formData.get("split_order_amount_usdt") || 0),
       ...buildNumericPayload(formData, fundingAdvancedFieldNames),
       ...buildNumericPayload(formData, spreadAdvancedFieldNames),
+      ...buildNumericPayload(formData, spreadRuntimeFieldNames),
       ...buildNumericPayload(formData, sharedAdvancedFieldNames),
       is_enabled: form.elements.is_enabled.checked,
     };
 
     if (payload.strategy_type === "funding") {
       payload.spread_rate_threshold = 0;
+      payload.open_spread_rate_max_threshold = 0;
       payload.min_close_spread_rate_threshold = 0;
       spreadAdvancedFieldNames.forEach((name) => {
         payload[name] = 0;
       });
+      payload.drawdown_add_step_percent = 0;
     }
     if (payload.strategy_type === "spread") {
       payload.annualized_rate_threshold = 0;
@@ -615,6 +722,22 @@ function bindStrategyModal() {
       fundingAdvancedFieldNames.forEach((name) => {
         payload[name] = 0;
       });
+
+      const targetAmount = Number(payload.order_amount_usdt || 0);
+      const splitAmount = Number(formData.get("split_order_amount_usdt") || 0);
+      if (splitAmount > 0 && targetAmount > 0 && splitAmount > targetAmount) {
+        showToast("价差套利的实际子委托金额不应大于每次开仓/加仓目标金额。");
+        submitButton.disabled = false;
+        return;
+      }
+    } else if (payload.strategy_type === "funding") {
+      const targetAmount = Number(payload.order_amount_usdt || 0);
+      const splitAmount = Number(formData.get("split_order_amount_usdt") || 0);
+      if (splitAmount > 0 && targetAmount > 0 && splitAmount > targetAmount) {
+        showToast("资金费套利的实际子委托金额不应大于每次开仓/加仓目标金额。");
+        submitButton.disabled = false;
+        return;
+      }
     }
 
     const isEditMode = form.dataset.mode === "edit";

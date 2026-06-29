@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from app.application.services.arbitrage_runtime_support_service import arbitrage_runtime_support_service
+from app.application.services.funding_runtime_state_service import funding_runtime_state_service
 from app.application.services.opportunity_user_overlay_service import opportunity_user_overlay_service
+from app.application.services.spread_runtime_state_service import spread_runtime_state_service
 from app.application.services.strategy_open_candidate_service import strategy_open_candidate_service
 from app.infrastructure.persistence import arbitrage_execution_repository
 from app.infrastructure.persistence.account_repository import account_repository
@@ -64,7 +66,7 @@ class ArbitrageExecutionPlanService:
         *,
         execution_row: Dict[str, Any],
         reason: str,
-        close_fraction: float = 1.0,
+        close_amount_usdt: float = 0.0,
     ) -> Optional[ExecutionPlanResult]:
         if str(execution_row.get("action") or "open") == "close":
             return None
@@ -94,11 +96,34 @@ class ArbitrageExecutionPlanService:
         )
         left_base_quantity = float((left_position or {}).get("quantity") or 0)
         right_base_quantity = float((right_position or {}).get("quantity") or 0)
-        effective_close_fraction = min(1.0, max(0.0, float(close_fraction or 1.0)))
-        if effective_close_fraction <= 0:
-            effective_close_fraction = 1.0
-        left_base_quantity *= effective_close_fraction
-        right_base_quantity *= effective_close_fraction
+        original_left_base_quantity = left_base_quantity
+        original_right_base_quantity = right_base_quantity
+        if left_base_quantity <= 0 and right_base_quantity <= 0:
+            return None
+        requested_close_amount = max(0.0, float(close_amount_usdt or 0))
+        left_market_value = float((left_position or {}).get("market_value_usdt") or 0)
+        if left_market_value <= 0:
+            left_mark_price = float((left_position or {}).get("mark_price") or 0)
+            left_avg_price = float((left_position or {}).get("avg_entry_price") or 0)
+            left_price = left_mark_price if left_mark_price > 0 else left_avg_price
+            left_market_value = left_base_quantity * left_price if left_price > 0 else 0.0
+        right_market_value = float((right_position or {}).get("market_value_usdt") or 0)
+        if right_market_value <= 0:
+            right_mark_price = float((right_position or {}).get("mark_price") or 0)
+            right_avg_price = float((right_position or {}).get("avg_entry_price") or 0)
+            right_price = right_mark_price if right_mark_price > 0 else right_avg_price
+            right_market_value = right_base_quantity * right_price if right_price > 0 else 0.0
+        left_has_live_position = left_base_quantity > 0
+        right_has_live_position = right_base_quantity > 0
+        both_legs_live = left_has_live_position and right_has_live_position
+        if requested_close_amount > 0:
+            pair_market_value = max(left_market_value, right_market_value)
+            close_ratio = min(1.0, requested_close_amount / pair_market_value) if pair_market_value > 0 else 0.0
+            if close_ratio > 0:
+                if left_market_value > 0:
+                    left_base_quantity *= close_ratio
+                if right_market_value > 0:
+                    right_base_quantity *= close_ratio
         if left_base_quantity <= 0 and right_base_quantity <= 0:
             return None
         left_plan = None
@@ -127,6 +152,35 @@ class ArbitrageExecutionPlanService:
             if right_plan.order_quantity <= 0:
                 right_plan = None
 
+        if both_legs_live and requested_close_amount > 0 and (left_plan is None or right_plan is None):
+            left_plan = None
+            if original_left_base_quantity > 0:
+                left_plan = arbitrage_runtime_support_service.build_quantity_plan(
+                    exchange_code=str(execution_row.get("left_exchange_code") or ""),
+                    market_type=str(execution_row.get("left_market_type") or ""),
+                    symbol=str(execution_row.get("left_symbol") or ""),
+                    side=left_side,
+                    order_amount_usdt=0,
+                    base_quantity=original_left_base_quantity,
+                )
+                if left_plan.order_quantity <= 0:
+                    left_plan = None
+
+            right_plan = None
+            if original_right_base_quantity > 0:
+                right_plan = arbitrage_runtime_support_service.build_quantity_plan(
+                    exchange_code=str(execution_row.get("right_exchange_code") or ""),
+                    market_type=str(execution_row.get("right_market_type") or ""),
+                    symbol=str(execution_row.get("right_symbol") or ""),
+                    side=right_side,
+                    order_amount_usdt=0,
+                    base_quantity=original_right_base_quantity,
+                )
+                if right_plan.order_quantity <= 0:
+                    right_plan = None
+
+        if both_legs_live and (left_plan is None or right_plan is None):
+            return None
         if left_plan is None and right_plan is None:
             return None
         planned_close_amount = sum(
@@ -134,6 +188,8 @@ class ArbitrageExecutionPlanService:
             for plan in (left_plan, right_plan)
             if plan is not None
         )
+        if planned_close_amount <= 0:
+            return None
 
         execution_id = arbitrage_execution_repository.create_execution(
             user_id=int(execution_row.get("user_id") or 0),
@@ -220,7 +276,9 @@ class ArbitrageExecutionPlanService:
         if left_account_id <= 0 or right_account_id <= 0:
             return None
 
-        order_amount = float(strategy_rule.get("order_amount_usdt") or 0)
+        target_order_amount = float(strategy_rule.get("order_amount_usdt") or 0)
+        split_order_amount = float(strategy_rule.get("split_order_amount_usdt") or 0)
+        order_amount = split_order_amount if split_order_amount > 0 else target_order_amount
         left_position_side = "long"
         left_side = "buy"
         right_position_side = "short"
@@ -266,8 +324,8 @@ class ArbitrageExecutionPlanService:
             right_market_type="swap",
             left_symbol=str(opportunity.get("left_symbol_raw") or ""),
             right_symbol=str(opportunity.get("right_symbol_raw") or ""),
-            planned_order_amount_usdt=order_amount,
-            max_position_usdt=float(strategy_rule.get("max_position_usdt") or order_amount),
+            planned_order_amount_usdt=target_order_amount,
+            max_position_usdt=float(strategy_rule.get("max_position_usdt") or target_order_amount),
             trigger_metric_primary=str(opportunity.get("net_rate") or ""),
             trigger_metric_secondary=f"{opportunity.get('annual') or ''}{settlement_marker}",
             trigger_metric_risk=str(opportunity.get("spread") or ""),
@@ -316,6 +374,19 @@ class ArbitrageExecutionPlanService:
             status_message="资金费开仓右腿待提交",
         )
 
+        funding_runtime_state_service.patch_pair_state(
+            user_id=user_id,
+            rule_id=int(strategy_rule.get("id") or 0),
+            pair_key=pair_key,
+            target_order_amount_usdt=target_order_amount,
+            split_order_amount_usdt=order_amount,
+            latest_net_rate_value=float(opportunity.get("net_rate_value") or 0),
+            last_open_net_rate_value=float(opportunity.get("net_rate_value") or 0),
+            latest_spread_value=float(opportunity.get("spread_value") or 0),
+            last_open_spread_value=float(opportunity.get("spread_value") or 0),
+            last_order_at=None,
+        )
+
         return ExecutionPlanResult(
             execution_id=execution_id,
             created_order_leg_ids=[left_leg_id, right_leg_id],
@@ -333,7 +404,9 @@ class ArbitrageExecutionPlanService:
         if left_account_id <= 0 or right_account_id <= 0:
             return None
 
-        order_amount = float(strategy_rule.get("order_amount_usdt") or 0)
+        target_order_amount = float(strategy_rule.get("order_amount_usdt") or 0)
+        split_order_amount = float(strategy_rule.get("split_order_amount_usdt") or 0)
+        order_amount = split_order_amount if split_order_amount > 0 else target_order_amount
         left_market_type = str(opportunity.get("left_market_type") or "swap")
         right_market_type = str(opportunity.get("right_market_type") or "swap")
         if left_market_type != "swap" or right_market_type != "swap":
@@ -382,16 +455,15 @@ class ArbitrageExecutionPlanService:
             right_market_type=right_market_type,
             left_symbol=str(opportunity.get("left_symbol_raw") or ""),
             right_symbol=str(opportunity.get("right_symbol_raw") or ""),
-            planned_order_amount_usdt=order_amount,
-            max_position_usdt=float(strategy_rule.get("max_position_usdt") or order_amount),
+            planned_order_amount_usdt=target_order_amount,
+            max_position_usdt=float(strategy_rule.get("max_position_usdt") or target_order_amount),
             trigger_metric_primary=str(opportunity.get("latest_spread") or ""),
             trigger_metric_secondary=str(opportunity.get("net_spread") or ""),
-            trigger_metric_risk=(
-                f"{opportunity.get('buy_fee_rate') or '--'} / {opportunity.get('sell_fee_rate') or '--'}"
-            ),
+            trigger_metric_risk=str(opportunity.get("price_diff") or ""),
             trigger_reason=(
                 f"价差开仓: 最新价差 {opportunity.get('latest_spread') or '--'} / "
-                f"净价差 {opportunity.get('net_spread') or '--'}"
+                f"净价差 {opportunity.get('net_spread') or '--'} / "
+                f"目标 {target_order_amount:.2f}U / 子委托 {order_amount:.2f}U"
             ),
             strategy_rule_id=int(strategy_rule.get("id") or 0),
             strategy_rule_name=str(strategy_rule.get("name") or ""),
@@ -431,6 +503,19 @@ class ArbitrageExecutionPlanService:
             requested_value_usdt=right_plan.order_value_usdt,
             status="pending",
             status_message="价差开仓右腿待提交",
+        )
+
+        spread_runtime_state_service.patch_pair_state(
+            user_id=user_id,
+            rule_id=int(strategy_rule.get("id") or 0),
+            pair_key=pair_key,
+            target_order_amount_usdt=target_order_amount,
+            split_order_amount_usdt=order_amount,
+            latest_spread_value=float(opportunity.get("latest_spread_value") or 0),
+            latest_net_spread_value=float(opportunity.get("net_spread_value") or 0),
+            last_open_spread_value=float(opportunity.get("latest_spread_value") or 0),
+            last_open_net_spread_value=float(opportunity.get("net_spread_value") or 0),
+            last_order_at=None,
         )
 
         return ExecutionPlanResult(
