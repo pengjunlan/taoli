@@ -602,6 +602,18 @@ class MySQLConnectionManager:
                 UNIQUE KEY uq_system_exchange_configs_exchange_code (exchange_code)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """,
+            """
+            CREATE TABLE IF NOT EXISTS system_runtime_configs (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                config_key VARCHAR(128) NOT NULL,
+                config_value LONGTEXT NOT NULL,
+                remark VARCHAR(255) NOT NULL DEFAULT '',
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_system_runtime_configs_key (config_key)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
         ]
 
         cursor = connection.cursor()
@@ -1504,6 +1516,22 @@ class MySQLConnectionManager:
                     ('htx', 1, 1, '', '', '', '默认公开接口')
                 ON DUPLICATE KEY UPDATE
                     exchange_code = VALUES(exchange_code)
+                """
+            )
+            cursor.execute(
+                """
+                INSERT INTO system_runtime_configs (
+                    config_key,
+                    config_value,
+                    remark
+                )
+                VALUES (
+                    'asset_blacklist',
+                    '',
+                    '全局币种黑名单，命中后显示冻结且不参与开仓/加仓'
+                )
+                ON DUPLICATE KEY UPDATE
+                    config_key = VALUES(config_key)
                 """
             )
             connection.commit()

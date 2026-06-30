@@ -11,3 +11,7 @@ class SystemExchangeConfigUpdateRequest(BaseModel):
     api_secret: str = ""
     api_passphrase: str = ""
     remark: str = ""
+
+
+class SystemAssetBlacklistUpdateRequest(BaseModel):
+    asset_blacklist: str = ""

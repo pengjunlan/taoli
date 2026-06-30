@@ -76,6 +76,36 @@
   gap: 16px;
 }
 
+.system-settings-blacklist-form__textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.system-settings-blacklist-form__meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.system-settings-blacklist-form__updated {
+  color: var(--text-soft);
+  font-size: 0.92rem;
+}
+
+.system-settings-blacklist-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+  padding: 18px 24px 24px;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.system-settings-blacklist-tags__empty {
+  color: var(--text-soft);
+}
+
 .system-settings-table th,
 .system-settings-table td {
   white-space: nowrap;

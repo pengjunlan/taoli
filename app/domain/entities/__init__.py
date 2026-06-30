@@ -7,6 +7,7 @@ from app.domain.entities.account_models import (
     ExchangeAccount,
     StrategyRule,
     SystemExchangeConfig,
+    SystemRuntimeConfig,
     TransferRecord,
 )
 from app.domain.entities.auth_models import AuthSession, AuthUser
@@ -20,5 +21,6 @@ __all__ = [
     "ExchangeAccount",
     "StrategyRule",
     "SystemExchangeConfig",
+    "SystemRuntimeConfig",
     "TransferRecord",
 ]

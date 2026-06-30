@@ -14,6 +14,7 @@ from app.application.services.market_sync_service import market_sync_service
 from app.application.services.monitor_center_service import monitor_center_service
 from app.application.services.opportunity_snapshot_service import opportunity_snapshot_service
 from app.application.services.strategy_risk_config import strategy_risk_config
+from app.application.services.system_exchange_config_service import system_exchange_config_service
 from app.application.services.trade_decision_service import trade_decision_service
 from app.infrastructure.cache import market_runtime_cache, strategy_runtime_cache
 from app.infrastructure.persistence.account_repository import account_repository
@@ -907,10 +908,18 @@ class OpportunityRuntimeService:
         return float(getattr(funding_item, "funding_rate_percent", 0.0) or 0.0) / max(interval_hours, 1e-9) * target_hours
 
     def _is_frozen_symbol(self, *values: Any) -> bool:
+        blacklist = system_exchange_config_service.get_asset_blacklist()
         for value in values:
             normalized = str(value or "").strip().upper()
             if not normalized:
                 continue
+            if normalized.endswith("/USDT"):
+                normalized = normalized[:-5]
+            elif normalized.endswith("USDT") and len(normalized) > 4:
+                normalized = normalized[:-4]
+            normalized = normalized.strip().upper()
+            if normalized in blacklist:
+                return True
             if normalized in {"ALL", "ALL/USDT", "ALLUSDT", "ALL/USDT:USDT"}:
                 return True
         return False

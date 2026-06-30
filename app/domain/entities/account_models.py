@@ -135,3 +135,13 @@ class SystemExchangeConfig:
     remark: str
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True)
+class SystemRuntimeConfig:
+    id: int
+    config_key: str
+    config_value: str
+    remark: str
+    created_at: datetime
+    updated_at: datetime

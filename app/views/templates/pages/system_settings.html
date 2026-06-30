@@ -19,11 +19,48 @@
     <section class="card card--section system-settings-section">
         <div class="card__header card__header--row system-settings-section__header">
             <div>
+                <h2>币种黑名单</h2>
+                <p>填入后，该币种会在资金费套利和价差套利页面显示为“冻结”，不参与开仓、加仓、开仓高亮和自动执行；已有持仓仍可正常平仓与风控退出。</p>
+            </div>
+            <div class="section-tools">
+                <div class="inline-note" data-asset-blacklist-count>加载中...</div>
+            </div>
+        </div>
+
+        <form class="form-stack system-settings-blacklist-form" data-asset-blacklist-form>
+            <label class="field field--full">
+                <span class="field__label">黑名单币种</span>
+                <textarea
+                    class="field__control system-settings-blacklist-form__textarea"
+                    name="asset_blacklist"
+                    rows="4"
+                    placeholder="例如：AI, ALL, EDGE"
+                ></textarea>
+                <span class="field__hint">支持逗号、空格、换行分隔；按币种名生效，例如填 AI 会冻结所有 AI/USDT 相关机会。</span>
+            </label>
+
+            <div class="system-settings-blacklist-form__meta">
+                <div class="system-settings-blacklist-form__updated" data-asset-blacklist-updated>最近更新：--</div>
+            </div>
+
+            <div class="form-actions">
+                <button class="button button--primary" type="submit">保存黑名单</button>
+            </div>
+        </form>
+
+        <div class="system-settings-blacklist-tags" data-asset-blacklist-tags>
+            <div class="system-settings-blacklist-tags__empty">当前没有黑名单币种</div>
+        </div>
+    </section>
+
+    <section class="card card--section system-settings-section">
+        <div class="card__header card__header--row system-settings-section__header">
+            <div>
                 <h2>系统交易所配置</h2>
                 <p>这里配置的是系统级交易所接口，用来统一同步公共市场数据，不占用普通用户自己的 API 授权。</p>
             </div>
             <div class="section-tools">
-                <div class="inline-note" data-system-config-count>加载中..</div>
+                <div class="inline-note" data-system-config-count>加载中...</div>
             </div>
         </div>
 
@@ -35,7 +72,7 @@
                         <th>启用状态</th>
                         <th>接口模式</th>
                         <th>配置状态</th>
-                        <th>行情获取</th>
+                        <th>行情拉取</th>
                         <th>API Key</th>
                         <th>API Secret</th>
                         <th>Passphrase</th>
@@ -46,7 +83,7 @@
                 </thead>
                 <tbody data-system-config-table-body>
                     <tr class="table-empty-row">
-                        <td colspan="11" class="spread-metric">加载中..</td>
+                        <td colspan="11" class="spread-metric">加载中...</td>
                     </tr>
                 </tbody>
             </table>
@@ -129,7 +166,7 @@
                 <h2 id="system-symbols-modal-title">永续交易对列表</h2>
                 <p data-system-symbols-summary>正在读取数据库中的永续交易对...</p>
             </div>
-            <button class="account-modal__close" type="button" aria-label="关闭永续交易对列表弹窗" data-system-symbols-close>脳</button>
+            <button class="account-modal__close" type="button" aria-label="关闭永续交易对弹窗" data-system-symbols-close>×</button>
         </div>
 
         <div class="system-symbols-modal__body">

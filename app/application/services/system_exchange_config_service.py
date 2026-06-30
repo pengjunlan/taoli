@@ -1,12 +1,16 @@
-"""System exchange config service."""
+"""System exchange and runtime config service."""
 
 from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timedelta
+import re
 from typing import Dict, List
 
-from app.application.dto.requests import SystemExchangeConfigUpdateRequest
+from app.application.dto.requests import (
+    SystemAssetBlacklistUpdateRequest,
+    SystemExchangeConfigUpdateRequest,
+)
 from app.application.services.swap_market_rules import is_u_margin_linear_swap_market
 from app.domain.entities import AuthUser
 from app.infrastructure.cache import market_runtime_cache
@@ -24,6 +28,7 @@ EXCHANGE_LABELS = {
 }
 
 MARKET_FEED_STALE_SECONDS = 90
+ASSET_BLACKLIST_CONFIG_KEY = "asset_blacklist"
 
 
 class SystemExchangeConfigService:
@@ -66,6 +71,39 @@ class SystemExchangeConfigService:
             "remark": str(row.get("remark") or ""),
             "updated_at": self._format_datetime(row.get("updated_at")),
         }
+
+    def get_asset_blacklist_detail(self) -> Dict[str, object]:
+        row = system_exchange_repository.get_runtime_config(ASSET_BLACKLIST_CONFIG_KEY)
+        raw_value = str((row or {}).get("config_value") or "")
+        assets = self._parse_asset_blacklist(raw_value)
+        return {
+            "asset_blacklist": ", ".join(assets),
+            "assets": assets,
+            "asset_count": len(assets),
+            "updated_at": self._format_datetime((row or {}).get("updated_at")),
+        }
+
+    def update_asset_blacklist(
+        self,
+        payload: SystemAssetBlacklistUpdateRequest,
+        _: AuthUser,
+    ) -> Dict[str, object]:
+        normalized_assets = self._parse_asset_blacklist(str(payload.asset_blacklist or ""))
+        entity = system_exchange_repository.upsert_runtime_config(
+            config_key=ASSET_BLACKLIST_CONFIG_KEY,
+            config_value=",".join(normalized_assets),
+            remark="全局币种黑名单，命中后显示冻结且不参与开仓/加仓",
+        )
+        return {
+            "asset_blacklist": ", ".join(normalized_assets),
+            "assets": normalized_assets,
+            "asset_count": len(normalized_assets),
+            "updated_at": self._format_datetime(entity.updated_at),
+        }
+
+    def get_asset_blacklist(self) -> set[str]:
+        row = system_exchange_repository.get_runtime_config(ASSET_BLACKLIST_CONFIG_KEY)
+        return set(self._parse_asset_blacklist(str((row or {}).get("config_value") or "")))
 
     def list_swap_symbols(self, exchange_code: str) -> Dict[str, object] | None:
         normalized_exchange_code = str(exchange_code or "").strip().lower()
@@ -189,6 +227,16 @@ class SystemExchangeConfigService:
                 "tone": "warning" if ready_count < enabled_count else "positive",
             },
         ]
+
+    def build_asset_blacklist_summary_card(self) -> Dict[str, str]:
+        detail = self.get_asset_blacklist_detail()
+        return {
+            "key": "asset_blacklist_count",
+            "label": "黑名单币种",
+            "value": str(int(detail.get("asset_count") or 0)),
+            "change": "命中的币种显示冻结，不参与开仓/加仓与自动执行",
+            "tone": "warning" if int(detail.get("asset_count") or 0) > 0 else "brand",
+        }
 
     def _build_row(
         self,
@@ -337,6 +385,26 @@ class SystemExchangeConfigService:
         if isinstance(value, datetime):
             return value.strftime("%Y-%m-%d %H:%M")
         return str(value)
+
+    def _parse_asset_blacklist(self, raw_value: str) -> List[str]:
+        text = str(raw_value or "")
+        parts = re.split(r"[\s,，;；]+", text)
+        normalized: List[str] = []
+        seen: set[str] = set()
+        for part in parts:
+            token = str(part or "").strip().upper()
+            if not token:
+                continue
+            if token.endswith("/USDT"):
+                token = token[:-5]
+            elif token.endswith("USDT") and len(token) > 4:
+                token = token[:-4]
+            token = token.strip().upper()
+            if not token or token in seen:
+                continue
+            seen.add(token)
+            normalized.append(token)
+        return normalized
 
 
 system_exchange_config_service = SystemExchangeConfigService()

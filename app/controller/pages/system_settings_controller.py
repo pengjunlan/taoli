@@ -12,7 +12,7 @@ PAGE = PageConfig(
     key="system_settings",
     template_name="pages/system_settings.html",
     title="系统配置",
-    subtitle="配置系统级交易所连接方式，统一控制公共市场数据同步所使用的交易所接口。",
+    subtitle="配置系统级交易所连接方式，并维护全局币种黑名单。",
     css_name="system_settings.css",
     js_name="system_settings.js",
 )
@@ -52,10 +52,17 @@ async def system_settings_page(request: Request) -> HTMLResponse:
             },
             {
                 "key": "ready_count",
-                "label": "已配置密钥",
+                "label": "已配密钥",
                 "value": "加载中...",
                 "change": "正在统计系统 API 配置",
                 "tone": "warning",
+            },
+            {
+                "key": "asset_blacklist_count",
+                "label": "黑名单币种",
+                "value": "加载中...",
+                "change": "命中的币种显示冻结，不参与开仓/加仓与自动执行",
+                "tone": "brand",
             },
         ],
     )

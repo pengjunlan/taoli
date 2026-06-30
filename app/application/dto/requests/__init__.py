@@ -15,6 +15,7 @@ from app.application.dto.requests.strategy_requests import (
     StrategyRuleUpdateRequest,
 )
 from app.application.dto.requests.system_exchange_requests import (
+    SystemAssetBlacklistUpdateRequest,
     SystemExchangeConfigUpdateRequest,
 )
 
@@ -30,5 +31,6 @@ __all__ = [
     "RegisterRequest",
     "StrategyRuleCreateRequest",
     "StrategyRuleUpdateRequest",
+    "SystemAssetBlacklistUpdateRequest",
     "SystemExchangeConfigUpdateRequest",
 ]

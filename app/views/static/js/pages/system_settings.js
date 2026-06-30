@@ -99,8 +99,43 @@ function renderRows(rows) {
     .join("");
 }
 
+function renderBlacklistTags(assets) {
+  const list = Array.isArray(assets) ? assets : [];
+  if (!list.length) {
+    return `<div class="system-settings-blacklist-tags__empty">当前没有黑名单币种</div>`;
+  }
+
+  return list
+    .map((asset) => `<span class="pill pill--neutral">${escapeHtml(asset)}</span>`)
+    .join("");
+}
+
 let latestRows = [];
 let systemConfigsRefreshLock = false;
+let assetBlacklistDirty = false;
+let assetBlacklistSaving = false;
+
+function applyAssetBlacklist(detail) {
+  const payload = detail || {};
+  const assets = Array.isArray(payload.assets) ? payload.assets : [];
+  const form = document.querySelector("[data-asset-blacklist-form]");
+  const count = document.querySelector("[data-asset-blacklist-count]");
+  const updated = document.querySelector("[data-asset-blacklist-updated]");
+  const tags = document.querySelector("[data-asset-blacklist-tags]");
+
+  if (form?.elements?.asset_blacklist && !assetBlacklistDirty && !assetBlacklistSaving) {
+    form.elements.asset_blacklist.value = String(payload.asset_blacklist || "");
+  }
+  if (count) {
+    count.textContent = `共 ${Number(payload.asset_count || assets.length || 0)} 个币种`;
+  }
+  if (updated) {
+    updated.textContent = `最近更新：${String(payload.updated_at || "--")}`;
+  }
+  if (tags) {
+    tags.innerHTML = renderBlacklistTags(assets);
+  }
+}
 
 async function refreshSystemConfigs() {
   if (systemConfigsRefreshLock) {
@@ -115,6 +150,7 @@ async function refreshSystemConfigs() {
 
     latestRows = Array.isArray(result.config_rows) ? result.config_rows : [];
     updateSummaryCards(result.summary_cards || []);
+    applyAssetBlacklist(result.asset_blacklist || {});
 
     const body = document.querySelector("[data-system-config-table-body]");
     const count = document.querySelector("[data-system-config-count]");
@@ -129,6 +165,47 @@ async function refreshSystemConfigs() {
   } finally {
     systemConfigsRefreshLock = false;
   }
+}
+
+function bindAssetBlacklistForm() {
+  const form = document.querySelector("[data-asset-blacklist-form]");
+  const submitButton = form?.querySelector('button[type="submit"]');
+  if (!form || !submitButton) {
+    return;
+  }
+
+  if (form.elements.asset_blacklist) {
+    form.elements.asset_blacklist.addEventListener("input", () => {
+      assetBlacklistDirty = true;
+    });
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    submitButton.disabled = true;
+    assetBlacklistSaving = true;
+
+    try {
+      const payload = {
+        asset_blacklist: String(form.elements.asset_blacklist?.value || "").trim(),
+      };
+      const result = await postJson("/api/system-settings/asset-blacklist", payload);
+      if (!result.success) {
+        showToast(result.message || "保存币种黑名单失败。");
+        return;
+      }
+
+      assetBlacklistDirty = false;
+      applyAssetBlacklist(result.asset_blacklist || {});
+      await refreshSystemConfigs();
+      showToast(result.message || "币种黑名单已保存。");
+    } catch (error) {
+      showToast(error?.message || "保存币种黑名单失败，请稍后再试。");
+    } finally {
+      assetBlacklistSaving = false;
+      submitButton.disabled = false;
+    }
+  });
 }
 
 function bindSystemConfigModal() {
@@ -302,7 +379,7 @@ function bindSystemSymbolsModal() {
     try {
       const result = await getJson(`/api/system-exchanges/${exchangeCode}/swap-symbols`);
       if (!result.success) {
-        summary.textContent = result.message || "读取永续交易对失败";
+        summary.textContent = result.message || "读取永续交易对失败。";
         list.innerHTML = `<div class="system-symbols-modal__empty">暂无数据</div>`;
         return;
       }
@@ -310,7 +387,7 @@ function bindSystemSymbolsModal() {
       summary.textContent = `${String(result.exchange_label || exchangeCode)} 共 ${Number(result.symbol_count || 0)} 个永续交易对`;
       list.innerHTML = renderSwapSymbols(result.symbols || []);
     } catch (error) {
-      summary.textContent = error?.message || "读取永续交易对失败";
+      summary.textContent = error?.message || "读取永续交易对失败。";
       list.innerHTML = `<div class="system-symbols-modal__empty">暂无数据</div>`;
     } finally {
       button.disabled = false;
@@ -347,17 +424,17 @@ function bindSystemSymbolsModal() {
       try {
         const result = await postJson(`/api/system-exchanges/${activeExchangeCode}/swap-symbols/refresh`, {});
         if (!result.success) {
-          showToast(result.message || "更新永续交易对失败");
-          summary.textContent = result.message || "更新永续交易对失败";
+          showToast(result.message || "更新永续交易对失败。");
+          summary.textContent = result.message || "更新永续交易对失败。";
           return;
         }
 
         summary.textContent =
           `${String(result.exchange_label || activeExchangeCode)} 共 ${Number(result.symbol_count || 0)} 个永续交易对` +
-          `，新增 ${Number(result.added_count || 0)}，恢复 ${Number(result.reactivated_count || 0)}，作废 ${Number(result.marked_inactive_count || 0)}`;
+          `，新增 ${Number(result.added_count || 0)}，恢复 ${Number(result.reactivated_count || 0)}，停用 ${Number(result.marked_inactive_count || 0)}`;
         list.innerHTML = renderSwapSymbols(result.symbols || []);
         await refreshSystemConfigs();
-        showToast(result.message || "永续交易对更新成功");
+        showToast(result.message || "永续交易对更新成功。");
       } catch (error) {
         const message = error?.message || "更新永续交易对失败，请稍后再试。";
         summary.textContent = message;
@@ -373,10 +450,11 @@ function bindSystemSymbolsModal() {
 bindPrototypeActions();
 bindListPagination();
 bindLogoutAction();
+bindAssetBlacklistForm();
 bindSystemConfigModal();
 bindSystemSymbolsModal();
 refreshSystemConfigs().catch((error) => {
-  showToast(error?.message || "读取系统交易所配置失败，请稍后再试。");
+  showToast(error?.message || "读取系统配置失败，请稍后再试。");
 });
 window.setInterval(() => {
   refreshSystemConfigs().catch(() => {});
