@@ -126,8 +126,23 @@ class ArbitrageExecutionPlanService:
                     right_base_quantity *= close_ratio
         if left_base_quantity <= 0 and right_base_quantity <= 0:
             return None
-        left_plan = None
-        if left_base_quantity > 0:
+        pair_plan = None
+        if left_base_quantity > 0 and right_base_quantity > 0:
+            pair_plan = arbitrage_runtime_support_service.build_pair_quantity_plan(
+                left_exchange_code=str(execution_row.get("left_exchange_code") or ""),
+                left_market_type=str(execution_row.get("left_market_type") or ""),
+                left_symbol=str(execution_row.get("left_symbol") or ""),
+                left_side=left_side,
+                right_exchange_code=str(execution_row.get("right_exchange_code") or ""),
+                right_market_type=str(execution_row.get("right_market_type") or ""),
+                right_symbol=str(execution_row.get("right_symbol") or ""),
+                right_side=right_side,
+                base_quantity=min(left_base_quantity, right_base_quantity),
+            )
+        left_plan = pair_plan.left_plan if pair_plan is not None else None
+        right_plan = pair_plan.right_plan if pair_plan is not None else None
+
+        if pair_plan is None and left_base_quantity > 0 and right_base_quantity <= 0:
             left_plan = arbitrage_runtime_support_service.build_quantity_plan(
                 exchange_code=str(execution_row.get("left_exchange_code") or ""),
                 market_type=str(execution_row.get("left_market_type") or ""),
@@ -139,8 +154,7 @@ class ArbitrageExecutionPlanService:
             if left_plan.order_quantity <= 0:
                 left_plan = None
 
-        right_plan = None
-        if right_base_quantity > 0:
+        if pair_plan is None and right_base_quantity > 0 and left_base_quantity <= 0:
             right_plan = arbitrage_runtime_support_service.build_quantity_plan(
                 exchange_code=str(execution_row.get("right_exchange_code") or ""),
                 market_type=str(execution_row.get("right_market_type") or ""),
@@ -153,31 +167,19 @@ class ArbitrageExecutionPlanService:
                 right_plan = None
 
         if both_legs_live and requested_close_amount > 0 and (left_plan is None or right_plan is None):
-            left_plan = None
-            if original_left_base_quantity > 0:
-                left_plan = arbitrage_runtime_support_service.build_quantity_plan(
-                    exchange_code=str(execution_row.get("left_exchange_code") or ""),
-                    market_type=str(execution_row.get("left_market_type") or ""),
-                    symbol=str(execution_row.get("left_symbol") or ""),
-                    side=left_side,
-                    order_amount_usdt=0,
-                    base_quantity=original_left_base_quantity,
-                )
-                if left_plan.order_quantity <= 0:
-                    left_plan = None
-
-            right_plan = None
-            if original_right_base_quantity > 0:
-                right_plan = arbitrage_runtime_support_service.build_quantity_plan(
-                    exchange_code=str(execution_row.get("right_exchange_code") or ""),
-                    market_type=str(execution_row.get("right_market_type") or ""),
-                    symbol=str(execution_row.get("right_symbol") or ""),
-                    side=right_side,
-                    order_amount_usdt=0,
-                    base_quantity=original_right_base_quantity,
-                )
-                if right_plan.order_quantity <= 0:
-                    right_plan = None
+            pair_plan = arbitrage_runtime_support_service.build_pair_quantity_plan(
+                left_exchange_code=str(execution_row.get("left_exchange_code") or ""),
+                left_market_type=str(execution_row.get("left_market_type") or ""),
+                left_symbol=str(execution_row.get("left_symbol") or ""),
+                left_side=left_side,
+                right_exchange_code=str(execution_row.get("right_exchange_code") or ""),
+                right_market_type=str(execution_row.get("right_market_type") or ""),
+                right_symbol=str(execution_row.get("right_symbol") or ""),
+                right_side=right_side,
+                base_quantity=min(original_left_base_quantity, original_right_base_quantity),
+            )
+            left_plan = pair_plan.left_plan if pair_plan is not None else None
+            right_plan = pair_plan.right_plan if pair_plan is not None else None
 
         if both_legs_live and (left_plan is None or right_plan is None):
             return None
@@ -283,23 +285,21 @@ class ArbitrageExecutionPlanService:
         left_side = "buy"
         right_position_side = "short"
         right_side = "sell"
-        left_plan = arbitrage_runtime_support_service.build_quantity_plan(
-            exchange_code=str(opportunity.get("left_exchange_code") or "").lower(),
-            market_type="swap",
-            symbol=str(opportunity.get("left_symbol_raw") or ""),
-            side=left_side,
+        pair_plan = arbitrage_runtime_support_service.build_pair_quantity_plan(
+            left_exchange_code=str(opportunity.get("left_exchange_code") or "").lower(),
+            left_market_type="swap",
+            left_symbol=str(opportunity.get("left_symbol_raw") or ""),
+            left_side=left_side,
+            right_exchange_code=str(opportunity.get("right_exchange_code") or "").lower(),
+            right_market_type="swap",
+            right_symbol=str(opportunity.get("right_symbol_raw") or ""),
+            right_side=right_side,
             order_amount_usdt=order_amount,
         )
-        right_plan = arbitrage_runtime_support_service.build_quantity_plan(
-            exchange_code=str(opportunity.get("right_exchange_code") or "").lower(),
-            market_type="swap",
-            symbol=str(opportunity.get("right_symbol_raw") or ""),
-            side=right_side,
-            order_amount_usdt=order_amount,
-            base_quantity=left_plan.base_quantity,
-        )
-        if left_plan.order_quantity <= 0 or right_plan.order_quantity <= 0:
+        if pair_plan is None:
             return None
+        left_plan = pair_plan.left_plan
+        right_plan = pair_plan.right_plan
 
         pair_key = self._build_pair_key(
             strategy_rule_id=int(strategy_rule.get("id") or 0),
@@ -415,23 +415,21 @@ class ArbitrageExecutionPlanService:
         left_side = "buy"
         right_position_side = "short"
         right_side = "sell"
-        left_plan = arbitrage_runtime_support_service.build_quantity_plan(
-            exchange_code=str(opportunity.get("left_exchange_code") or "").lower(),
-            market_type=left_market_type,
-            symbol=str(opportunity.get("left_symbol_raw") or ""),
-            side=left_side,
+        pair_plan = arbitrage_runtime_support_service.build_pair_quantity_plan(
+            left_exchange_code=str(opportunity.get("left_exchange_code") or "").lower(),
+            left_market_type=left_market_type,
+            left_symbol=str(opportunity.get("left_symbol_raw") or ""),
+            left_side=left_side,
+            right_exchange_code=str(opportunity.get("right_exchange_code") or "").lower(),
+            right_market_type=right_market_type,
+            right_symbol=str(opportunity.get("right_symbol_raw") or ""),
+            right_side=right_side,
             order_amount_usdt=order_amount,
         )
-        right_plan = arbitrage_runtime_support_service.build_quantity_plan(
-            exchange_code=str(opportunity.get("right_exchange_code") or "").lower(),
-            market_type=right_market_type,
-            symbol=str(opportunity.get("right_symbol_raw") or ""),
-            side=right_side,
-            order_amount_usdt=order_amount,
-            base_quantity=left_plan.base_quantity,
-        )
-        if left_plan.order_quantity <= 0 or right_plan.order_quantity <= 0:
+        if pair_plan is None:
             return None
+        left_plan = pair_plan.left_plan
+        right_plan = pair_plan.right_plan
 
         pair_key = self._build_pair_key(
             strategy_rule_id=int(strategy_rule.get("id") or 0),

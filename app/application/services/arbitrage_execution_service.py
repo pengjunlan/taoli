@@ -557,22 +557,18 @@ class ArbitrageExecutionService:
         if left_leg is None or right_leg is None:
             return False
 
-        left_plan = arbitrage_runtime_support_service.build_quantity_plan(
-            exchange_code=str(left_leg.get("exchange_code") or "").lower(),
-            market_type=str(left_leg.get("market_type") or ""),
-            symbol=str(left_leg.get("symbol") or ""),
-            side=str(left_leg.get("side") or "").lower(),
+        pair_plan = arbitrage_runtime_support_service.build_pair_quantity_plan(
+            left_exchange_code=str(left_leg.get("exchange_code") or "").lower(),
+            left_market_type=str(left_leg.get("market_type") or ""),
+            left_symbol=str(left_leg.get("symbol") or ""),
+            left_side=str(left_leg.get("side") or "").lower(),
+            right_exchange_code=str(right_leg.get("exchange_code") or "").lower(),
+            right_market_type=str(right_leg.get("market_type") or ""),
+            right_symbol=str(right_leg.get("symbol") or ""),
+            right_side=str(right_leg.get("side") or "").lower(),
             order_amount_usdt=next_child_amount,
         )
-        right_plan = arbitrage_runtime_support_service.build_quantity_plan(
-            exchange_code=str(right_leg.get("exchange_code") or "").lower(),
-            market_type=str(right_leg.get("market_type") or ""),
-            symbol=str(right_leg.get("symbol") or ""),
-            side=str(right_leg.get("side") or "").lower(),
-            order_amount_usdt=next_child_amount,
-            base_quantity=left_plan.base_quantity,
-        )
-        if left_plan.order_quantity <= 0 or right_plan.order_quantity <= 0:
+        if pair_plan is None:
             spread_runtime_state_service.patch_pair_state(
                 user_id=user_id,
                 rule_id=rule_id,
@@ -583,6 +579,8 @@ class ArbitrageExecutionService:
                 staging_status="quantity_plan_failed",
             )
             return False
+        left_plan = pair_plan.left_plan
+        right_plan = pair_plan.right_plan
 
         scheduled_submit_at = now + timedelta(seconds=interval_seconds) if interval_seconds > 0 else now
         left_leg_id = arbitrage_execution_repository.create_order_leg(
@@ -734,22 +732,18 @@ class ArbitrageExecutionService:
         if left_leg is None or right_leg is None:
             return False
 
-        left_plan = arbitrage_runtime_support_service.build_quantity_plan(
-            exchange_code=str(left_leg.get("exchange_code") or "").lower(),
-            market_type=str(left_leg.get("market_type") or ""),
-            symbol=str(left_leg.get("symbol") or ""),
-            side=str(left_leg.get("side") or "").lower(),
+        pair_plan = arbitrage_runtime_support_service.build_pair_quantity_plan(
+            left_exchange_code=str(left_leg.get("exchange_code") or "").lower(),
+            left_market_type=str(left_leg.get("market_type") or ""),
+            left_symbol=str(left_leg.get("symbol") or ""),
+            left_side=str(left_leg.get("side") or "").lower(),
+            right_exchange_code=str(right_leg.get("exchange_code") or "").lower(),
+            right_market_type=str(right_leg.get("market_type") or ""),
+            right_symbol=str(right_leg.get("symbol") or ""),
+            right_side=str(right_leg.get("side") or "").lower(),
             order_amount_usdt=next_child_amount,
         )
-        right_plan = arbitrage_runtime_support_service.build_quantity_plan(
-            exchange_code=str(right_leg.get("exchange_code") or "").lower(),
-            market_type=str(right_leg.get("market_type") or ""),
-            symbol=str(right_leg.get("symbol") or ""),
-            side=str(right_leg.get("side") or "").lower(),
-            order_amount_usdt=next_child_amount,
-            base_quantity=left_plan.base_quantity,
-        )
-        if left_plan.order_quantity <= 0 or right_plan.order_quantity <= 0:
+        if pair_plan is None:
             funding_runtime_state_service.patch_pair_state(
                 user_id=user_id,
                 rule_id=rule_id,
@@ -760,6 +754,8 @@ class ArbitrageExecutionService:
                 staging_status="quantity_plan_failed",
             )
             return False
+        left_plan = pair_plan.left_plan
+        right_plan = pair_plan.right_plan
 
         scheduled_submit_at = now + timedelta(seconds=interval_seconds) if interval_seconds > 0 else now
         left_leg_id = arbitrage_execution_repository.create_order_leg(
